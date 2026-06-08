@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+@utility animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@utility animate-slide-up {
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@utility animate-shake {
+  animation: shake 0.2s ease-in-out 2;
+}
+
+/* Custom scrollbar styling for smooth data grid horizontal scrolling */
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+  border: 2px solid #f1f5f9;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Make table headers sticky vertically as well in the scrollable wrapper */
+#employees-grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: #f1f5f9 !important; /* Slate 100 solid color to prevent transparent overlap */
+}
+
+/* Responsive sticky behavior for all data tables */
+@media (max-width: 1023px) {
+  th.sticky,
+  td.sticky {
+    position: static !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  #employees-grid-table thead th.sticky {
+    z-index: 30; /* Elevated z-index to overlay horizontal sticky cells */
+    background-color: #f1f5f9 !important; /* Keep same solid background for sticky headers */
+  }
+
+  /* Ensure horizontal sticky cells are layered correctly during scrolling */
+  #employees-grid-table tbody td.sticky {
+    z-index: 10;
+  }
+}
+

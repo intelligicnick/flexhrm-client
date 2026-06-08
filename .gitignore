@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS & editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# Vite cache
+.vite/
+
+# Deploy artifacts
+flex-hrm-deploy-*.zip
+
+# PM2
+.pm2/
+pids/
+*.pid
+
+# Local overrides
+*.local
