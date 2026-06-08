@@ -1,13 +1,7 @@
-declare global {
-  interface Window {
-    __FLEXHRM_API_BASE__?: string;
-  }
-}
+import { PRODUCTION_API_BASE } from "./api-config";
 
-/** API origin from runtime config (server) or build-time PUBLIC_API_URL. Empty = same-origin /api proxy. */
+/** API origin. Dev uses same-origin /api proxy; production uses baked-in backend URL. */
 export function getApiBase(): string {
-  const runtime =
-    typeof window !== 'undefined' ? window.__FLEXHRM_API_BASE__ : undefined;
-  const buildTime = process.env.PUBLIC_API_URL;
-  return (runtime ?? buildTime ?? '').replace(/\/$/, '');
+  if (import.meta.env.DEV) return "";
+  return PRODUCTION_API_BASE.replace(/\/$/, "");
 }

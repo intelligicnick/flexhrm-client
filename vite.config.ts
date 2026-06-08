@@ -28,13 +28,12 @@ const extensionErrorGuardPlugin = {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
-  const backendUrl = env.BACKEND_URL || '';
+  const backendUrl = env.BACKEND_URL || 'http://localhost:3001';
 
   return {
     plugins: [extensionErrorGuardPlugin, react(), tailwindcss()],
     define: {
       "process.env.BACKEND_URL": JSON.stringify(backendUrl),
-      "process.env.PUBLIC_API_URL": JSON.stringify(env.PUBLIC_API_URL || ""),
     },
     resolve: {
       alias: {

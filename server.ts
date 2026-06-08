@@ -18,19 +18,12 @@ const isProd = process.env.NODE_ENV === "production";
 function resolveBackendUrl(): string {
   const url = process.env.BACKEND_URL?.trim().replace(/\/$/, "");
   if (url) return url;
-  const hint = isProd
-    ? "Set BACKEND_URL for the Express /api proxy, PUBLIC_API_URL for a public API host, or use a reverse proxy for same-origin /api."
-    : "Set BACKEND_URL in frontend/.env for local development.";
-  console.warn(`BACKEND_URL is not set — /api proxy disabled. ${hint}`);
+  if (!isProd) return "http://localhost:3001";
+  console.warn("BACKEND_URL is not set — /api proxy disabled in production.");
   return "";
 }
 
 const BACKEND_URL = resolveBackendUrl();
-
-/** Browser-facing API origin. BACKEND_URL is server-side proxy only and is not exposed. */
-function getPublicApiBase(): string {
-  return process.env.PUBLIC_API_URL?.trim().replace(/\/$/, "") ?? "";
-}
 
 function createApiProxy(backendUrl: string) {
   const target = new URL(backendUrl);
@@ -67,12 +60,6 @@ function createApiProxy(backendUrl: string) {
 
 async function startServer() {
   const isDev = !isProd;
-
-  app.get("/runtime-config.js", (_req, res) => {
-    const apiBase = getPublicApiBase();
-    res.type("application/javascript");
-    res.send(`window.__FLEXHRM_API_BASE__=${JSON.stringify(apiBase)};`);
-  });
 
   app.get("/favicon.ico", (_req, res) => {
     res.redirect(302, "/favicon.svg");
@@ -113,10 +100,7 @@ async function startServer() {
     if (BACKEND_URL) {
       console.log(`API proxy target: ${BACKEND_URL}`);
     }
-    const publicApiBase = getPublicApiBase();
-    if (publicApiBase) {
-      console.log(`Browser API base: ${publicApiBase}`);
-    } else {
+    if (isDev) {
       console.log("Browser API base: same-origin (/api proxy)");
     }
   });

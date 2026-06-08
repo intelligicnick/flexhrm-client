@@ -82,7 +82,7 @@ export async function parseApiError(response: Response, fallback: string): Promi
   if (!contentType.includes("application/json")) {
     if (response.status === 404) {
       return new Error(
-        "API server not found. Deploy the NestJS backend and set PUBLIC_API_URL in runtime-config.js.",
+        "Cannot reach the API server. Ensure the NestJS backend is running and reachable.",
       );
     }
     return new Error(fallback);
