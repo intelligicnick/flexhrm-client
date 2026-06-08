@@ -89,7 +89,26 @@ export async function parseApiError(response: Response, fallback: string): Promi
   }
   try {
     const data = await response.json();
-    return new Error(data.error || data.message || fallback);
+    const message =
+      typeof data.message === "string"
+        ? data.message
+        : Array.isArray(data.message)
+          ? data.message.join(", ")
+          : "";
+    const error = typeof data.error === "string" ? data.error : "";
+    // NestJS puts the helpful text in `message` and a generic HTTP label in `error`.
+    const genericErrors = new Set([
+      "Bad Request",
+      "Unauthorized",
+      "Forbidden",
+      "Not Found",
+      "Method Not Allowed",
+      "Internal Server Error",
+    ]);
+    if (message && (!error || genericErrors.has(error))) {
+      return new Error(message);
+    }
+    return new Error(error || message || fallback);
   } catch {
     return new Error(fallback);
   }
