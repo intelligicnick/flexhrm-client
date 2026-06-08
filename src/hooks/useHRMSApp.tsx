@@ -508,7 +508,7 @@ export function useHRMSApp() {
     });
     try {
       const res = await fetch(`/api/bulk-pay-exports/${id}/preview`);
-      if (!res.ok) throw new Error("Could not load file for preview.");
+      if (!res.ok) throw await parseApiError(res, "Could not load file for preview.");
       const buffer = await res.arrayBuffer();
       const workbook = parseBulkPayXlsWorkbook(buffer);
       setBulkPayPreview({
