@@ -1,3 +1,3 @@
-/** NestJS API origin for production builds (no trailing slash). */
-export const PRODUCTION_API_BASE =
-  "https://steelblue-hamster-881717.hostingersite.com";
+/** Default NestJS API origin when no build-time env is set (no trailing slash). */
+export const DEFAULT_PRODUCTION_API_BASE =
+  "https://midnightblue-partridge-476451.hostingersite.com";
