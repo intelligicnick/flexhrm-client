@@ -6317,10 +6317,13 @@ export function useHRMSApp() {
                                   {selectedSalaryColumns.includes("Net Payable") && (
                                     <col className="w-[140px]" />
                                   )}
+                                  {selectedSalaryColumns.includes("Payment Status") && (
+                                    <col className="w-[110px]" />
+                                  )}
                                 </colgroup>
-                                <thead className="sticky top-0 bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200 z-10">
+                                <thead className="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200">
                                   <tr>
-                                    <th rowSpan={2} className="px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] align-middle">
+                                    <th rowSpan={2} className="sticky top-0 z-30 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] align-middle">
                                       <input
                                         id="salary-select-all"
                                         name="salarySelectAll"
@@ -6338,125 +6341,125 @@ export function useHRMSApp() {
                                       />
                                     </th>
                                     {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100">Employee Details</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100">Employee Details</th>
                                     )}
                                     {selectedSalaryColumns.includes("Skill Category") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
                                     )}
                                     {selectedSalaryColumns.includes("Job Role") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Job Role</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Job Role</th>
                                     )}
                                     {selectedSalaryColumns.includes("Present Days") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Days</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Days</th>
                                     )}
                                     {selectedSalaryColumns.includes("Total Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Total Salary</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Total Salary</th>
                                     )}
                                     {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Gross Pay</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Gross Pay</th>
                                     )}
                                     {selectedSalaryColumns.includes("Basic Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Basic Pay</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Basic Pay</th>
                                     )}
                                     {(() => {
                                       const count = ["Employer PF (13%)", "Employer ESIC (3.25%)"].filter(c => selectedSalaryColumns.includes(c)).length;
                                       return count > 0 ? (
-                                        <th className="px-3 py-2.5 border-r border-slate-200 bg-blue-50 text-blue-700 text-center" colSpan={count}>Employer Liability</th>
+                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-blue-50 text-blue-700 text-center" colSpan={count}>Employer Liability</th>
                                       ) : null;
                                     })()}
                                     {(() => {
                                       const count = ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"].filter(c => selectedSalaryColumns.includes(c)).length;
                                       return count > 0 ? (
-                                        <th className="px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
+                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
                                       ) : null;
                                     })()}
                                     {selectedSalaryColumns.includes("Net Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
                                     )}
                                     {selectedSalaryColumns.includes("Total Deductions") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-800 text-center">Total Deductions</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-800 text-center">Total Deductions</th>
                                     )}
                                     {(() => {
                                       const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => selectedSalaryColumns.includes(c)).length;
                                       return count > 0 ? (
-                                        <th className="px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks (Click to Edit)</th>
+                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks (Click to Edit)</th>
                                       ) : null;
                                     })()}
                                     {selectedSalaryColumns.includes("Net Payable") && (
-                                      <th className="px-3 py-2.5 bg-emerald-50 text-emerald-800 text-right">Net Payable</th>
+                                      <th className="sticky top-0 z-20 px-3 py-2.5 bg-emerald-50 text-emerald-800 text-right">Net Payable</th>
+                                    )}
+                                    {selectedSalaryColumns.includes("Payment Status") && (
+                                      <th rowSpan={2} className="sticky top-0 z-30 px-3 py-2.5 border-l border-slate-200 bg-violet-50 text-violet-900 text-center font-bold align-middle">Status</th>
                                     )}
                                   </tr>
                                   <tr className="border-t border-slate-200">
                                     {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold">Code & Name</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold">Code & Name</th>
                                     )}
                                     {selectedSalaryColumns.includes("Skill Category") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Skill Category</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Skill Category</th>
                                     )}
                                     {selectedSalaryColumns.includes("Job Role") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Job Role</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Job Role</th>
                                     )}
                                     {selectedSalaryColumns.includes("Present Days") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Present Days</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Present Days</th>
                                     )}
                                     {selectedSalaryColumns.includes("Total Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Total Salary (Full Month)</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Total Salary (Full Month)</th>
                                     )}
                                     {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Gross (Monthly)</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Gross (Monthly)</th>
                                     )}
                                     {selectedSalaryColumns.includes("Basic Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold">Basic Salary</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Basic Salary</th>
                                     )}
                                     
                                     {selectedSalaryColumns.includes("Employer PF (13%)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50/40 text-blue-800">PF</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">PF</th>
                                     )}
                                     {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50/40 text-blue-800">ESIC</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">ESIC</th>
                                     )}
                                     
                                     {selectedSalaryColumns.includes("Employee PF (12%)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">PF</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PF</th>
                                     )}
                                     {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">ESIC</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">ESIC</th>
                                     )}
                                     {selectedSalaryColumns.includes("Professional Tax (PT)") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">PT</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PT</th>
                                     )}
                                     {selectedSalaryColumns.includes("Advance Balance") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">Adv</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Adv</th>
                                     )}
                                     {selectedSalaryColumns.includes("Uniform Deductions") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">Uniform</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Uniform</th>
                                     )}
                                     {selectedSalaryColumns.includes("Penalty Balance") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50/40 text-rose-800">Pen</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Pen</th>
                                     )}
                                     
                                     {selectedSalaryColumns.includes("Net Salary") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-amber-50/40 text-amber-800 text-center font-bold">Net Salary</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-800 text-center font-bold">Net Salary</th>
                                     )}
                                     {selectedSalaryColumns.includes("Total Deductions") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-rose-100/40 text-rose-900 text-center font-bold">Total Ded.</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-900 text-center font-bold">Total Ded.</th>
                                     )}
                                     
                                     {selectedSalaryColumns.includes("Food Perk") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50/40 text-indigo-800">Food</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Food</th>
                                     )}
                                     {selectedSalaryColumns.includes("Accommodation Perk") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50/40 text-indigo-800">Accom</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Accom</th>
                                     )}
                                     {selectedSalaryColumns.includes("Conveyance Perk") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50/40 text-indigo-800">Conv</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Conv</th>
                                     )}
                                     
                                     {selectedSalaryColumns.includes("Net Payable") && (
-                                      <th className="px-3 py-2.5 border-r border-slate-200 bg-emerald-50/40 text-emerald-800 text-right font-black">Net Payable</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Payment Status") && (
-                                      <th className="px-3 py-2.5 border-l border-slate-200 bg-violet-50 text-violet-900 text-center font-bold">Status</th>
+                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-emerald-50 text-emerald-800 text-right font-black">Net Payable</th>
                                     )}
                                   </tr>
                                 </thead>
