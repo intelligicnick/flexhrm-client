@@ -778,10 +778,28 @@ export function formatAxisBankAccountNo(accountNo: string): string {
   return trimmed;
 }
 
-export function buildAxisBulkPayXlsBuffer(
+export interface BulkPaySalarySheetInput {
+  month: string;
+  location: string;
+  columns: string[];
+  employeeRows: (string | number)[][];
+}
+
+function writeXlsWorkbook(
+  sheets: { name: string; rows: (string | number)[][] }[],
+): Uint8Array {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(({ name, rows }) => {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+  });
+  const raw = XLSX.write(wb, { bookType: "biff8", type: "array" });
+  return raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+}
+
+export function buildAxisBulkPayRows(
   items: AxisBulkPayRowInput[],
   options: AxisBulkPayOptions,
-): { buffer: Uint8Array; exported: number; totalAmount: number } {
+): { rows: (string | number)[][]; exported: number; totalAmount: number } {
   const today = options.activationDate || new Date();
   const paymentMethod = options.paymentMethod || "N";
   const accountType = options.receiverAccountType || "10";
@@ -812,18 +830,58 @@ export function buildAxisBulkPayXlsBuffer(
     exported++;
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "BulkPay");
-  const buffer = XLSX.write(wb, { bookType: "biff8", type: "array" }) as Uint8Array;
+  return { rows, exported, totalAmount };
+}
+
+export function buildSalaryCalculationsSheetRows(
+  salarySheet: BulkPaySalarySheetInput,
+): (string | number)[][] {
+  const recordCount = salarySheet.employeeRows.length;
+  return [
+    [`Dynamic Custom Payroll Calculations Sheet — ${salarySheet.month}`],
+    [`Worksite / Branch Location: ${salarySheet.location || "All Locations"}`],
+    [
+      `Generated on: ${new Date().toLocaleString()} | Filtered records: ${recordCount}`,
+    ],
+    [],
+    [...salarySheet.columns],
+    ...salarySheet.employeeRows,
+  ];
+}
+
+export function buildAxisBulkPayXlsBuffer(
+  items: AxisBulkPayRowInput[],
+  options: AxisBulkPayOptions,
+): { buffer: Uint8Array; exported: number; totalAmount: number } {
+  const { rows, exported, totalAmount } = buildAxisBulkPayRows(items, options);
+  const buffer = writeXlsWorkbook([{ name: "BulkPay", rows }]);
   return { buffer, exported, totalAmount };
 }
 
-function uint8ToBase64(bytes: Uint8Array): string {
+/** Axis bank upload sheet plus full salary calculation rows/columns for archive preview. */
+export function buildBulkPayArchiveXlsBuffer(
+  items: AxisBulkPayRowInput[],
+  options: AxisBulkPayOptions,
+  salarySheet: BulkPaySalarySheetInput,
+): { buffer: Uint8Array; exported: number; totalAmount: number } {
+  const { rows: bulkPayRows, exported, totalAmount } = buildAxisBulkPayRows(items, options);
+  const salaryRows = buildSalaryCalculationsSheetRows(salarySheet);
+  const buffer = writeXlsWorkbook([
+    { name: "BulkPay", rows: bulkPayRows },
+    { name: "Salary Calculations", rows: salaryRows },
+  ]);
+  return { buffer, exported, totalAmount };
+}
+
+function uint8ToBase64(data: Uint8Array | ArrayBuffer): string {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   let binary = "";
-  const chunkSize = 0x8000;
+  const chunkSize = 0x1000;
   for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    const chunk = bytes.subarray(i, i + chunkSize);
+    for (let j = 0; j < chunk.length; j += 1) {
+      binary += String.fromCharCode(chunk[j]);
+    }
   }
   return btoa(binary);
 }
@@ -859,6 +917,86 @@ export interface SavedBulkPayRecord {
   recordCount: number;
   totalAmount: number;
   employeeIds: string[];
+  downloadCount?: number;
+}
+
+function xlsCellToDisplayString(cell: XLSX.CellObject | undefined): string {
+  if (!cell) return "";
+  if (cell.w != null && String(cell.w).trim() !== "") return String(cell.w);
+  if (cell.v == null) return "";
+  if (cell.t === "d" && cell.v instanceof Date) {
+    const dd = String(cell.v.getDate()).padStart(2, "0");
+    const mm = String(cell.v.getMonth() + 1).padStart(2, "0");
+    const yyyy = cell.v.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  return String(cell.v);
+}
+
+function parseWorksheetRows(worksheet: XLSX.WorkSheet): string[][] {
+  let minR = Infinity;
+  let minC = Infinity;
+  let maxR = -1;
+  let maxC = -1;
+
+  for (const addr of Object.keys(worksheet)) {
+    if (addr[0] === "!") continue;
+    const { r, c } = XLSX.utils.decode_cell(addr);
+    minR = Math.min(minR, r);
+    minC = Math.min(minC, c);
+    maxR = Math.max(maxR, r);
+    maxC = Math.max(maxC, c);
+  }
+
+  if (maxR < 0) return [];
+
+  const rows: string[][] = [];
+  for (let r = minR; r <= maxR; r++) {
+    const row: string[] = [];
+    for (let c = minC; c <= maxC; c++) {
+      const cell = worksheet[XLSX.utils.encode_cell({ r, c })];
+      row.push(xlsCellToDisplayString(cell));
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+export interface BulkPayXlsWorkbookPreview {
+  sheetNames: string[];
+  sheets: Record<string, string[][]>;
+  defaultSheet: string;
+}
+
+export function parseBulkPayXlsWorkbook(buffer: ArrayBuffer): BulkPayXlsWorkbookPreview {
+  const workbook = XLSX.read(new Uint8Array(buffer), {
+    type: "array",
+    cellDates: true,
+    cellText: true,
+  });
+  const sheetNames = workbook.SheetNames.filter(Boolean);
+  const sheets: Record<string, string[][]> = {};
+  sheetNames.forEach((name) => {
+    sheets[name] = parseWorksheetRows(workbook.Sheets[name]);
+  });
+  const defaultSheet =
+    sheetNames.find((name) => name === "Salary Calculations") ||
+    sheetNames.find((name) => name === "BulkPay") ||
+    sheetNames[0] ||
+    "";
+  return { sheetNames, sheets, defaultSheet };
+}
+
+/** Read every populated cell in the preferred sheet so preview shows the full row/column range. */
+export function parseBulkPayXlsPreview(buffer: ArrayBuffer): string[][] {
+  const { sheets, defaultSheet } = parseBulkPayXlsWorkbook(buffer);
+  if (!defaultSheet) return [];
+  return sheets[defaultSheet] || [];
+}
+
+export function getBulkPayPreviewHeaderRowCount(sheetName: string): number {
+  if (sheetName === "Salary Calculations") return 5;
+  return 1;
 }
 
 export async function saveAxisBulkPayArchive(
@@ -893,20 +1031,29 @@ export async function saveAxisBulkPayArchive(
     throw new Error(validationMsg || err.error || "Failed to archive bulk pay file on server.");
   }
   const data = await res.json();
+  if (!data?.record?.id) {
+    throw new Error("Archive API succeeded but did not return a saved bulk pay record.");
+  }
   return data.record as SavedBulkPayRecord;
 }
 
 export function downloadAxisBulkPayXls(
   items: AxisBulkPayRowInput[],
   options: AxisBulkPayOptions,
-  filename: string
+  filename: string,
+  salarySheet?: BulkPaySalarySheetInput,
 ): { exported: number; totalAmount: number; fileBase64: string } {
-  const { buffer, exported, totalAmount } = buildAxisBulkPayXlsBuffer(items, options);
+  const { rows, exported, totalAmount } = buildAxisBulkPayRows(items, options);
   if (exported === 0) {
     return { exported: 0, totalAmount: 0, fileBase64: "" };
   }
 
-  const blob = new Blob([buffer], { type: "application/vnd.ms-excel" });
+  const downloadBuffer = writeXlsWorkbook([{ name: "BulkPay", rows }]);
+  const archiveBuffer = salarySheet
+    ? buildBulkPayArchiveXlsBuffer(items, options, salarySheet).buffer
+    : downloadBuffer;
+
+  const blob = new Blob([downloadBuffer], { type: "application/vnd.ms-excel" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -915,5 +1062,5 @@ export function downloadAxisBulkPayXls(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  return { exported, totalAmount, fileBase64: uint8ToBase64(buffer) };
+  return { exported, totalAmount, fileBase64: uint8ToBase64(archiveBuffer) };
 }
