@@ -54,6 +54,12 @@
   background-color: #f1f5f9 !important; /* Slate 100 solid color to prevent transparent overlap */
 }
 
+/* Salary sheet: solid sticky headers so row content does not show through while scrolling */
+#salary-sheet-scroller thead th {
+  background-clip: padding-box;
+  box-shadow: 0 1px 0 #e2e8f0;
+}
+
 /* Responsive sticky behavior for all data tables */
 @media (max-width: 1023px) {
   th.sticky,
