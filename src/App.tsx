@@ -9610,7 +9610,7 @@ export default function App() {
                       <div className="border border-slate-200 rounded-lg bg-white overflow-hidden flex flex-col min-w-0">
                         <div className="bg-slate-100/50 px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
                           <label className="flex items-center gap-2 min-w-0 cursor-pointer select-none">
-                            <input id={`loc-select-${loc}`} name={`locSelect_${loc}`}
+                            <input id="loc-select-all" name="locSelectAll"
                               type="checkbox"
                               checked={customLocations.length > 0 && selectedLocs.length === customLocations.length}
                               onChange={(e) => {
@@ -9832,7 +9832,7 @@ export default function App() {
                       <div className="border border-slate-200 rounded-lg bg-white overflow-hidden flex flex-col">
                         <div className="bg-slate-100/50 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-[10px] font-black text-slate-500 uppercase tracking-wider">
                           <div className="flex items-center gap-2">
-                            <input id={`role-select-${role}`} name={`roleSelect_${role}`}
+                            <input id="role-select-all" name="roleSelectAll"
                               type="checkbox"
                               checked={customRoles.length > 0 && selectedRoles.length === customRoles.length}
                               onChange={(e) => {
