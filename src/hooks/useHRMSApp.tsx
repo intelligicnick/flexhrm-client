@@ -478,7 +478,7 @@ export function useHRMSApp() {
   const handleDownloadBulkPayArchive = async (id: string, filename: string) => {
     try {
       const res = await fetch(`/api/bulk-pay-exports/${id}/download`);
-      if (!res.ok) throw new Error("Download failed.");
+      if (!res.ok) throw await parseApiError(res, "Could not download archived bulk pay file.");
       const downloadCountHeader = res.headers.get("X-Download-Count");
       if (downloadCountHeader) {
         updateBulkPayDownloadCount(id, Number(downloadCountHeader));
