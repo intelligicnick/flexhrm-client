@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, IndianRupee } from "lucide-react";
+import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, LogOut, X } from "lucide-react";
 import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
 import EmployeeViewModal from "./EmployeeViewModal";
@@ -16,11 +16,28 @@ interface EmployeeTableProps {
   onEditClick: (emp: Employee) => void;
   onDeleteClick: (id: string) => void;
   onBulkDelete: (ids: string[]) => void;
-  onExportSelected: (type: "csv" | "excel" | "pdf" | "bulkpay", ids: string[]) => void;
+  onBulkMarkExit?: (ids: string[], exitDate: string, exitReason: string) => void;
+  onMarkExit?: (employee: Employee, exitDate: string, exitReason: string) => Promise<boolean>;
+  onExportSelected: (type: "csv" | "excel" | "pdf", ids: string[]) => void;
   readOnly?: boolean;
 }
 
 type ViewMode = "all" | "identity" | "salary" | "nominee";
+
+const BULK_EXIT_REASON_OPTIONS = [
+  "Resignation",
+  "Termination",
+  "Retirement",
+  "Absconding",
+  "Contract Ended",
+  "Mutual Separation",
+  "Other",
+] as const;
+
+function buildBulkExitReason(category: string, details: string): string {
+  const trimmedDetails = details.trim();
+  return trimmedDetails ? `${category} — ${trimmedDetails}` : category;
+}
 
 export default function EmployeeTable({
   employees,
@@ -29,6 +46,8 @@ export default function EmployeeTable({
   onEditClick,
   onDeleteClick,
   onBulkDelete,
+  onBulkMarkExit,
+  onMarkExit,
   onExportSelected,
   readOnly = false,
 }: EmployeeTableProps) {
@@ -38,6 +57,10 @@ export default function EmployeeTable({
   const [statusFilter, setStatusFilter] = useState<"active" | "exited" | "all">("active");
   const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null);
+  const [showBulkExitDialog, setShowBulkExitDialog] = useState(false);
+  const [bulkExitDate, setBulkExitDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [bulkExitReasonCategory, setBulkExitReasonCategory] = useState<string>(BULK_EXIT_REASON_OPTIONS[0]);
+  const [bulkExitReasonDetails, setBulkExitReasonDetails] = useState("");
   
   // Sorting state
   const [sortField, setSortField] = useState<keyof Employee>("srNo");
@@ -334,15 +357,6 @@ export default function EmployeeTable({
               Excel
             </button>
             <button
-              onClick={() => onExportSelected("bulkpay", selectedIds)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-100 font-bold text-xs px-3 py-1.5 rounded transition cursor-pointer"
-              id="bulk-export-axis-bulkpay-btn"
-              title="Download Axis Bank Bulk Pay file (Excel 97–2003)"
-            >
-              <IndianRupee size={14} className="text-violet-400" />
-              Bulk Pay
-            </button>
-            <button
               onClick={() => onExportSelected("pdf", selectedIds)}
               className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-100 font-bold text-xs px-3 py-1.5 rounded transition cursor-pointer"
               id="bulk-export-pdf-btn"
@@ -351,6 +365,22 @@ export default function EmployeeTable({
               <FileDown size={14} className="text-rose-400" />
               PDF
             </button>
+            {!readOnly && onBulkMarkExit && (
+              <button
+                onClick={() => {
+                  setBulkExitDate(new Date().toISOString().split("T")[0]);
+                  setBulkExitReasonCategory(BULK_EXIT_REASON_OPTIONS[0]);
+                  setBulkExitReasonDetails("");
+                  setShowBulkExitDialog(true);
+                }}
+                className="flex items-center gap-1.5 bg-rose-900/80 hover:bg-rose-900 border border-rose-700 text-rose-100 font-bold text-xs px-3 py-1.5 rounded transition cursor-pointer"
+                id="bulk-mark-exit-btn"
+                title="Mark selected employees as exited"
+              >
+                <LogOut size={14} className="text-rose-300" />
+                Mark Exit ({selectedIds.length})
+              </button>
+            )}
             {!readOnly && (
               <button
                 onClick={() => onBulkDelete(selectedIds)}
@@ -761,7 +791,106 @@ export default function EmployeeTable({
             setViewEmployee(null);
             onEditClick(emp);
           }}
+          onMarkExit={onMarkExit}
+          readOnly={readOnly}
         />
+      )}
+
+      {showBulkExitDialog && onBulkMarkExit && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"
+            onClick={() => setShowBulkExitDialog(false)}
+            aria-hidden
+          />
+          <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Bulk mark exit</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Set the same leaving date for {selectedIds.length} selected employee(s). They will leave the active roster.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBulkExitDialog(false)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <label className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Exit / leaving date
+            </label>
+            <input
+              type="date"
+              value={bulkExitDate}
+              onChange={(e) => setBulkExitDate(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-[#ff791a]/20"
+              id="bulk-exit-date-input"
+            />
+            <label className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Reason for exit
+            </label>
+            <select
+              value={bulkExitReasonCategory}
+              onChange={(e) => setBulkExitReasonCategory(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-[#ff791a]/20"
+              id="bulk-exit-reason-input"
+            >
+              {BULK_EXIT_REASON_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <label className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              {bulkExitReasonCategory === "Other" ? "Details (required)" : "Additional notes (optional)"}
+            </label>
+            <textarea
+              value={bulkExitReasonDetails}
+              onChange={(e) => setBulkExitReasonDetails(e.target.value)}
+              rows={3}
+              placeholder={
+                bulkExitReasonCategory === "Other"
+                  ? "Describe why these employees are leaving..."
+                  : "Any extra context about the separation..."
+              }
+              className="mt-1.5 w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-[#ff791a]/20"
+              id="bulk-exit-details-input"
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkExitDialog(false)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const reason = buildBulkExitReason(bulkExitReasonCategory, bulkExitReasonDetails);
+                  if (bulkExitReasonCategory === "Other" && !bulkExitReasonDetails.trim()) {
+                    alert("Please describe the exit reason when selecting Other.");
+                    return;
+                  }
+                  onBulkMarkExit(selectedIds, bulkExitDate, reason);
+                  setShowBulkExitDialog(false);
+                }}
+                disabled={
+                  !bulkExitDate.trim() ||
+                  (bulkExitReasonCategory === "Other" && !bulkExitReasonDetails.trim())
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+                id="confirm-bulk-mark-exit-btn"
+              >
+                <LogOut size={14} />
+                Mark {selectedIds.length} Exited
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

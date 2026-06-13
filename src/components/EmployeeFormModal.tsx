@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.5
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, Check, Calculator, UserCheck, CreditCard, Users, Link, MapPin, Plus } from "lucide-react";
+import { X, Check, Calculator, UserCheck, CreditCard, Users, Link, MapPin, Plus, Camera, Trash2, Edit3, UserPlus, FolderOpen } from "lucide-react";
 import { Employee } from "../types";
 import {
   calculateSalaryDetails,
@@ -16,11 +16,20 @@ import {
   DEFAULT_LOCATION_PT_AMOUNT,
   parseLocationPtInput,
 } from "../utils";
+import {
+  applySalaryFieldChange,
+  inferSalaryAnchor,
+  toSalaryFieldValues,
+  type SalaryAnchor,
+} from "../lib/salary-calc";
+import { CARD_PHOTO, prepareCardPhoto } from "./id-card";
+import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
+import EmployeeDocumentsPanel from "./EmployeeDocumentsPanel";
 
 interface EmployeeFormModalProps {
   employee?: Employee | null; // null if adding
   onClose: () => void;
-  onSave: (empData: Partial<Employee>) => Promise<boolean>;
+  onSave: (empData: Partial<Employee>) => Promise<Employee | null>;
   availableLocations?: string[];
   availableRoles?: string[];
   basicSalaryPercent?: number;
@@ -30,7 +39,32 @@ interface EmployeeFormModalProps {
   onCreateRole?: (name: string) => Promise<void>;
 }
 
-type FormTab = "basic" | "identity" | "bank" | "dependents" | "custom";
+type FormTab = "basic" | "identity" | "bank" | "dependents" | "custom" | "documents";
+
+const FORM_TABS: { id: FormTab; label: string; icon: React.ReactNode }[] = [
+  { id: "basic", label: "Corporate & Salary", icon: <Calculator size={14} /> },
+  { id: "identity", label: "Identity & Personal", icon: <UserCheck size={14} /> },
+  { id: "bank", label: "Banking & Address", icon: <CreditCard size={14} /> },
+  { id: "dependents", label: "Nominee & Dependents", icon: <Users size={14} /> },
+  { id: "custom", label: "Custom Fields", icon: <Plus size={14} /> },
+  { id: "documents", label: "Documents", icon: <FolderOpen size={14} /> },
+];
+
+const TAB_ERROR_KEYS: Partial<Record<FormTab, string[]>> = {
+  basic: ["employeeCode", "grossSalary", "basicSalary"],
+  identity: ["nameAsPerAadhar", "aadharNo", "nameAsPerAadharColumn", "gender", "maritalStatus", "fatherName", "aadharLinkMobNo"],
+  bank: ["bankAccountNo", "ifscCode", "nameAsPerBank", "presentAddress", "permanentAddress"],
+};
+
+function getInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0))
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
 
 export default function EmployeeFormModal({
   employee,
@@ -46,6 +80,8 @@ export default function EmployeeFormModal({
 }: EmployeeFormModalProps) {
   const isEdit = !!employee;
   const [activeTab, setActiveTab] = useState<FormTab>("basic");
+  const [createdEmployee, setCreatedEmployee] = useState<Employee | null>(null);
+  const documentsEmployee = employee ?? createdEmployee;
   
   // Custom locations state
   const [localLocations, setLocalLocations] = useState<string[]>([]);
@@ -60,39 +96,21 @@ export default function EmployeeFormModal({
   const [newRoleName, setNewRoleName] = useState("");
 
   useEffect(() => {
-    const presets = [
-      "Mumbai Main Office",
-      "Delhi Branch Office",
-      "Bangalore R&D Center",
-      "Pune Tech Park",
-      "Chennai Operational Hub",
-      "Hyderabad Global Center",
-      "Kolkata Zonal Hub"
-    ];
-    const propLocs = availableLocations || [];
-    const merged = Array.from(new Set([...presets, ...propLocs]));
-    setLocalLocations(merged);
-  }, [availableLocations]);
+    const registryLocs = availableLocations || [];
+    const editExtras = employee?.location ? [employee.location] : [];
+    setLocalLocations(Array.from(new Set([...registryLocs, ...editExtras])).filter(Boolean));
+  }, [availableLocations, employee?.location]);
 
   useEffect(() => {
-    const presets = [
-      "Driver",
-      "Guard",
-      "Supervisor",
-      "Helper",
-      "Operator",
-      "Plumber",
-      "Electrician"
-    ];
-    const propRoles = availableRoles || [];
-    const merged = Array.from(new Set([...presets, ...propRoles]));
-    setLocalRoles(merged);
-  }, [availableRoles]);
+    const registryRoles = availableRoles || [];
+    const editExtras = employee?.role ? [employee.role] : [];
+    setLocalRoles(Array.from(new Set([...registryRoles, ...editExtras])).filter(Boolean));
+  }, [availableRoles, employee?.role]);
 
   // Form State
   const [formData, setFormData] = useState<Partial<Employee>>({
     employeeCode: "",
-    location: "Mumbai Main Office",
+    location: "",
     nameAsPerAadhar: "",
     grossSalary: 0,
     basicSalary: 0,
@@ -133,7 +151,7 @@ export default function EmployeeFormModal({
     familyMember3Relation: "",
     workingDaysType: "26 Days (Sun Off)",
     skillCategory: "Skilled",
-    role: "Driver",
+    role: "",
     dailyWage: 0,
     employeeMobile: "",
     nomineeMobile: "",
@@ -143,7 +161,18 @@ export default function EmployeeFormModal({
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const salaryAnchorRef = useRef<SalaryAnchor | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
+  const [photoRemoveConfirm, setPhotoRemoveConfirm] = useState(false);
+  const savedPhotoUrl = useEmployeePhotoUrl(
+    employee?.id ?? formData.id,
+    photoRemoved || formData.photo?.startsWith("data:")
+      ? null
+      : (formData.photo || employee?.photo),
+  );
+  const displayPhotoSrc = photoRemoved ? null : (photoPreview || savedPhotoUrl);
   
   // Custom fields helper state
   const [newFieldName, setNewFieldName] = useState("");
@@ -219,8 +248,56 @@ export default function EmployeeFormModal({
         skillCategory: normalizeSkillCategory(employee.skillCategory) || "Skilled",
         pfCalculationMode: employee.pfCalculationMode || "ceiling_15000",
       });
+      salaryAnchorRef.current = inferSalaryAnchor(toSalaryFieldValues(employee));
+      setPhotoPreview(null);
+      setPhotoRemoved(false);
+      setPhotoRemoveConfirm(false);
+    } else {
+      salaryAnchorRef.current = null;
+      setPhotoPreview(null);
+      setPhotoRemoved(false);
+      setPhotoRemoveConfirm(false);
     }
   }, [employee]);
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image file.");
+      return;
+    }
+    if (file.size > CARD_PHOTO.maxFileSizeMb * 1024 * 1024) {
+      alert(`Photo must be smaller than ${CARD_PHOTO.maxFileSizeMb} MB.`);
+      return;
+    }
+    try {
+      const dataUrl = await prepareCardPhoto(file);
+      setFormData((prev) => ({ ...prev, photo: dataUrl }));
+      setPhotoPreview(dataUrl);
+      setPhotoRemoved(false);
+      setPhotoRemoveConfirm(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Unable to read the selected photo.");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  const handleConfirmRemovePhoto = () => {
+    setFormData((prev) => ({ ...prev, photo: "" }));
+    setPhotoPreview(null);
+    setPhotoRemoved(true);
+    setPhotoRemoveConfirm(false);
+  };
 
   // Handle standard field change
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -248,32 +325,33 @@ export default function EmployeeFormModal({
     }
   };
 
-  const getWorkingDaysCount = (cycle: string | undefined): number => {
-    if (!cycle) return 26;
-    const match = cycle.match(/(\d+)\s*Days?/i);
-    if (match) return parseInt(match[1]);
-    if (cycle.includes("22")) return 22;
-    if (cycle.includes("26")) return 26;
-    if (cycle.includes("30") || cycle.includes("31")) return 30;
-    return 26;
-  };
+  const applySalaryUpdate = (
+    field: "grossSalary" | "dailyWage" | "basicSalary" | "workingDaysType",
+    value: string,
+  ) => {
+    setFormData((prev) => {
+      const currentSalary = toSalaryFieldValues(prev);
+      const { values, anchor } = applySalaryFieldChange(
+        currentSalary,
+        salaryAnchorRef.current,
+        field,
+        value,
+        basicSalaryPercent,
+        esicEligibilityLimit,
+      );
+      salaryAnchorRef.current = anchor;
 
-  // Automated Salary Calculators
-  const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const gross = parseFloat(e.target.value) || 0;
-    const workingDays = getWorkingDaysCount(formData.workingDaysType);
-    const daily = workingDays > 0 ? parseFloat((gross / workingDays).toFixed(2)) : 0;
-    const { basic, esic } = calculateSalaryDetails(gross, basicSalaryPercent, esicEligibilityLimit);
+      return {
+        ...prev,
+        grossSalary: values.grossSalary,
+        dailyWage: values.dailyWage,
+        basicSalary: values.basicSalary,
+        workingDaysType: values.workingDaysType,
+        esic: values.esic,
+      };
+    });
 
-    setFormData((prev) => ({
-      ...prev,
-      grossSalary: gross,
-      dailyWage: daily,
-      basicSalary: basic,
-      esic: esic,
-    }));
-
-    if (errors.grossSalary) {
+    if (errors.grossSalary || errors.basicSalary) {
       setErrors((prev) => {
         const copy = { ...prev };
         delete copy.grossSalary;
@@ -281,43 +359,22 @@ export default function EmployeeFormModal({
         return copy;
       });
     }
+  };
+
+  const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    applySalaryUpdate("grossSalary", e.target.value);
   };
 
   const handleDailyWageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const daily = parseFloat(e.target.value) || 0;
-    const workingDays = getWorkingDaysCount(formData.workingDaysType);
-    const gross = Math.round(daily * workingDays);
-    const { basic, esic } = calculateSalaryDetails(gross, basicSalaryPercent, esicEligibilityLimit);
+    applySalaryUpdate("dailyWage", e.target.value);
+  };
 
-    setFormData((prev) => ({
-      ...prev,
-      dailyWage: daily,
-      grossSalary: gross,
-      basicSalary: basic,
-      esic: esic,
-    }));
-
-    if (errors.grossSalary) {
-      setErrors((prev) => {
-        const copy = { ...prev };
-        delete copy.grossSalary;
-        delete copy.basicSalary;
-        return copy;
-      });
-    }
+  const handleBasicSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    applySalaryUpdate("basicSalary", e.target.value);
   };
 
   const handleWorkingDaysChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const cycle = e.target.value;
-    const workingDays = getWorkingDaysCount(cycle);
-    const gross = formData.grossSalary || 0;
-    const daily = workingDays > 0 ? parseFloat((gross / workingDays).toFixed(2)) : 0;
-
-    setFormData((prev) => ({
-      ...prev,
-      workingDaysType: cycle,
-      dailyWage: daily,
-    }));
+    applySalaryUpdate("workingDaysType", e.target.value);
   };
 
   // Toggle present/permanent address copy
@@ -367,8 +424,8 @@ export default function EmployeeFormModal({
   };
 
   // Submit Handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     const validationErrors = validateEmployee(formData);
 
     if (Object.keys(validationErrors).length > 0) {
@@ -403,9 +460,15 @@ export default function EmployeeFormModal({
     }
 
     setIsSubmitting(true);
-    const success = await onSave(formData);
+    const saved = await onSave(formData);
     setIsSubmitting(false);
-    if (success) onClose();
+    if (!saved) return;
+    if (!isEdit) {
+      setCreatedEmployee(saved);
+      setActiveTab("documents");
+      return;
+    }
+    onClose();
   };
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -414,121 +477,199 @@ export default function EmployeeFormModal({
     }
   };
 
-  return createPortal(
-    <div 
-      onClick={handleBackdropClick} 
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in cursor-pointer" 
-      id="employee-form-modal"
-    >
-      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden cursor-default">
-        
-        {/* Modal Header */}
-        <div className="p-4 md:p-5 border-b border-slate-200 flex items-start justify-between bg-slate-50 gap-2">
-          <div className="text-left">
-            <h3 className="font-extrabold text-slate-800 text-sm md:text-lg leading-tight" id="modal-header-heading">
-              {isEdit ? `Edit Profile Checklist: ${employee.employeeCode}` : "Onboard New Employee"}
-            </h3>
-            <p className="text-[10px] md:text-xs text-slate-500 mt-1 leading-tight">
-              Fields with <span className="text-red-500 font-bold">*</span> are required for statutory ECR compliance.
-            </p>
+  const displayName = formData.nameAsPerAadhar || employee?.nameAsPerAadhar || "Unnamed Employee";
+  const isExited = !!(formData.exitDate || employee?.exitDate);
+  const tabHasErrors = (tab: FormTab) =>
+    (TAB_ERROR_KEYS[tab] ?? []).some((key) => key in errors);
+
+  const renderPhotoSection = () => {
+    const hasPhoto = !!(displayPhotoSrc || employee?.photo) && !photoRemoved;
+
+    return (
+      <div className="relative shrink-0 group" id="employee-photo-upload-section">
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 border-white/20 bg-white shadow-lg sm:h-20 sm:w-20">
+          {displayPhotoSrc ? (
+            <img src={displayPhotoSrc} alt="Employee preview" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[#ff791a] text-white">
+              {isEdit ? (
+                <span className="text-lg font-black tracking-wide">{getInitials(displayName)}</span>
+              ) : (
+                <UserPlus size={28} className="stroke-[2]" />
+              )}
+            </div>
+          )}
+          <label
+            className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-2xl bg-black/45 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+            title={`Upload portrait photo (${CARD_PHOTO.aspectLabel}, up to ${CARD_PHOTO.maxFileSizeMb} MB)`}
+          >
+            <Camera size={20} className="text-white" />
+            <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+          </label>
+        </div>
+
+        {hasPhoto && !photoRemoveConfirm && (
+          <button
+            type="button"
+            onClick={() => setPhotoRemoveConfirm(true)}
+            className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-white/30 bg-rose-600 text-white shadow-md transition hover:bg-rose-700"
+            title="Remove photo"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+        {photoRemoveConfirm && (
+          <div className="absolute left-0 top-full z-10 mt-2 w-52 rounded-xl border border-rose-200 bg-white p-2.5 shadow-xl">
+            <p className="text-[10px] font-bold text-rose-700 mb-2">Remove photo?</p>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={handleConfirmRemovePhoto}
+                className="flex-1 rounded-lg bg-rose-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-rose-700"
+              >
+                Remove
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoRemoveConfirm(false)}
+                className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-150 hover:text-slate-600 transition shrink-0"
-            id="close-form-modal"
-          >
-            <X size={20} />
-          </button>
-        </div>
+        )}
+      </div>
+    );
+  };
 
-        {/* Tab Selection Header */}
-        <div className="flex border-b border-slate-150 bg-slate-50/50 p-1 px-4 gap-1 overflow-x-auto shrink-0 select-none" id="form-tab-headers">
-          <button
-            type="button"
-            onClick={() => setActiveTab("basic")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
-              activeTab === "basic"
-                ? "border-blue-600 text-blue-600 font-black"
-                : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-btn-basic"
-          >
-            <Calculator size={15} />
-            Corporate & Salary
-            {Object.keys(errors).some((k) => ["employeeCode", "grossSalary", "basicSalary"].includes(k)) && (
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-hidden animate-fade-in" id="employee-form-modal">
+      <div
+        onClick={handleBackdropClick}
+        className="absolute inset-0 cursor-pointer bg-slate-950/50 backdrop-blur-sm"
+        aria-hidden
+      />
+      <div className="relative flex h-full items-center justify-center p-3 sm:p-4 pointer-events-none">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="pointer-events-auto flex h-full max-h-[92vh] w-full max-w-5xl min-h-0 cursor-default flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        >
+          {/* Header */}
+          <div className="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#0C1E4A] via-slate-900 to-slate-800 px-5 pb-4 pt-5 text-white sm:px-6">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,121,26,0.18),transparent_55%)]" />
+            <div className="relative flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-start gap-4">
+                {renderPhotoSection()}
+                <div className="min-w-0 text-left">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-orange-200/90">
+                    {isEdit ? "Edit employee profile" : "Employee onboarding"}
+                  </p>
+                  <h2 className="mt-0.5 truncate text-lg font-extrabold tracking-tight sm:text-xl" id="modal-header-heading">
+                    {isEdit ? displayName : "Onboard New Employee"}
+                  </h2>
+                  <p className="mt-0.5 text-sm text-slate-300">
+                    {isEdit
+                      ? formData.role || employee?.role || "Update payroll, identity, and compliance details"
+                      : "Complete all tabs to register a new team member. Hover the avatar to add an ID card photo (optional)."}
+                  </p>
+                  {isEdit && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 font-mono text-[11px] font-bold text-orange-200">
+                        {formData.employeeCode || employee?.employeeCode}
+                      </span>
+                      {formData.location && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-slate-200">
+                          <MapPin size={10} />
+                          {formData.location}
+                        </span>
+                      )}
+                      {isExited ? (
+                        <span className="rounded-full border border-rose-400/30 bg-rose-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-rose-200">
+                          Exited
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-emerald-400/30 bg-emerald-500/20 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-200">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={onClose}
+                className="cursor-pointer rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white shrink-0"
+                id="close-form-modal"
+                type="button"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {isEdit && (
+              <div className="relative mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Gross</p>
+                  <p className="text-sm font-extrabold text-emerald-300">
+                    ₹{(Number(formData.grossSalary) || 0).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Basic</p>
+                  <p className="text-sm font-extrabold text-sky-300">
+                    ₹{(Number(formData.basicSalary) || 0).toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">ESIC</p>
+                  <p className="text-sm font-bold text-white">{formData.esic === "Yes" ? "Covered" : "Not covered"}</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Skill</p>
+                  <p className="truncate text-sm font-bold text-white">
+                    {normalizeSkillCategory(formData.skillCategory) || "—"}
+                  </p>
+                </div>
+              </div>
             )}
-          </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("identity")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
-              activeTab === "identity"
-                ? "border-blue-600 text-blue-600 font-black"
-                : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-btn-identity"
-          >
-            <UserCheck size={15} />
-            Identity & Personal
-            {Object.keys(errors).some((k) =>
-              ["nameAsPerAadhar", "aadharNo", "nameAsPerAadharColumn", "gender", "maritalStatus", "fatherName", "aadharLinkMobNo"].includes(k)
-            ) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
-          </button>
+            {!isEdit && (
+              <p className="relative mt-3 text-[11px] text-slate-300/90">
+                Fields marked with <span className="font-bold text-rose-300">*</span> are required for statutory ECR compliance.
+              </p>
+            )}
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("bank")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
-              activeTab === "bank"
-                ? "border-blue-600 text-blue-600 font-black"
-                : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-btn-bank"
-          >
-            <CreditCard size={15} />
-            Banking & Address
-            {Object.keys(errors).some((k) =>
-              ["bankAccountNo", "ifscCode", "nameAsPerBank", "presentAddress", "permanentAddress"].includes(k)
-            ) && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
-          </button>
+          {/* Tabs */}
+          <div className="shrink-0 border-b border-slate-200 bg-slate-50/80 px-3 sm:px-4" id="form-tab-headers">
+            <div className="flex gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {FORM_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-bold transition ${
+                    activeTab === tab.id
+                      ? "bg-[#ff791a] text-white shadow-sm"
+                      : "text-slate-600 hover:bg-white hover:text-slate-900"
+                  }`}
+                  id={`tab-btn-${tab.id}`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                  {tabHasErrors(tab.id) && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400 ring-2 ring-white/30" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab("dependents")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
-              activeTab === "dependents"
-                ? "border-blue-600 text-blue-600 font-black"
-                : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-btn-dependents"
-          >
-            <Users size={15} />
-            Nominee & Dependents
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("custom")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition ${
-              activeTab === "custom"
-                ? "border-blue-600 text-blue-600 font-black"
-                : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-            id="tab-btn-custom"
-          >
-            <Plus size={15} />
-            Custom Fields
-          </button>
-        </div>
-
-        {/* Modal Form Content */}
-        <form onSubmit={handleSubmit} className="overflow-y-auto flex-1 p-6" id="onboard-employee-form">
-          
+          <form onSubmit={handleSubmit} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/60 p-4 sm:p-5" id="onboard-employee-form">
           {/* TAB 1: BASIC & CORPORATE SALARY */}
           {activeTab === "basic" && (
-            <div className="space-y-5 animate-fade-in" id="basic-fields-group">
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs space-y-5 animate-fade-in" id="basic-fields-group">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1">
@@ -549,137 +690,43 @@ export default function EmployeeFormModal({
                   )}
                 </div>
 
-                <div className={`relative min-w-0 ${showAddLocationInput ? "md:col-span-2" : ""}`}>
+                <div className="relative min-w-0">
                   <label className="text-xs font-bold text-slate-600 block mb-1">Work Location</label>
                   
-                  {!showAddLocationInput ? (
-                    <div className="flex items-stretch gap-1.5">
-                      <div className="relative flex-1 min-w-0">
-                        <input
-                          type="text"
-                          name="location"
-                          value={formData.location || ""}
-                          onChange={handleChange}
-                          onFocus={() => setSearchFocused(true)}
-                          placeholder="Search or select location..."
-                          className="w-full pl-3 pr-8 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition"
-                          id="field-location"
-                          autoComplete="off"
-                        />
-                        <span className="absolute right-2.5 top-2.5 text-slate-400 pointer-events-none z-10">
-                          <MapPin size={12} />
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          openQuickAddLocation("");
-                        }}
-                        className="px-3 bg-white hover:bg-orange-50 border border-slate-250 hover:border-orange-300 active:bg-orange-100/50 rounded text-orange-600 flex items-center justify-center transition cursor-pointer shrink-0"
-                        id="btn-add-location-toggle"
-                        title="Add a new branch office"
-                      >
-                        <Plus size={15} className="stroke-[2.5]" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      className="rounded-xl border border-orange-200 bg-gradient-to-b from-orange-50/80 to-white p-3 space-y-3 shadow-sm animate-fade-in"
-                      id="quick-add-location-panel"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-orange-600">
-                          <MapPin size={14} />
-                        </span>
-                        <div>
-                          <p className="text-[11px] font-black text-slate-700 uppercase tracking-wide">New branch office</p>
-                          <p className="text-[10px] text-slate-500 leading-snug">Saved to registry with compliance &amp; PT settings</p>
-                        </div>
-                      </div>
-
+                  <div className="flex items-stretch gap-1.5">
+                    <div className="relative flex-1 min-w-0">
                       <input
                         type="text"
-                        placeholder="Enter office location name..."
-                        value={newLocationName}
-                        onChange={(e) => setNewLocationName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            commitQuickAddLocation(newLocationName);
-                          } else if (e.key === "Escape") {
-                            resetQuickAddLocationForm();
-                          }
-                        }}
-                        className="w-full px-3 py-2 border border-slate-250 bg-white text-xs text-slate-800 rounded-lg placeholder-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30"
-                        id="new-location-name-input-field"
-                        autoFocus
+                        name="location"
+                        value={formData.location || ""}
+                        onChange={handleChange}
+                        onFocus={() => setSearchFocused(true)}
+                        placeholder="Search or select location..."
+                        className="w-full pl-3 pr-8 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition"
+                        id="field-location"
+                        autoComplete="off"
                       />
-
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 space-y-2.5">
-                        <label htmlFor="inline-new-loc-compliance" className="flex items-start gap-2 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            id="inline-new-loc-compliance"
-                            checked={newLocationCompliance}
-                            onChange={(e) => setNewLocationCompliance(e.target.checked)}
-                            className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
-                          />
-                          <span className="text-[11px] font-bold text-slate-650 leading-snug">
-                            Enable Compliance (PF, ESIC, PT)
-                          </span>
-                        </label>
-                        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100">
-                          <label htmlFor="inline-new-loc-pt" className="text-[11px] font-bold text-slate-650 whitespace-nowrap">
-                            Professional Tax (₹)
-                          </label>
-                          <input
-                            type="number"
-                            id="inline-new-loc-pt"
-                            min={0}
-                            step={1}
-                            value={newLocationPtAmount}
-                            onChange={(e) => setNewLocationPtAmount(e.target.value)}
-                            className="w-24 px-2 py-1 border border-slate-250 bg-white text-xs font-semibold text-slate-800 rounded focus:outline-none focus:border-orange-500 text-right"
-                            title="PT deducted when monthly gross exceeds ₹10,000"
-                          />
-                        </div>
-                        <p className="text-[10px] text-slate-400 leading-snug">
-                          PT applies per location when gross salary is above ₹10,000 for the month.
-                        </p>
-                      </div>
-
-                      <div className="flex items-center justify-end gap-2 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            resetQuickAddLocationForm();
-                          }}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[11px] rounded-lg border border-slate-200 transition cursor-pointer"
-                          id="btn-cancel-new-location"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!newLocationName.trim()}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            commitQuickAddLocation(newLocationName);
-                          }}
-                          className="px-3.5 py-1.5 bg-[#f57416] hover:bg-[#e4640c] disabled:opacity-40 text-white font-bold text-[11px] rounded-lg shadow-sm flex items-center gap-1 transition cursor-pointer"
-                          id="btn-confirm-new-location"
-                        >
-                          <Check size={13} className="stroke-[3]" /> Add Branch
-                        </button>
-                      </div>
+                      <span className="absolute right-2.5 top-2.5 text-slate-400 pointer-events-none z-10">
+                        <MapPin size={12} />
+                      </span>
                     </div>
-                  )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        openQuickAddLocation("");
+                      }}
+                      className="px-3 bg-white hover:bg-orange-50 border border-slate-250 hover:border-orange-300 active:bg-orange-100/50 rounded text-orange-600 flex items-center justify-center transition cursor-pointer shrink-0"
+                      id="btn-add-location-toggle"
+                      title="Add a new branch office"
+                    >
+                      <Plus size={15} className="stroke-[2.5]" />
+                    </button>
+                  </div>
 
                   {/* Dropdown Options Box */}
-                  {!showAddLocationInput && searchFocused && (
+                  {searchFocused && (
                     <>
                       {/* Invisible backdrop to dismiss dropdown cleanly */}
                       <div 
@@ -960,7 +1007,7 @@ export default function EmployeeFormModal({
                         type="number"
                         name="basicSalary"
                         value={formData.basicSalary || ""}
-                        onChange={handleChange}
+                        onChange={handleBasicSalaryChange}
                         placeholder="Calculates as 50% automatically"
                         className="w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition"
                         id="field-basic-salary"
@@ -1132,7 +1179,7 @@ export default function EmployeeFormModal({
 
           {/* TAB 2: PERSONAL IDENTITY */}
           {activeTab === "identity" && (
-            <div className="space-y-4 animate-fade-in" id="identity-fields-group">
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs space-y-4 animate-fade-in" id="identity-fields-group">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1">
@@ -1345,7 +1392,7 @@ export default function EmployeeFormModal({
 
           {/* TAB 3: BANKING DETAILS & ADRESSES */}
           {activeTab === "bank" && (
-            <div className="space-y-4 animate-fade-in" id="bank-fields-group">
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs space-y-4 animate-fade-in" id="bank-fields-group">
               <div className="p-4 bg-blue-50/20 border border-blue-100 rounded-xl">
                 <span className="text-[11px] font-black text-blue-900 uppercase tracking-widest block mb-3">
                   Checklist: Bank Remittance
@@ -1463,7 +1510,7 @@ export default function EmployeeFormModal({
 
           {/* TAB 4: NOMINEES & IMMEDIATE DEPENDENTS */}
           {activeTab === "dependents" && (
-            <div className="space-y-5 animate-fade-in" id="family-fields-group">
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs space-y-5 animate-fade-in" id="family-fields-group">
               {/* Nominee Details Section */}
               <div className="p-4 bg-emerald-50/20 border border-emerald-100 rounded-xl">
                 <span className="text-[11px] font-black text-emerald-800 uppercase tracking-widest block mb-3">
@@ -1678,9 +1725,52 @@ export default function EmployeeFormModal({
             </div>
           )}
 
+          {/* TAB: EMPLOYEE DOCUMENTS */}
+          {activeTab === "documents" && (
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs animate-fade-in">
+              {documentsEmployee ? (
+                <>
+                  {createdEmployee && !isEdit && (
+                    <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      Employee saved. Upload PAN, Aadhaar, passbook, or other proofs below.
+                    </div>
+                  )}
+                  <EmployeeDocumentsPanel employeeId={documentsEmployee.id} />
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-[#ff791a]">
+                    <FolderOpen size={28} />
+                  </div>
+                  <h3 className="text-sm font-extrabold text-slate-800">Upload employee documents</h3>
+                  <p className="mt-2 max-w-md text-xs leading-relaxed text-slate-500">
+                    Attach PAN, Aadhaar, bank passbook, appointment letter, and other proofs after the employee
+                    record is saved. Save the form first, then return here to upload files.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={isSubmitting}
+                    className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#e56a12] disabled:opacity-50"
+                    id="btn-save-and-upload-docs"
+                  >
+                    {isSubmitting ? (
+                      "Saving..."
+                    ) : (
+                      <>
+                        <Check size={14} />
+                        Save Employee & Upload Documents
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* TAB 5: DYNAMIC CUSTOM FIELDS */}
           {activeTab === "custom" && (
-            <div className="space-y-6 animate-fade-in" id="custom-fields-group">
+            <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5 shadow-xs space-y-6 animate-fade-in" id="custom-fields-group">
               <div className="p-4 bg-slate-50 border border-slate-205 rounded-xl">
                 <span className="text-[11px] font-black text-slate-800 uppercase tracking-widest block mb-1">
                   Define Extra Profile Fields
@@ -1800,39 +1890,173 @@ export default function EmployeeFormModal({
           )}
         </form>
 
-        {/* Modal footer */}
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
-          <div className="text-[11px] text-slate-400 font-medium">
-            🚩 Switch tabs to fill out addresses and dependents
+        {/* Footer */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
+          <div className="hidden text-[11px] font-medium text-slate-400 sm:block">
+            {createdEmployee && !isEdit ? (
+              <span className="inline-flex items-center gap-1.5">
+                <FolderOpen size={12} className="text-[#ff791a]" />
+                Upload documents for {createdEmployee.employeeCode}
+              </span>
+            ) : isEdit ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Edit3 size={12} className="text-[#ff791a]" />
+                Editing {formData.employeeCode || employee?.employeeCode}
+              </span>
+            ) : (
+              "Complete all tabs before saving — use Documents to attach proofs after save"
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="ml-auto flex gap-2">
             <button
               onClick={onClose}
               type="button"
-              className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-lg text-slate-705 text-xs font-semibold cursor-pointer transition bg-white"
+              className="cursor-pointer rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
               id="btn-cancel-onboard"
             >
-              Discard Changes
+              {createdEmployee && !isEdit && activeTab === "documents" ? "Finish" : "Cancel"}
             </button>
+            {!(createdEmployee && !isEdit && activeTab === "documents") && (
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#ff791a] px-5 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#e56a12] disabled:opacity-50"
               id="btn-save-onboard"
             >
               {isSubmitting ? (
-                "Saving Record..."
+                "Saving..."
               ) : (
                 <>
                   <Check size={14} />
-                  {isEdit ? "Update Employee" : "Save Employee Details"}
+                  {isEdit ? "Update Employee" : "Save Employee"}
                 </>
               )}
             </button>
+            )}
           </div>
         </div>
 
+        </div>
       </div>
+
+      {showAddLocationInput && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            onClick={resetQuickAddLocationForm}
+            aria-hidden
+          />
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-orange-200 bg-white p-5 shadow-2xl animate-fade-in"
+            id="quick-add-location-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-100 text-orange-600">
+                  <MapPin size={18} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">Add branch office</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Register a new location with compliance and PT settings.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={resetQuickAddLocationForm}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                id="btn-cancel-new-location"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <label
+              htmlFor="new-location-name-input-field"
+              className="mt-4 block text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Office location name
+            </label>
+            <input
+              type="text"
+              placeholder="Enter office location name..."
+              value={newLocationName}
+              onChange={(e) => setNewLocationName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitQuickAddLocation(newLocationName);
+                } else if (e.key === "Escape") {
+                  resetQuickAddLocationForm();
+                }
+              }}
+              className="mt-1.5 w-full rounded-lg border border-slate-250 px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+              id="new-location-name-input-field"
+              autoFocus
+            />
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 space-y-2.5">
+              <label htmlFor="inline-new-loc-compliance" className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  id="inline-new-loc-compliance"
+                  checked={newLocationCompliance}
+                  onChange={(e) => setNewLocationCompliance(e.target.checked)}
+                  className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
+                />
+                <span className="text-[11px] font-bold text-slate-650 leading-snug">
+                  Enable Compliance (PF, ESIC, PT)
+                </span>
+              </label>
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                <label htmlFor="inline-new-loc-pt" className="text-[11px] font-bold text-slate-650 whitespace-nowrap">
+                  Professional Tax (₹)
+                </label>
+                <input
+                  type="number"
+                  id="inline-new-loc-pt"
+                  min={0}
+                  step={1}
+                  value={newLocationPtAmount}
+                  onChange={(e) => setNewLocationPtAmount(e.target.value)}
+                  className="w-24 rounded-lg border border-slate-250 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-800 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                  title="PT deducted when monthly gross exceeds ₹10,000"
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                PT applies per location when gross salary is above ₹10,000 for the month.
+              </p>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  resetQuickAddLocationForm();
+                }}
+                className="cursor-pointer rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!newLocationName.trim()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  commitQuickAddLocation(newLocationName);
+                }}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#f57416] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#e4640c] disabled:opacity-40"
+                id="btn-confirm-new-location"
+              >
+                <Check size={14} className="stroke-[3]" /> Add Branch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );

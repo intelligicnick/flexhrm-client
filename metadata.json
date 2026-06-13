@@ -1,6 +1,5 @@
 {
   "name": "Flex HRM an Intelligic product",
   "description": "Premium multi-field FlexHRM Employee Management Software with bulk CSV upload, automated salary structuring, administrator user invitation engine, and selected record exporter.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": []
 }

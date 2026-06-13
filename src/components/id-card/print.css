@@ -1,0 +1,75 @@
+/* Off-screen holder for print-ready cards (React keeps this in the DOM). */
+.id-card-print-source {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@media print {
+  @page id-card-sheet {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    width: auto;
+    height: auto;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  /* Hide the whole app except the ephemeral print clone */
+  body * {
+    visibility: hidden;
+  }
+
+  .id-card-print-root,
+  .id-card-print-root * {
+    visibility: visible;
+  }
+
+  .id-card-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8mm;
+    overflow: visible;
+    opacity: 1;
+    pointer-events: none;
+    z-index: 9999;
+    page: id-card-sheet;
+  }
+
+  .id-card-print-root [data-card-side] {
+    display: block;
+    width: 54mm !important;
+    height: 85.6mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+    object-fit: fill;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    page-break-after: avoid;
+    break-after: avoid;
+    flex-shrink: 0;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

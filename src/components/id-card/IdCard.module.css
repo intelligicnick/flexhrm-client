@@ -1,0 +1,220 @@
+.card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background-color: #fff;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: center;
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-shadow: 0 4px 18px rgba(11, 27, 61, 0.14);
+}
+
+.photoMask {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.photo {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center top;
+}
+
+.photoPlaceholder {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.idNumberStrip {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 3px 2px 0 0;
+  text-align: right;
+  transform: translateX(-15px);
+}
+
+.idNumberLabel,
+.idNumberText {
+  color: #0b1b3d;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+}
+
+.idNumberLabel {
+  flex-shrink: 0;
+}
+
+.idNumberText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldsBlock {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 4px 6px 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(224, 242, 252, 0.98) 0%,
+    rgba(215, 238, 252, 0.98) 100%
+  );
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.fieldLine {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 22px;
+  line-height: 1;
+}
+
+.fieldLabel,
+.fieldText {
+  color: #000;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.fieldLabel {
+  flex-shrink: 0;
+}
+
+.fieldText {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.datesLine {
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.datesLine > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.qrCode {
+  position: absolute;
+  display: block;
+  object-fit: contain;
+  background: #fff;
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
+  border-radius: 1px;
+}
+
+/* ── Panel UI ── */
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.panelBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: background 0.15s;
+}
+
+.panelBtnSecondary {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+}
+
+.panelBtnSecondary:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.panelBtnPrimary {
+  border: none;
+  background: #0b1b3d;
+  color: #fff;
+}
+
+.panelBtnPrimary:hover:not(:disabled) {
+  background: #1a3a6e;
+}
+
+.panelBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .previewGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.previewBox {
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  padding: 0.75rem;
+}
+
+.previewLabel {
+  margin: 0 0 0.5rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.previewScaler {
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+@media print {
+  .card {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

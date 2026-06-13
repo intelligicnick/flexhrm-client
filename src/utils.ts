@@ -755,7 +755,7 @@ function formatAxisActivationDate(date: Date): string {
   const dd = String(date.getDate()).padStart(2, "0");
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const yyyy = String(date.getFullYear());
-  return `${dd}-${mm}-${yyyy}`;
+  return `${mm}-${dd}-${yyyy}`;
 }
 
 function formatAxisCrn(date: Date, index: number): string {
@@ -1064,3 +1064,18 @@ export function downloadAxisBulkPayXls(
   URL.revokeObjectURL(url);
   return { exported, totalAmount, fileBase64: uint8ToBase64(archiveBuffer) };
 }
+
+export function getEmployeePhotoUrl(employeeId: string, photo?: string): string | null {
+  if (!employeeId?.trim() || !photo?.trim()) return null;
+  return `/api/employees/${encodeURIComponent(employeeId)}/photo`;
+}
+
+export function readImageFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read image file."));
+    reader.readAsDataURL(file);
+  });
+}
+

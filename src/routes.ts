@@ -9,6 +9,8 @@ export const TAB_TO_PATH: Record<string, string> = {
   "Attendance": "/attendance",
   "Directory": "/directory",
   "Birthdays": "/birthdays",
+  "School Salary": "/school-salary",
+  "Expenses": "/school-expenses",
   "My Info": "/my-info",
 };
 
@@ -37,5 +39,7 @@ export const APP_ROUTES = [
   { path: "/attendance", tab: "Attendance" },
   { path: "/directory", tab: "Directory" },
   { path: "/birthdays", tab: "Birthdays" },
+  { path: "/school-salary", tab: "School Salary" },
+  { path: "/school-expenses", tab: "Expenses" },
   { path: "/my-info", tab: "My Info" },
 ] as const;

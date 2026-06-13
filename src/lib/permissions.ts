@@ -1,9 +1,15 @@
 import React from "react";
 
+export interface SidebarChildItemDef {
+  name: string;
+  tab: string;
+}
+
 export interface SidebarItemDef {
   name: string;
   icon: React.ComponentType<any>;
   badge: string;
+  children?: SidebarChildItemDef[];
 }
 
 export const getModuleKey = (tabName: string): string => {
@@ -11,6 +17,10 @@ export const getModuleKey = (tabName: string): string => {
     case "Admin": return "admin";
     case "Audit Logs": return "admin";
     case "Employees": return "employees";
+    case "School Work":
+    case "School Salary":
+    case "Expenses":
+      return "schoolWork";
     case "Salary": return "salary";
     case "Saved Bulk Pay": return "salary";
     case "Advance & Penalty": return "ledger";
@@ -23,5 +33,5 @@ export const getModuleKey = (tabName: string): string => {
 };
 
 export const PERMISSION_MODULES = [
-  "employees", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin",
+  "employees", "schoolWork", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin",
 ] as const;

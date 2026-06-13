@@ -8,7 +8,6 @@ import {
   UserPlus, 
   TrendingUp, 
   IndianRupee, 
-  Map, 
   HelpCircle, 
   FileSpreadsheet, 
   Heart, 
@@ -59,12 +58,27 @@ import {
   Square,
   Archive,
   Download,
-  Eye
+  Eye,
+  School,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import {
+  BULK_EDIT_FIELDS,
+  buildCustomFieldsAfterEdit,
+  buildMergedEmployee,
+  buildSubmissionPayload,
+  getEmployeeFieldValue,
+  getOriginalCustomFieldValue,
+} from "../lib/employee-bulk-edit-fields";
+import {
+  applySalaryFieldChange,
+  isSalaryCascadeField,
+  toSalaryFieldValues,
+  type SalaryAnchor,
+} from "../lib/salary-calc";
 import PasswordInput from "../components/PasswordInput";
 import {
   generateCSV,
@@ -91,7 +105,23 @@ import { formatAuditLogDetails } from "../utils/formatAuditLogDetails";
 import CsvImporter from "../components/CsvImporter";
 import EmployeeTable from "../components/EmployeeTable";
 import EmployeeFormModal from "../components/EmployeeFormModal";
+import SchoolWorkImporter from "../components/SchoolWorkImporter";
+import SchoolWorkTable from "../components/SchoolWorkTable";
+import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
+import BlockMonthlyExpensePanel from "../components/BlockMonthlyExpensePanel";
+import SchoolExpensesSalaryTab, {
+  buildSchoolExpenseSalaryCsv,
+  SCHOOL_EXPENSE_SALARY_HEADERS,
+  getSchoolExpenseSalaryRow,
+} from "../components/SchoolExpensesSalaryTab";
+import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
+import {
+  loadPayrollConfig,
+  savePayrollConfig,
+  validatePayrollConfig,
+  type PayrollConfig,
+} from "../lib/hrms-config";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
@@ -109,6 +139,122 @@ import { formatPhoneDisplay, phoneToDialString } from "../lib/phone-helpers";
 import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
+
+function applyBulkEditDraftUpdate(
+  prev: Record<string, Partial<Employee>>,
+  anchors: Record<string, SalaryAnchor | null>,
+  employees: Employee[],
+  employeeId: string,
+  field: keyof Employee,
+  value: string,
+  basicSalaryPercent: number,
+  esicEligibilityLimit: number,
+): {
+  drafts: Record<string, Partial<Employee>>;
+  anchors: Record<string, SalaryAnchor | null>;
+} {
+  const emp = employees.find((e) => e.id === employeeId);
+  if (!emp) return { drafts: prev, anchors };
+
+  const fieldDef = BULK_EDIT_FIELDS.find((f) => f.key === field);
+  const currentDraft = { ...(prev[employeeId] || {}) };
+  const nextDraft: Partial<Employee> = { ...currentDraft };
+  const nextAnchors = { ...anchors };
+
+  if (isSalaryCascadeField(field)) {
+    const merged = buildMergedEmployee(emp, currentDraft);
+    const currentSalary = toSalaryFieldValues(merged);
+    const currentAnchor = anchors[employeeId] ?? null;
+    const { values, anchor } = applySalaryFieldChange(
+      currentSalary,
+      currentAnchor,
+      field,
+      value,
+      basicSalaryPercent,
+      esicEligibilityLimit,
+    );
+    nextAnchors[employeeId] = anchor;
+
+    for (const salaryField of [
+      "grossSalary",
+      "dailyWage",
+      "basicSalary",
+      "workingDaysType",
+      "esic",
+    ] as const) {
+      const originalVal = getEmployeeFieldValue(emp, salaryField);
+      const newVal =
+        salaryField === "workingDaysType"
+          ? values.workingDaysType
+          : salaryField === "esic"
+            ? values.esic
+            : String(values[salaryField]);
+
+      if (newVal === originalVal || (newVal === "0" && originalVal === "")) {
+        delete (nextDraft as Record<string, unknown>)[salaryField];
+      } else if (salaryField === "esic" || salaryField === "workingDaysType") {
+        (nextDraft as Record<string, unknown>)[salaryField] = newVal;
+      } else {
+        (nextDraft as Record<string, unknown>)[salaryField] = Number(newVal) || 0;
+      }
+    }
+  } else {
+    const originalVal = getEmployeeFieldValue(emp, field);
+    let comparableNew = value;
+    if (fieldDef?.type === "boolean") {
+      comparableNew = value;
+      (nextDraft as Record<string, unknown>)[field] = value === "Yes";
+    } else if (fieldDef?.type === "number") {
+      comparableNew = String(Number(value) || 0);
+      (nextDraft as Record<string, unknown>)[field] = Number(value) || 0;
+    } else {
+      (nextDraft as Record<string, unknown>)[field] = value;
+    }
+
+    if (comparableNew === originalVal || (value === "" && originalVal === "")) {
+      delete (nextDraft as Record<string, unknown>)[field];
+    }
+  }
+
+  if (Object.keys(nextDraft).length === 0) {
+    const { [employeeId]: _, ...rest } = prev;
+    const { [employeeId]: __, ...restAnchors } = nextAnchors;
+    return { drafts: rest, anchors: restAnchors };
+  }
+  return { drafts: { ...prev, [employeeId]: nextDraft }, anchors: nextAnchors };
+}
+
+function applyBulkEditCustomFieldUpdate(
+  prev: Record<string, Partial<Employee>>,
+  employees: Employee[],
+  employeeId: string,
+  fieldName: string,
+  value: string,
+): Record<string, Partial<Employee>> {
+  const emp = employees.find((e) => e.id === employeeId);
+  if (!emp) return prev;
+
+  const currentDraft = prev[employeeId] || {};
+  const originalVal = getOriginalCustomFieldValue(emp, fieldName);
+  const nextDraft: Partial<Employee> = { ...currentDraft };
+
+  if (value === originalVal) {
+    const mergedCustom = buildCustomFieldsAfterEdit(emp, currentDraft, fieldName, value);
+    const stillDirty = mergedCustom.some(
+      (f) => getOriginalCustomFieldValue(emp, f.name) !== (f.value ?? ""),
+    );
+    if (stillDirty) nextDraft.customFields = mergedCustom;
+    else delete nextDraft.customFields;
+  } else {
+    nextDraft.customFields = buildCustomFieldsAfterEdit(emp, currentDraft, fieldName, value);
+  }
+
+  if (Object.keys(nextDraft).length === 0) {
+    const { [employeeId]: _, ...rest } = prev;
+    return rest;
+  }
+  return { ...prev, [employeeId]: nextDraft };
+}
 
 export function useHRMSApp() {
   const navigate = useNavigate();
@@ -172,6 +318,7 @@ export function useHRMSApp() {
   const [roleDescInput, setRoleDescInput] = useState("");
   const [rolePermsInput, setRolePermsInput] = useState<Record<string, { view: boolean; edit: boolean }>>({
     employees: { view: true, edit: true },
+    schoolWork: { view: true, edit: true },
     salary: { view: false, edit: false },
     ledger: { view: false, edit: false },
     attendance: { view: true, edit: true },
@@ -185,7 +332,7 @@ export function useHRMSApp() {
 
 
 
-  const PERMISSION_MODULES = ["employees", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
+  const PERMISSION_MODULES = ["employees", "schoolWork", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
 
   const applySessionFromAuthMe = (data: {
     username?: string;
@@ -259,6 +406,10 @@ export function useHRMSApp() {
   const activeSidebarTab = pathToTab(location.pathname);
   const setActiveSidebarTab = (tab: string) => navigate(tabToPath(tab));
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
+  const [activeSchoolSubTab, setActiveSchoolSubTab] = useState("School Salary");
+  const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
+    "School Work": false,
+  });
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return typeof window !== "undefined" ? window.innerWidth < 768 : true;
@@ -277,6 +428,17 @@ export function useHRMSApp() {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changePasswordSuccess, setChangePasswordSuccess] = useState<string | null>(null);
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileEmailError, setProfileEmailError] = useState<string | null>(null);
+  const [profileEmailSuccess, setProfileEmailSuccess] = useState<string | null>(null);
+  const [isSavingProfileEmail, setIsSavingProfileEmail] = useState(false);
+
+  // School Work Registry States
+  const [rawSchoolWorks, setRawSchoolWorks] = useState<SchoolWork[]>([]);
+  const [selectedSchoolIds, setSelectedSchoolIds] = useState<string[]>([]);
+  const [isSchoolFormOpen, setIsSchoolFormOpen] = useState(false);
+  const [currentSchool, setCurrentSchool] = useState<SchoolWork | null>(null);
+  const [isSchoolLoading, setIsSchoolLoading] = useState(false);
 
   // Employee Registry Core States
   const [rawEmployees, setRawEmployees] = useState<Employee[]>([]);
@@ -288,12 +450,16 @@ export function useHRMSApp() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Configuration States (Fully interactive!)
-  const [esicEligibilityLimit, setEsicEligibilityLimit] = useState(21000);
-  const [basicSalaryPercentage, setBasicSalaryPercentage] = useState(50);
-  const [companyBranch, setCompanyBranch] = useState("Corporate HQ, Mumbai");
+  const [savedPayrollConfig, setSavedPayrollConfig] = useState(() => loadPayrollConfig());
+  const [esicEligibilityLimit, setEsicEligibilityLimit] = useState(savedPayrollConfig.esicEligibilityLimit);
+  const [basicSalaryPercentage, setBasicSalaryPercentage] = useState(savedPayrollConfig.basicSalaryPercentage);
+  const [companyBranch, setCompanyBranch] = useState(savedPayrollConfig.companyBranch);
+  const [configValidationError, setConfigValidationError] = useState<string | null>(null);
+  const [isSavingPayrollConfig, setIsSavingPayrollConfig] = useState(false);
 
   // Custom locations list with sync and edit capabilities
   const [rawCustomLocations, setRawCustomLocations] = useState<string[]>([]);
+  const [registeredLocations, setRegisteredLocations] = useState<string[]>([]);
   const [locationCompliance, setLocationCompliance] = useState<Record<string, boolean>>({});
   const [locationPtAmounts, setLocationPtAmounts] = useState<Record<string, number>>({});
   const [isFetchingLocations, setIsFetchingLocations] = useState(false);
@@ -360,6 +526,16 @@ export function useHRMSApp() {
     return rawCustomLocations;
   }, [rawCustomLocations, isLoggedIn, sessionUser, sessionLocations]);
 
+  const registryLocations = useMemo(() => {
+    const isLocationRestricted = isLoggedIn && sessionUser !== "admin" && Array.isArray(sessionLocations) && sessionLocations.length > 0;
+    if (isLocationRestricted) {
+      return registeredLocations.filter((loc) =>
+        sessionLocations.some((sl) => sl.toLowerCase() === loc.toLowerCase())
+      );
+    }
+    return registeredLocations;
+  }, [registeredLocations, isLoggedIn, sessionUser, sessionLocations]);
+
   const fetchLocations = useCallback(async () => {
     setIsFetchingLocations(true);
     try {
@@ -368,7 +544,8 @@ export function useHRMSApp() {
       const data = await res.json();
       const locationRecords = Array.isArray(data) ? data : [];
       const apiLocations = locationRecords.map((loc: any) => loc.name).filter(Boolean);
-    const empLocations = rawEmployees.map((e) => e.location).filter(Boolean) as string[];
+      const empLocations = rawEmployees.map((e) => e.location).filter(Boolean) as string[];
+      setRegisteredLocations(apiLocations);
       setRawCustomLocations(Array.from(new Set([...apiLocations, ...empLocations])));
 
       const complianceMap: Record<string, boolean> = {};
@@ -389,6 +566,7 @@ export function useHRMSApp() {
 
   // Custom roles list with sync and edit capabilities
   const [customRoles, setCustomRoles] = useState<string[]>([]);
+  const [registeredJobRoles, setRegisteredJobRoles] = useState<string[]>([]);
   const [isFetchingJobRoles, setIsFetchingJobRoles] = useState(false);
 
   const fetchJobRoles = useCallback(async () => {
@@ -399,6 +577,7 @@ export function useHRMSApp() {
       const data = await res.json();
       const apiRoles = Array.isArray(data) ? data.map((role: any) => role.name).filter(Boolean) : [];
       const empRoles = rawEmployees.map(e => e.role).filter(Boolean) as string[];
+      setRegisteredJobRoles(apiRoles);
       setCustomRoles(Array.from(new Set([...apiRoles, ...empRoles])));
     } catch (err: any) {
       setErrorMessage(err.message || "Could not load job roles.");
@@ -526,7 +705,13 @@ export function useHRMSApp() {
   };
 
   const handleDeleteBulkPayArchive = async (id: string) => {
-    if (!window.confirm("Delete this archived bulk pay file from the server?")) return;
+    const confirmed = await confirmAction({
+      title: "Delete archived file",
+      message: "Delete this archived bulk pay file from the server? This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/bulk-pay-exports/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed.");
@@ -567,28 +752,33 @@ export function useHRMSApp() {
   }, [bulkPayArchives, bulkPayArchiveYearFilter, lastSavedBulkPay]);
 
   const filteredAuditLogs = useMemo(() => {
-    return auditLogsList.filter((log: any) => {
-      if (!log) return false;
-      if (auditSearch.trim()) {
-        const query = auditSearch.toLowerCase();
-        const matchesId = String(log.id || "").toLowerCase().includes(query);
-        const matchesUser = String(log.username || "").toLowerCase().includes(query);
-        const matchesAction = String(log.action || "").toLowerCase().includes(query);
-        const matchesTarget = String(log.target || "").toLowerCase().includes(query);
-        const detailsStr = typeof log.details === "object" ? JSON.stringify(log.details) : String(log.details);
-        const matchesDetails = detailsStr.toLowerCase().includes(query);
-        if (!matchesId && !matchesUser && !matchesAction && !matchesTarget && !matchesDetails) {
+    return auditLogsList
+      .filter((log: any) => {
+        if (!log) return false;
+        if (auditSearch.trim()) {
+          const query = auditSearch.toLowerCase();
+          const matchesId = String(log.id || "").toLowerCase().includes(query);
+          const matchesUser = String(log.username || "").toLowerCase().includes(query);
+          const matchesAction = String(log.action || "").toLowerCase().includes(query);
+          const matchesTarget = String(log.target || "").toLowerCase().includes(query);
+          const detailsStr = typeof log.details === "object" ? JSON.stringify(log.details) : String(log.details);
+          const matchesDetails = detailsStr.toLowerCase().includes(query);
+          if (!matchesId && !matchesUser && !matchesAction && !matchesTarget && !matchesDetails) {
+            return false;
+          }
+        }
+        if (auditFilterAdmin && log.username !== auditFilterAdmin) {
           return false;
         }
-      }
-      if (auditFilterAdmin && log.username !== auditFilterAdmin) {
-        return false;
-      }
-      if (auditFilterAction && log.action !== auditFilterAction) {
-        return false;
-      }
-      return true;
-    });
+        if (auditFilterAction && log.action !== auditFilterAction) {
+          return false;
+        }
+        return true;
+      })
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+      );
   }, [auditLogsList, auditSearch, auditFilterAdmin, auditFilterAction]);
 
   // Fetch Audit Logs
@@ -601,7 +791,12 @@ export function useHRMSApp() {
         throw new Error("Failed to fetch audit logs from the server.");
       }
       const data = await res.json();
-      const sorted = Array.isArray(data) ? [...data].reverse() : [];
+      const sorted = Array.isArray(data)
+        ? [...data].sort(
+            (a: any, b: any) =>
+              new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+          )
+        : [];
       setAuditLogsList(sorted);
     } catch (err: any) {
       console.error(err);
@@ -848,7 +1043,7 @@ export function useHRMSApp() {
     if (!cleanName) return;
     
     if (rawCustomLocations.some(l => l.toLowerCase() === cleanName.toLowerCase())) {
-      triggerSuccess(`Location "${cleanName}" already exists.`);
+      setErrorMessage(`Location "${cleanName}" already exists.`);
       return;
     }
 
@@ -863,6 +1058,9 @@ export function useHRMSApp() {
       });
       if (!res.ok) throw await parseApiError(res, "Failed to register location.");
       await fetchLocations();
+      setNewLocNameInput("");
+      setNewLocCompliance(true);
+      setNewLocPtAmount(String(DEFAULT_LOCATION_PT_AMOUNT));
       triggerSuccess(`Successfully registered new location: "${cleanName}"`);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to register location.");
@@ -990,6 +1188,15 @@ export function useHRMSApp() {
     penaltyReason: string;
   }>>({});
 
+  const [bulkEditDrafts, setBulkEditDrafts] = useState<Record<string, Partial<Employee>>>({});
+  const [bulkEditSalaryAnchors, setBulkEditSalaryAnchors] = useState<
+    Record<string, SalaryAnchor | null>
+  >({});
+  const bulkEditSalaryAnchorsRef = useRef<Record<string, SalaryAnchor | null>>({});
+  const [employeeChangeRequests, setEmployeeChangeRequests] = useState<EmployeeChangeRequest[]>([]);
+  const [pendingChangeCount, setPendingChangeCount] = useState(0);
+  const [isFetchingChangeRequests, setIsFetchingChangeRequests] = useState(false);
+  const [isSubmittingBulkEdit, setIsSubmittingBulkEdit] = useState(false);
   // Salary Advanced Filtering states
   const [salarySearchQuery, setSalarySearchQuery] = useState("");
   const [salaryLocationFilter, setSalaryLocationFilter] = useState("");
@@ -1124,7 +1331,13 @@ export function useHRMSApp() {
   };
 
   const handleDeleteHelpline = async (nameToDelete: string) => {
-    if (!window.confirm(`Are you sure you want to delete the helpline "${nameToDelete}"?`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete helpline",
+      message: `Are you sure you want to delete the helpline "${nameToDelete}"?`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     const target = helplines.find(h => h.name === nameToDelete);
     if (!target?._id) {
       setErrorMessage("Cannot delete helpline because the API id is missing.");
@@ -1153,7 +1366,6 @@ export function useHRMSApp() {
   const [bulkWizardSkillFilters, setBulkWizardSkillFilters] = useState<string[]>([]);
   const [isBulkWizardRoleDropdownOpen, setIsBulkWizardRoleDropdownOpen] = useState(false);
   const [isBulkWizardSkillDropdownOpen, setIsBulkWizardSkillDropdownOpen] = useState(false);
-  const [confirmClearState, setConfirmClearState] = useState<{ empId: string, type: string } | null>(null);
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
 
   // Bulk marking form states
@@ -1172,6 +1384,38 @@ export function useHRMSApp() {
   const [bulkSelDates, setBulkSelDates] = useState<number[]>([]);
   const [bulkConfirm1, setBulkConfirm1] = useState(false);
   const [bulkConfirm2, setBulkConfirm2] = useState(false);
+
+  type ConfirmDialogVariant = "danger" | "warning" | "default";
+  type ConfirmDialogOptions = {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    variant?: ConfirmDialogVariant;
+  };
+  const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<(ConfirmDialogOptions & { open: true }) | null>(null);
+
+  const closeConfirmDialog = useCallback((result: boolean) => {
+    confirmResolverRef.current?.(result);
+    confirmResolverRef.current = null;
+    setConfirmDialog(null);
+  }, []);
+
+  const confirmAction = useCallback((options: ConfirmDialogOptions): Promise<boolean> => {
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmDialog({ ...options, open: true });
+    });
+  }, []);
+
+  const handleConfirmDialogConfirm = useCallback(() => {
+    closeConfirmDialog(true);
+  }, [closeConfirmDialog]);
+
+  const handleConfirmDialogCancel = useCallback(() => {
+    closeConfirmDialog(false);
+  }, [closeConfirmDialog]);
 
   const fetchAttendanceForMonth = useCallback(async (monthKey: string) => {
     if (!monthKey) return;
@@ -1679,7 +1923,8 @@ export function useHRMSApp() {
         exitStart: reportExitStartFilter,
         exitEnd: reportExitEndFilter,
         skills: reportSkillFilters,
-        roles: reportRoleFilters
+        roles: reportRoleFilters,
+        employment: reportEmploymentFilter,
       }
     };
     try {
@@ -1725,6 +1970,12 @@ export function useHRMSApp() {
       if (template.filters.exitEnd !== undefined) setReportExitEndFilter(template.filters.exitEnd);
       if (template.filters.skills !== undefined) setReportSkillFilters(template.filters.skills);
       if (template.filters.roles !== undefined) setReportRoleFilters(template.filters.roles);
+      if (template.filters.employment !== undefined) {
+        const employment = template.filters.employment;
+        if (employment === "active" || employment === "exited" || employment === "all") {
+          setReportEmploymentFilter(employment);
+        }
+      }
       
       setActiveReportTemplateName(name);
       triggerSuccess(`Loaded report template layout: "${name}"`);
@@ -1732,6 +1983,13 @@ export function useHRMSApp() {
   };
 
   const handleDeleteReportTemplate = async (name: string) => {
+    const confirmed = await confirmAction({
+      title: "Delete report template",
+      message: `Delete the report template "${name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/export-templates?type=report&name=${encodeURIComponent(name)}`, {
         method: "DELETE",
@@ -1843,6 +2101,13 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSalaryTemplate = async (name: string) => {
+    const confirmed = await confirmAction({
+      title: "Delete salary template",
+      message: `Delete the salary template "${name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/export-templates?type=salary&name=${encodeURIComponent(name)}`, {
         method: "DELETE",
@@ -1866,7 +2131,13 @@ export function useHRMSApp() {
       ? `Are you sure you want to delete "${locsToDelete[0]}"? Active employees with this location will have their location unassigned.`
       : `Are you sure you want to delete ${locsToDelete.length} selected locations? Active employees with these locations will have their location unassigned.`;
       
-    if (!window.confirm(confirmMsg)) return;
+    const confirmed = await confirmAction({
+      title: locsToDelete.length === 1 ? "Delete location" : "Delete locations",
+      message: confirmMsg,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     try {
       setErrorMessage(null);
@@ -1925,7 +2196,7 @@ export function useHRMSApp() {
     if (!cleanName) return;
     
     if (customRoles.some(r => r.toLowerCase() === cleanName.toLowerCase())) {
-      triggerSuccess(`Role "${cleanName}" already exists.`);
+      setErrorMessage(`Role "${cleanName}" already exists.`);
       return;
     }
 
@@ -1937,6 +2208,7 @@ export function useHRMSApp() {
       });
       if (!res.ok) throw await parseApiError(res, "Failed to register job role.");
       await fetchJobRoles();
+      setNewRoleNameInput("");
       triggerSuccess(`Successfully registered new role: "${cleanName}"`);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to register job role.");
@@ -1991,7 +2263,13 @@ export function useHRMSApp() {
       ? `Are you sure you want to delete the role "${rolesToDelete[0]}"? Active employees with this role will have their role unassigned.`
       : `Are you sure you want to delete ${rolesToDelete.length} selected roles? Active employees with these roles will have their role unassigned.`;
       
-    if (!window.confirm(confirmMsg)) return;
+    const confirmed = await confirmAction({
+      title: rolesToDelete.length === 1 ? "Delete role" : "Delete roles",
+      message: confirmMsg,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
 
     try {
       setErrorMessage(null);
@@ -2222,39 +2500,32 @@ export function useHRMSApp() {
   };
 
   const renderClearButtonOrConfirm = (empId: string, type: "advance" | "penalty" | "foodPerk" | "accommodationPerk" | "conveyancePerk" | "uniform", currentVal: number, colorClass: string) => {
-    const isConfirming = confirmClearState?.empId === empId && confirmClearState?.type === type;
-    if (isConfirming) {
-      return (
-        <div className="flex flex-col items-start gap-1 bg-red-50 p-2 border border-red-200 rounded-lg mt-1 shadow-sm w-[180px] z-10 relative delete-confirm-popover">
-          <span className="text-[9.5px] text-red-650 font-black leading-tight">Are you sure you want to delete?</span>
-          <div className="flex gap-1.5 w-full justify-between mt-1">
-            <button
-              type="button"
-              onClick={() => {
-                handleClearLedgerValue(empId, type);
-                setConfirmClearState(null);
-              }}
-              className="px-1.5 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded text-[8.5px] font-black uppercase tracking-wider cursor-pointer"
-            >
-              Confirm
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmClearState(null)}
-              className="px-1.5 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[8.5px] font-black uppercase tracking-wider cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      );
-    }
+    const typeLabel =
+      type === "advance" ? "Advance"
+      : type === "foodPerk" ? "Food Perk"
+      : type === "accommodationPerk" ? "Accommodation Perk"
+      : type === "conveyancePerk" ? "Conveyance Perk"
+      : type === "uniform" ? "Uniform"
+      : "Penalty";
+    const emp = employees.find((e) => e.id === empId);
+    const empName = emp?.nameAsPerAadharColumn || emp?.nameAsPerAadhar || emp?.employeeCode || empId;
+
     return (
       <div className="flex flex-col items-start">
         <span className={`font-semibold ${colorClass}`}>₹{currentVal.toLocaleString("en-IN")}</span>
         <button
           type="button"
-          onClick={() => setConfirmClearState({ empId, type })}
+          onClick={async () => {
+            const confirmed = await confirmAction({
+              title: `Clear ${typeLabel}`,
+              message: `Clear outstanding ${typeLabel} of ₹${currentVal.toLocaleString("en-IN")} for ${empName} in ${selectedMonth}?`,
+              confirmLabel: "Clear",
+              variant: "danger",
+            });
+            if (confirmed) {
+              await handleClearLedgerValue(empId, type);
+            }
+          }}
           className="text-[9px] text-slate-400 hover:text-red-500 cursor-pointer uppercase tracking-wider font-extrabold"
         >
           [Clear]
@@ -2368,7 +2639,13 @@ export function useHRMSApp() {
       return;
     }
     if (selectedSalaryEmployeeIds.length === 0) return;
-    if (!window.confirm(`Are you sure you want to mark salary status as "${status}" for the ${selectedSalaryEmployeeIds.length} selected employees?`)) return;
+    const confirmed = await confirmAction({
+      title: "Update payment status",
+      message: `Mark salary status as "${status}" for ${selectedSalaryEmployeeIds.length} selected employee(s)?`,
+      confirmLabel: "Update",
+      variant: "warning",
+    });
+    if (!confirmed) return;
 
     try {
       setErrorMessage(null);
@@ -2449,6 +2726,7 @@ export function useHRMSApp() {
   const [reportGenderFilter, setReportGenderFilter] = useState<string>("All");
   const [reportMaritalFilter, setReportMaritalFilter] = useState<string>("All");
   const [reportEsicFilter, setReportEsicFilter] = useState<string>("All");
+  const [reportEmploymentFilter, setReportEmploymentFilter] = useState<"active" | "exited" | "all">("active");
   const [reportSkillFilters, setReportSkillFilters] = useState<string[]>([]);
   const [reportRoleFilters, setReportRoleFilters] = useState<string[]>([]);
   const [isReportLocDropdownOpen, setIsReportLocDropdownOpen] = useState(false);
@@ -2460,9 +2738,147 @@ export function useHRMSApp() {
   const [reportSearchQuery, setReportSearchQuery] = useState<string>("");
   const [selectedReportEmployeeIds, setSelectedReportEmployeeIds] = useState<string[]>([]);
 
+  const reportActiveFilterCount = useMemo(() => {
+    let count = 0;
+    if (reportLocFilters.length > 0) count += 1;
+    if (reportJoinStartFilter || reportJoinEndFilter) count += 1;
+    if (reportExitStartFilter || reportExitEndFilter) count += 1;
+    if (reportMinSalaryFilter || reportMaxSalaryFilter) count += 1;
+    if (reportGenderFilter !== "All") count += 1;
+    if (reportMaritalFilter !== "All") count += 1;
+    if (reportEsicFilter !== "All") count += 1;
+    if (reportEmploymentFilter !== "active") count += 1;
+    if (reportSkillFilters.length > 0) count += 1;
+    if (reportRoleFilters.length > 0) count += 1;
+    if (reportSearchQuery.trim()) count += 1;
+    return count;
+  }, [
+    reportLocFilters,
+    reportJoinStartFilter,
+    reportJoinEndFilter,
+    reportExitStartFilter,
+    reportExitEndFilter,
+    reportMinSalaryFilter,
+    reportMaxSalaryFilter,
+    reportGenderFilter,
+    reportMaritalFilter,
+    reportEsicFilter,
+    reportEmploymentFilter,
+    reportSkillFilters,
+    reportRoleFilters,
+    reportSearchQuery,
+  ]);
+
+  const clearReportFilters = useCallback(() => {
+    setReportLocFilters([]);
+    setReportJoinStartFilter("");
+    setReportJoinEndFilter("");
+    setReportExitStartFilter("");
+    setReportExitEndFilter("");
+    setReportMinSalaryFilter("");
+    setReportMaxSalaryFilter("");
+    setReportGenderFilter("All");
+    setReportMaritalFilter("All");
+    setReportEsicFilter("All");
+    setReportEmploymentFilter("active");
+    setReportSkillFilters([]);
+    setReportRoleFilters([]);
+    setReportSearchQuery("");
+    setSelectedReportEmployeeIds([]);
+    setIsReportLocDropdownOpen(false);
+    setIsSkillDropdownOpen(false);
+    setIsRoleDropdownOpen(false);
+  }, []);
+
+  const reportOverviewStats = useMemo(() => {
+    const activeEmployees = employees.filter((emp) => !isEmployeeExitedGeneral(emp));
+    const totalActive = activeEmployees.length;
+    const totalGross = activeEmployees.reduce((acc, emp) => acc + (emp.grossSalary || 0), 0);
+    const esicCovered = activeEmployees.filter((emp) => {
+      const isCompliant = locationCompliance[emp.location || ""] !== false;
+      return isEmployeeEsicCovered(
+        emp.grossSalary || 0,
+        esicEligibilityLimit,
+        isCompliant,
+        emp.esic,
+      );
+    }).length;
+
+    const locationMap = new Map<string, number>();
+    activeEmployees.forEach((emp) => {
+      const loc = emp.location?.trim() || "Unassigned";
+      locationMap.set(loc, (locationMap.get(loc) || 0) + 1);
+    });
+    const locationBreakdown = Array.from(locationMap.entries())
+      .map(([label, count]) => ({
+        label,
+        count,
+        pct: totalActive ? Math.round((count / totalActive) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    const genderBuckets = [
+      { label: "Male", count: 0 },
+      { label: "Female", count: 0 },
+      { label: "Other", count: 0 },
+      { label: "Not specified", count: 0 },
+    ];
+    activeEmployees.forEach((emp) => {
+      const gender = (emp.gender || "").trim().toLowerCase();
+      if (gender === "male") genderBuckets[0].count += 1;
+      else if (gender === "female") genderBuckets[1].count += 1;
+      else if (gender === "other") genderBuckets[2].count += 1;
+      else genderBuckets[3].count += 1;
+    });
+    const genderBreakdown = genderBuckets
+      .map((bucket) => ({
+        ...bucket,
+        pct: totalActive ? Math.round((bucket.count / totalActive) * 100) : 0,
+      }))
+      .filter((bucket) => bucket.count > 0 || bucket.label !== "Not specified");
+
+    return {
+      totalActive,
+      totalGross,
+      averageSalary: totalActive ? Math.round(totalGross / totalActive) : 0,
+      esicCovered,
+      esicCoveragePct: totalActive ? Math.round((esicCovered / totalActive) * 100) : 0,
+      locationCount: locationMap.size,
+      locationBreakdown,
+      genderBreakdown,
+    };
+  }, [employees, esicEligibilityLimit, locationCompliance]);
+
+  useEffect(() => {
+    setSelectedReportEmployeeIds([]);
+  }, [
+    reportLocFilters,
+    reportJoinStartFilter,
+    reportJoinEndFilter,
+    reportExitStartFilter,
+    reportExitEndFilter,
+    reportMinSalaryFilter,
+    reportMaxSalaryFilter,
+    reportGenderFilter,
+    reportMaritalFilter,
+    reportEsicFilter,
+    reportEmploymentFilter,
+    reportSkillFilters,
+    reportRoleFilters,
+    reportSearchQuery,
+  ]);
+
   // Dynamic report matching resolver
   const filteredReportEmployees = useMemo(() => {
     return employees.filter(emp => {
+      const isExited = isEmployeeExitedGeneral(emp);
+      if (reportEmploymentFilter === "active" && isExited) {
+        return false;
+      }
+      if (reportEmploymentFilter === "exited" && !isExited) {
+        return false;
+      }
+
       // 1. Location Filter (multi-select)
       if (reportLocFilters.length > 0) {
         const empLoc = (emp.location || "").toLowerCase();
@@ -2540,7 +2956,15 @@ export function useHRMSApp() {
 
       // 7. ESIC Coverage Filter
       if (reportEsicFilter !== "All") {
-        if ((emp.esic || "").toLowerCase() !== reportEsicFilter.toLowerCase()) {
+        const isCompliant = locationCompliance[emp.location || ""] !== false;
+        const covered = isEmployeeEsicCovered(
+          emp.grossSalary || 0,
+          esicEligibilityLimit,
+          isCompliant,
+          emp.esic,
+        );
+        const wantsYes = reportEsicFilter.toLowerCase() === "yes";
+        if (covered !== wantsYes) {
           return false;
         }
       }
@@ -2585,9 +3009,12 @@ export function useHRMSApp() {
     reportGenderFilter,
     reportMaritalFilter,
     reportEsicFilter,
+    reportEmploymentFilter,
     reportSkillFilters,
     reportRoleFilters,
-    reportSearchQuery
+    reportSearchQuery,
+    esicEligibilityLimit,
+    locationCompliance,
   ]);
 
   // Download custom CSV report
@@ -2950,6 +3377,24 @@ export function useHRMSApp() {
     }
   };
 
+  const fetchSchoolWorks = async () => {
+    setIsSchoolLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch("/api/school-works");
+      if (!res.ok) {
+        throw new Error(`Failed to load school work list (${res.status})`);
+      }
+      const data = await res.json();
+      setRawSchoolWorks(data);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage("Could not load school work records: " + err.message);
+    } finally {
+      setIsSchoolLoading(false);
+    }
+  };
+
   // Fetch administrator accounts from server
   const fetchAdmins = async () => {
     setIsFetchingAdmins(true);
@@ -2979,6 +3424,7 @@ export function useHRMSApp() {
       }
       const data = await res.json();
       setAdminProfileInfo(data);
+      setProfileEmail(data.email || "");
       if (data.disabled) {
         handleLogout();
         setLoginError("Your administrator account is restricted. Session terminated.");
@@ -3052,14 +3498,67 @@ export function useHRMSApp() {
     }
   };
 
+  const handleProfileEmailSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileEmailError(null);
+    setProfileEmailSuccess(null);
+
+    const email = profileEmail.trim();
+    if (!email) {
+      setProfileEmailError("Please enter a valid email address.");
+      return;
+    }
+
+    setIsSavingProfileEmail(true);
+    try {
+      const res = await fetch("/api/admins/update-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to save recovery email.");
+      }
+
+      const data = await res.json();
+      setProfileEmail(data.email || email);
+      setAdminProfileInfo((prev: any) => (prev ? { ...prev, email: data.email || email } : prev));
+      setProfileEmailSuccess("✓ Recovery email saved. You can use it on the login page if you forget your password.");
+      triggerSuccess("Recovery email updated.");
+    } catch (err: any) {
+      setProfileEmailError(err.message);
+    } finally {
+      setIsSavingProfileEmail(false);
+    }
+  };
+
 
   useEffect(() => {
     if (isLoggedIn) {
       fetchEmployees();
+      fetchSchoolWorks();
       fetchRoles();
       fetchExportTemplates();
+      fetchPendingChangeCount();
     }
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (isLoggedIn && activeSidebarTab === "Employee Management") {
+      fetchEmployeeChangeRequests();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
+    if (activeSidebarTab === "Expenses" || activeSidebarTab === "School Salary") {
+      setExpandedSidebarGroups((prev) => ({ ...prev, "School Work": true }));
+      if (activeSidebarTab === "School Salary") {
+        setActiveSchoolSubTab("School Salary");
+      }
+    }
+  }, [activeSidebarTab]);
 
   useEffect(() => {
     if (isLoggedIn && sessionUser) {
@@ -3159,9 +3658,6 @@ export function useHRMSApp() {
       if (isLedgerRoleDropdownOpen && !target.closest("#ledger-role-multiselect-container")) {
         setIsLedgerRoleDropdownOpen(false);
       }
-      if (confirmClearState && !target.closest(".delete-confirm-popover")) {
-        setConfirmClearState(null);
-      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
@@ -3179,7 +3675,6 @@ export function useHRMSApp() {
     isLedgerLocationDropdownOpen,
     isLedgerSkillDropdownOpen,
     isLedgerRoleDropdownOpen,
-    confirmClearState
   ]);
 
   // Show auto-expiring success indicator
@@ -3230,7 +3725,7 @@ export function useHRMSApp() {
     e.preventDefault();
     const cleanUser = forgotUsername.trim();
     if (!cleanUser) {
-      setForgotError("Please enter your username.");
+      setForgotError("Please enter your username or recovery email.");
       return;
     }
     try {
@@ -3251,6 +3746,12 @@ export function useHRMSApp() {
         setIssuedResetToken(data.resetToken);
         setResetTokenInput(data.resetToken);
         setUsernameInput(data.username || cleanUser);
+        setLoginView("reset");
+      } else if (data.username) {
+        setForgotUsername(data.username);
+        setUsernameInput(data.username);
+        setResetTokenInput("");
+        setIssuedResetToken(null);
         setLoginView("reset");
       }
     } catch (err: any) {
@@ -3461,6 +3962,7 @@ export function useHRMSApp() {
       setRoleDescInput("");
       setRolePermsInput({
         employees: { view: true, edit: true },
+        schoolWork: { view: true, edit: true },
         salary: { view: false, edit: false },
         ledger: { view: false, edit: false },
         attendance: { view: true, edit: true },
@@ -3479,7 +3981,13 @@ export function useHRMSApp() {
 
   // Delete a custom role
   const handleDeleteRole = async (name: string) => {
-    if (!confirm(`Are you sure you want to delete the custom role "${name}"?`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete custom role",
+      message: `Are you sure you want to delete the custom role "${name}"?`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/roles/${encodeURIComponent(name)}`, {
         method: "DELETE"
@@ -3495,7 +4003,7 @@ export function useHRMSApp() {
   };
 
   // Add or Edit Employee Save Trigger
-  const handleSaveEmployee = async (empData: Partial<Employee>): Promise<boolean> => {
+  const handleSaveEmployee = async (empData: Partial<Employee>): Promise<Employee | null> => {
     try {
       setErrorMessage(null);
       const isEdit = !!empData.id && rawEmployees.some((e) => e.id === empData.id);
@@ -3521,16 +4029,17 @@ export function useHRMSApp() {
         throw new Error(errorJson.error || "Server rejected save request.");
       }
 
+      const savedEmployee = (await res.json()) as Employee;
       await fetchEmployees();
       triggerSuccess(
         isEdit 
-          ? `Successfully saved changes for employee "${empData.employeeCode}"` 
-          : `Successfully onboarded employee "${empData.employeeCode}" into registry`
+          ? `Successfully saved changes for employee "${empData.employeeCode}". ID card updated.` 
+          : `Successfully onboarded employee "${empData.employeeCode}". You can now upload documents.`
       );
-      return true;
+      return savedEmployee;
     } catch (err: any) {
       setErrorMessage("Onboarding Save Refused: " + err.message);
-      return false;
+      return null;
     }
   };
 
@@ -3569,9 +4078,304 @@ export function useHRMSApp() {
     }
   };
 
+  const fetchEmployeeChangeRequests = async (status?: string) => {
+    setIsFetchingChangeRequests(true);
+    try {
+      const url = status
+        ? `/api/employees/change-requests?status=${encodeURIComponent(status)}`
+        : "/api/employees/change-requests";
+      const res = await fetch(url);
+      if (!res.ok) throw await parseApiError(res, "Failed to load change requests.");
+      const data = await res.json();
+      setEmployeeChangeRequests(data);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage("Could not load employee change requests: " + err.message);
+    } finally {
+      setIsFetchingChangeRequests(false);
+    }
+  };
+
+  const fetchPendingChangeCount = async () => {
+    try {
+      const res = await fetch("/api/employees/change-requests/pending-count");
+      if (res.ok) {
+        const count = await res.json();
+        setPendingChangeCount(typeof count === "number" ? count : 0);
+      }
+    } catch {
+      /* non-critical */
+    }
+  };
+
+  const handleBulkEditDraftChange = (employeeId: string, field: keyof Employee, value: string) => {
+    setBulkEditDrafts((prev) => {
+      const { drafts, anchors } = applyBulkEditDraftUpdate(
+        prev,
+        bulkEditSalaryAnchorsRef.current,
+        rawEmployees,
+        employeeId,
+        field,
+        value,
+        basicSalaryPercentage,
+        esicEligibilityLimit,
+      );
+      bulkEditSalaryAnchorsRef.current = anchors;
+      setBulkEditSalaryAnchors(anchors);
+      return drafts;
+    });
+  };
+
+  const handleBulkEditDraftChangeMany = (
+    updates: Array<{ employeeId: string; field: keyof Employee; value: string }>,
+  ) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      handleBulkEditDraftChange(updates[0].employeeId, updates[0].field, updates[0].value);
+      return;
+    }
+    setBulkEditDrafts((prev) => {
+      let nextDrafts = prev;
+      let nextAnchors = bulkEditSalaryAnchorsRef.current;
+      for (const update of updates) {
+        const result = applyBulkEditDraftUpdate(
+          nextDrafts,
+          nextAnchors,
+          rawEmployees,
+          update.employeeId,
+          update.field,
+          update.value,
+          basicSalaryPercentage,
+          esicEligibilityLimit,
+        );
+        nextDrafts = result.drafts;
+        nextAnchors = result.anchors;
+      }
+      bulkEditSalaryAnchorsRef.current = nextAnchors;
+      setBulkEditSalaryAnchors(nextAnchors);
+      return nextDrafts;
+    });
+  };
+
+  const handleBulkEditCustomFieldChange = (
+    employeeId: string,
+    fieldName: string,
+    value: string,
+  ) => {
+    setBulkEditDrafts((prev) =>
+      applyBulkEditCustomFieldUpdate(prev, rawEmployees, employeeId, fieldName, value),
+    );
+  };
+
+  const handleBulkEditCustomFieldChangeMany = (
+    updates: Array<{ employeeId: string; fieldName: string; value: string }>,
+  ) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      handleBulkEditCustomFieldChange(
+        updates[0].employeeId,
+        updates[0].fieldName,
+        updates[0].value,
+      );
+      return;
+    }
+    setBulkEditDrafts((prev) => {
+      let next = prev;
+      for (const update of updates) {
+        next = applyBulkEditCustomFieldUpdate(
+          next,
+          rawEmployees,
+          update.employeeId,
+          update.fieldName,
+          update.value,
+        );
+      }
+      return next;
+    });
+  };
+
+  const handleDiscardBulkEditDrafts = async () => {
+    if (Object.keys(bulkEditDrafts).length === 0) return;
+    const confirmed = await confirmAction({
+      title: "Discard changes",
+      message: "Discard all unsaved bulk edit changes?",
+      confirmLabel: "Discard",
+      variant: "warning",
+    });
+    if (!confirmed) return;
+    setBulkEditDrafts({});
+    bulkEditSalaryAnchorsRef.current = {};
+    setBulkEditSalaryAnchors({});
+  };
+
+  const handleApplyBulkEmployeeChanges = async () => {
+    if (!userPermissions.employees?.edit) {
+      alert("Action locked: You do not have write permissions for Employees.");
+      return;
+    }
+
+    const updates = buildSubmissionPayload(rawEmployees, bulkEditDrafts);
+    if (updates.length === 0) {
+      alert("No changes to apply.");
+      return;
+    }
+
+    setIsSubmittingBulkEdit(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch("/api/employees/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to apply bulk employee changes.");
+
+      const result = await res.json();
+      setBulkEditDrafts({});
+      bulkEditSalaryAnchorsRef.current = {};
+      setBulkEditSalaryAnchors({});
+      await fetchEmployees();
+      triggerSuccess(
+        `Applied bulk edit for ${result.applied ?? result.employeeCount ?? updates.length} employee(s).`,
+      );
+    } catch (err: any) {
+      setErrorMessage("Bulk edit apply failed: " + err.message);
+      throw err;
+    } finally {
+      setIsSubmittingBulkEdit(false);
+    }
+  };
+
+  const handleApproveEmployeeChanges = async (requestId: string, reviewNotes: string) => {
+    if (!userPermissions.admin?.edit) {
+      alert("Only administrators with admin edit permission can approve changes.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/employees/change-requests/${requestId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewNotes }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to approve change request.");
+
+      const result = await res.json();
+      await fetchEmployees();
+      await fetchEmployeeChangeRequests();
+      await fetchPendingChangeCount();
+      triggerSuccess(`Approved and published ${result.applied} employee update(s).`);
+    } catch (err: any) {
+      alert(err.message);
+      throw err;
+    }
+  };
+
+  const handleRejectEmployeeChanges = async (requestId: string, reviewNotes: string) => {
+    if (!userPermissions.admin?.edit) {
+      alert("Only administrators with admin edit permission can reject changes.");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/employees/change-requests/${requestId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewNotes }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to reject change request.");
+
+      await fetchEmployeeChangeRequests();
+      await fetchPendingChangeCount();
+      triggerSuccess("Change request rejected. No updates were published.");
+    } catch (err: any) {
+      alert(err.message);
+      throw err;
+    }
+  };
+
+  const handleMarkEmployeeExit = async (
+    id: string,
+    exitDate: string,
+    exitReason: string,
+  ): Promise<boolean> => {
+    const trimmedDate = exitDate.trim();
+    const trimmedReason = exitReason.trim();
+    if (!trimmedDate) {
+      alert("Please select an exit / leaving date.");
+      return false;
+    }
+    if (!trimmedReason) {
+      alert("Please provide a reason for exit.");
+      return false;
+    }
+
+    try {
+      setErrorMessage(null);
+      const res = await fetch(`/api/employees/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exitDate: trimmedDate, exitReason: trimmedReason }),
+      });
+
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.error || "Failed to mark employee as exited.");
+      }
+
+      await fetchEmployees();
+      triggerSuccess(`Employee marked as exited effective ${trimmedDate}.`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Mark Exit Failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleBulkMarkExit = async (ids: string[], exitDate: string, exitReason: string) => {
+    const trimmedDate = exitDate.trim();
+    const trimmedReason = exitReason.trim();
+    if (ids.length === 0) return;
+    if (!trimmedDate) {
+      alert("Please select an exit / leaving date.");
+      return;
+    }
+    if (!trimmedReason) {
+      alert("Please provide a reason for exit.");
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/employees/mark-exit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, exitDate: trimmedDate, exitReason: trimmedReason }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || "Bulk mark exit request failed.");
+      }
+
+      const report = await res.json();
+      setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+      await fetchEmployees();
+      triggerSuccess(
+        `Marked ${report.count ?? ids.length} employee(s) as exited effective ${trimmedDate}.`,
+      );
+    } catch (err: any) {
+      setErrorMessage("Bulk Mark Exit Failed: " + err.message);
+    }
+  };
+
   // Single Delete Tracker
   const handleDeleteEmployee = async (id: string) => {
-    if (!window.confirm(`Are you sure you want to permanently remove employee "${id}"?`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete employee",
+      message: `Are you sure you want to permanently remove employee "${id}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       setErrorMessage(null);
       const res = await fetch("/api/employees/delete", {
@@ -3590,9 +4394,229 @@ export function useHRMSApp() {
     }
   };
 
+  const handleSaveSchoolWork = async (data: Partial<SchoolWork>): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const isEdit = !!data.id && rawSchoolWorks.some((s) => s.id === data.id);
+      const url = isEdit ? `/api/school-works/${data.id}` : "/api/school-works";
+      const method = isEdit ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.error || "Server rejected save request.");
+      }
+      await fetchSchoolWorks();
+      triggerSuccess(
+        isEdit
+          ? `Successfully saved changes for school "${data.schoolName}"`
+          : `Successfully added school "${data.schoolName}"`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage("School save failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleBulkSchoolImport = async (importedList: Partial<SchoolWork>[]) => {
+    if (importedList.length === 0) return;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(importedList),
+      });
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || "Server bulk creation endpoint failed.");
+      }
+      const report = await res.json();
+      await fetchSchoolWorks();
+      let summary = `Bulk import complete! Added ${report.added} school(s).`;
+      if (report.skipped > 0) summary += ` ${report.skipped} duplicate UDISE(s) skipped.`;
+      triggerSuccess(summary);
+    } catch (err: any) {
+      setErrorMessage("Failed to perform school bulk upload: " + err.message);
+    }
+  };
+
+  const handleDeleteSchoolWork = async (id: string) => {
+    const confirmed = await confirmAction({
+      title: "Delete school record",
+      message: "Are you sure you want to permanently remove this school record? This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id] }),
+      });
+      if (!res.ok) throw new Error("Delete request refused by backend.");
+      setSelectedSchoolIds((prev) => prev.filter((item) => item !== id));
+      await fetchSchoolWorks();
+      triggerSuccess("School record removed successfully.");
+    } catch (err: any) {
+      setErrorMessage("Deletion Failed: " + err.message);
+    }
+  };
+
+  const handleBulkDeleteSchools = async (ids: string[]) => {
+    const confirmed = await confirmAction({
+      title: "Delete school records",
+      message: `You are about to permanently delete ${ids.length} selected school record(s). This cannot be undone.`,
+      confirmLabel: "Delete all",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Bulk delete rejected.");
+      setSelectedSchoolIds([]);
+      await fetchSchoolWorks();
+      triggerSuccess(`Successfully removed ${ids.length} school record(s).`);
+    } catch (err: any) {
+      setErrorMessage("Bulk Deletion Failed: " + err.message);
+    }
+  };
+
+  const handleExportSchoolsSelected = async (type: "csv" | "excel", ids: string[]) => {
+    const selected = rawSchoolWorks.filter((s) => ids.includes(s.id));
+    if (selected.length === 0) return;
+    if (type === "csv") {
+      const lines = [SCHOOL_EXCEL_ROW_HEADERS.join(",")];
+      selected.forEach((school, index) => {
+        lines.push(
+          SCHOOL_EXCEL_ROW_HEADERS.map((h) => quoteCSVValue(getSchoolHeaderValue(school, h, index))).join(","),
+        );
+      });
+      const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `school_work_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      triggerSuccess(`Exported ${selected.length} school record(s) as CSV.`);
+    } else {
+      const workbook = new ExcelJS.Workbook();
+      const ws = workbook.addWorksheet("School Work");
+      ws.addRow(SCHOOL_EXCEL_ROW_HEADERS);
+      selected.forEach((school, index) => {
+        ws.addRow(SCHOOL_EXCEL_ROW_HEADERS.map((h) => getSchoolHeaderValue(school, h, index)));
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `school_work_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      triggerSuccess(`Exported ${selected.length} school record(s) as Excel.`);
+    }
+  };
+
+  const handleExportSchoolExpenseSalary = async (type: "csv" | "excel", rows: SchoolWork[]) => {
+    if (rows.length === 0) return;
+    if (type === "csv") {
+      const blob = new Blob([buildSchoolExpenseSalaryCsv(rows, selectedMonth)], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `school_expenses_salary_${selectedMonth.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      triggerSuccess(`Exported ${rows.length} school expense salary record(s) as CSV.`);
+    } else {
+      const workbook = new ExcelJS.Workbook();
+      const ws = workbook.addWorksheet("School Expenses Salary");
+      ws.addRow(SCHOOL_EXPENSE_SALARY_HEADERS);
+      rows.forEach((school, index) => {
+        ws.addRow(getSchoolExpenseSalaryRow(school, index, selectedMonth));
+      });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `school_expenses_salary_${selectedMonth.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      triggerSuccess(`Exported ${rows.length} school expense salary record(s) as Excel.`);
+    }
+  };
+
+  const handleDistributeBlockExpense = async (payload: {
+    block: string;
+    monthKey: string;
+    materialAmount: number;
+    miscellaneousAmount: number;
+    materialRemark: string;
+    miscellaneousRemark: string;
+  }): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/distribute-block-expense", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to distribute block expense.");
+      }
+      const result = await res.json();
+      await fetchSchoolWorks();
+      triggerSuccess(
+        `Applied ${payload.monthKey} expenses to ${result.updatedCount} school(s) in block "${payload.block}". Material ₹${result.perSchoolMaterial}/school, Miscellaneous ₹${result.perSchoolMiscellaneous}/school.`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Block expense distribution failed: " + err.message);
+      return false;
+    }
+  };
+
+  const existingSchoolUdiseCodes = useMemo(
+    () => rawSchoolWorks.map((s) => s.udise).filter(Boolean),
+    [rawSchoolWorks],
+  );
+
+  const schoolDashboardStats = useMemo(() => {
+    const totalRates = rawSchoolWorks.reduce((sum, s) => sum + (Number(s.rates) || 0), 0);
+    const totalToilets = rawSchoolWorks.reduce((sum, s) => sum + (Number(s.noOfToilets) || 0), 0);
+    const districts = new Set(rawSchoolWorks.map((s) => s.district).filter(Boolean));
+    return {
+      totalCount: rawSchoolWorks.length,
+      totalRates,
+      totalToilets,
+      uniqueDistricts: districts.size,
+    };
+  }, [rawSchoolWorks]);
+
   // Bulk Selection Delete Trigger
   const handleBulkDelete = async (ids: string[]) => {
-    if (!window.confirm(`WARNING: You are about to permanently DELETE ${ids.length} selected employees. Continue?`)) return;
+    const confirmed = await confirmAction({
+      title: "Delete employees",
+      message: `You are about to permanently delete ${ids.length} selected employee(s). This cannot be undone.`,
+      confirmLabel: "Delete all",
+      variant: "danger",
+    });
+    if (!confirmed) return;
     try {
       setErrorMessage(null);
       const res = await fetch("/api/employees/delete", {
@@ -3656,9 +4680,12 @@ export function useHRMSApp() {
       (e) => !e.bankAccountNo?.trim() || !e.nameAsPerBank?.trim()
     );
     if (missingBank.length > 0) {
-      const proceed = window.confirm(
-        `${missingBank.length} selected employee(s) are missing bank account or name-as-per-bank and will be skipped. Continue?`
-      );
+      const proceed = await confirmAction({
+        title: "Missing bank details",
+        message: `${missingBank.length} selected employee(s) are missing bank account or name-as-per-bank and will be skipped. Continue?`,
+        confirmLabel: "Continue",
+        variant: "warning",
+      });
       if (!proceed) return;
     }
 
@@ -3767,11 +4794,7 @@ export function useHRMSApp() {
   };
 
   // Export selected row items back into matching formatted patterns (CSV, Excel, or PDF)
-  const handleExportSelected = (exportType: "csv" | "excel" | "pdf" | "bulkpay", ids: string[]) => {
-    if (exportType === "bulkpay") {
-      handleExportAxisBulkPay(ids);
-      return;
-    }
+  const handleExportSelected = (exportType: "csv" | "excel" | "pdf", ids: string[]) => {
     const selectedEmployees = employees.filter((e) => ids.includes(e.id));
     if (selectedEmployees.length === 0) {
       alert("No rows selected to export.");
@@ -3945,6 +4968,70 @@ export function useHRMSApp() {
     };
   }, [employees, esicEligibilityLimit]);
 
+  const configHasUnsavedChanges = useMemo(() => {
+    return (
+      esicEligibilityLimit !== savedPayrollConfig.esicEligibilityLimit ||
+      basicSalaryPercentage !== savedPayrollConfig.basicSalaryPercentage ||
+      companyBranch.trim() !== savedPayrollConfig.companyBranch.trim()
+    );
+  }, [esicEligibilityLimit, basicSalaryPercentage, companyBranch, savedPayrollConfig]);
+
+  const configSummary = useMemo(() => {
+    const locationCounts: Record<string, number> = {};
+    const roleCounts: Record<string, number> = {};
+    employees.forEach((emp) => {
+      if (emp.location) {
+        locationCounts[emp.location] = (locationCounts[emp.location] || 0) + 1;
+      }
+      if (emp.role) {
+        roleCounts[emp.role] = (roleCounts[emp.role] || 0) + 1;
+      }
+    });
+    const registeredLocationSet = new Set(registeredLocations.map((loc) => loc.toLowerCase()));
+    const registeredRoleSet = new Set(registeredJobRoles.map((role) => role.toLowerCase()));
+    return {
+      locationCounts,
+      roleCounts,
+      registeredLocationSet,
+      registeredRoleSet,
+      esicCoveredCount: dashboardStats.esicCoveredCount,
+      totalEmployees: dashboardStats.totalCount,
+    };
+  }, [employees, registeredLocations, registeredJobRoles, dashboardStats.esicCoveredCount, dashboardStats.totalCount]);
+
+  const handleSavePayrollConfig = async () => {
+    const draft: PayrollConfig = {
+      esicEligibilityLimit,
+      basicSalaryPercentage,
+      companyBranch: companyBranch.trim(),
+    };
+    const validationError = validatePayrollConfig(draft);
+    if (validationError) {
+      setConfigValidationError(validationError);
+      setErrorMessage(validationError);
+      return;
+    }
+
+    setIsSavingPayrollConfig(true);
+    setConfigValidationError(null);
+    setErrorMessage(null);
+    try {
+      savePayrollConfig(draft);
+      setSavedPayrollConfig(draft);
+      setCompanyBranch(draft.companyBranch);
+      triggerSuccess("Payroll rules saved. Salary calculations will use the updated settings.");
+    } finally {
+      setIsSavingPayrollConfig(false);
+    }
+  };
+
+  const handleResetPayrollConfig = () => {
+    setEsicEligibilityLimit(savedPayrollConfig.esicEligibilityLimit);
+    setBasicSalaryPercentage(savedPayrollConfig.basicSalaryPercentage);
+    setCompanyBranch(savedPayrollConfig.companyBranch);
+    setConfigValidationError(null);
+  };
+
   // List of all existing employee codes to prevent duplicates in front-end previewers
   const existingCodes = useMemo(() => employees.map((e) => e.employeeCode), [employees]);
 
@@ -4116,7 +5203,16 @@ export function useHRMSApp() {
     { name: "Leave", icon: CalendarOff, badge: "" },
     { name: "Attendance", icon: Clock, badge: "" },
     { name: "Directory", icon: Contact, badge: "" },
-    { name: "Birthdays", icon: Cake, badge: "Gift" }
+    { name: "Birthdays", icon: Cake, badge: "Gift" },
+    {
+      name: "School Work",
+      icon: School,
+      badge: "New",
+      children: [
+        { name: "School Salary", tab: "School Salary" },
+        { name: "Expenses", tab: "Expenses" },
+      ],
+    },
   ];
 
   // Filtered sidebar items
@@ -4132,6 +5228,9 @@ export function useHRMSApp() {
     // Filter by view permissions
     return items.filter(item => {
       const key = getModuleKey(item.name);
+      if (!key && item.children?.length) {
+        return item.children.some((child) => !!userPermissions[getModuleKey(child.tab)]?.view);
+      }
       if (!key) return true;
       return !!userPermissions[key]?.view;
     });
@@ -4154,6 +5253,25 @@ export function useHRMSApp() {
     }
   };
 
+  const handleSchoolSubTabClick = (tabName: string) => {
+    if (tabName === "Add School") {
+      setCurrentSchool(null);
+      setIsSchoolFormOpen(true);
+    } else if (tabName === "School Salary") {
+      setActiveSchoolSubTab(tabName);
+      setActiveSidebarTab("School Salary");
+    } else {
+      setActiveSchoolSubTab(tabName);
+    }
+  };
+
+  const toggleSidebarGroup = (groupName: string) => {
+    setExpandedSidebarGroups((prev) => ({
+      ...prev,
+      [groupName]: !prev[groupName],
+    }));
+  };
+
   const navigateToTab = (tabName: string) => {
     setActiveSidebarTab(tabName);
     triggerSuccess(`Switched module view to: ${tabName}`);
@@ -4162,6583 +5280,6 @@ export function useHRMSApp() {
     }
   };
 
-  const renderAuthenticatedApp = () => (
-    <div className="h-screen max-h-screen bg-slate-100/70 text-slate-800 font-sans flex flex-row overflow-hidden" id="management-shell">
-              
-              {/* Sidebar Backdrop overlay on mobile viewports */}
-              {!isSidebarCollapsed && (
-                <div 
-                  onClick={() => setIsSidebarCollapsed(true)} 
-                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 md:hidden animate-fade-in"
-                  id="sidebar-backdrop"
-                />
-              )}
-        
-              {/* 1. LEFT HAND SIDEBAR - Exact OrangeHRM Style */}
-              <aside 
-                className={`bg-white border-r border-slate-200 shrink-0 select-none flex flex-col fixed md:sticky top-0 h-screen transition-all duration-300 z-50 ${
-                  isSidebarCollapsed 
-                    ? "-translate-x-full md:translate-x-0 md:w-16" 
-                    : "translate-x-0 w-64 shadow-xl md:shadow-none"
-                }`} 
-                id="sidebar-container"
-              >
-                {/* Collapse arrow toggle overlay */}
-                <button
-                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                  className="absolute top-1/2 -right-3 transform -translate-y-1/2 bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-full p-0.5 border border-white cursor-pointer shadow z-40 hidden md:block"
-                  id="sidebar-toggle-overlay-btn"
-                  title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-                >
-                  {isSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-                </button>
-        
-                {/* Sidebar Header branding */}
-                <div className="p-4 border-b border-slate-150 bg-white flex items-center gap-2.5 overflow-hidden" id="sidebar-header">
-                  <div className="w-8 h-8 rounded-lg bg-[#ff791a] flex items-center justify-center text-white font-bold text-lg shrink-0 shadow animate-pulse">
-                    F
-                  </div>
-                  {!isSidebarCollapsed && (
-                    <div className="text-left leading-none animate-fade-in">
-                      <span className="text-slate-800 font-extrabold tracking-tight block">Flex <span className="text-[#ff791a]">HRM</span></span>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mt-0.5 truncate max-w-full">an Intelligic product</span>
-                    </div>
-                  )}
-                </div>
-        
-                {/* Sidebar Options Search Box */}
-                {!isSidebarCollapsed ? (
-                  <div className="p-3 border-b border-slate-50" id="sidebar-search-box">
-                    <div className="relative">
-                      <input id="sidebar-search" name="sidebarSearch"
-                        type="text"
-                        placeholder="Search..."
-                        value={sidebarSearch}
-                        onChange={(e) => setSidebarSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-orange-500 transition"
-                      />
-                      <span className="absolute left-2.5 top-2 text-slate-400"><Search size={12} /></span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-2 flex justify-center border-b border-slate-50">
-                    <span className="p-2 text-slate-400 bg-slate-50 rounded-full" title="Type to search in full view"><Search size={14} /></span>
-                  </div>
-                )}
-        
-                {/* Sidebar Links Menu items */}
-                <nav className="p-2 py-3 space-y-1 overflow-y-auto flex-1 scrollbar-thin" id="sidebar-navigation">
-                  {filteredSidebarItems.map((item) => {
-                    const IconComponent = item.icon;
-                    const isSelected = activeSidebarTab === item.name;
-                    return (
-                      <button
-                        key={item.name}
-                        onClick={() => {
-                          navigateToTab(item.name);
-                          triggerSuccess(`Switched module view to: ${item.name}`);
-                          if (window.innerWidth < 768) {
-                            setIsSidebarCollapsed(true);
-                          }
-                        }}
-                        className={`w-full flex items-center text-left px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all cursor-pointer ${
-                          isSelected 
-                            ? "bg-[#ff791a] text-white shadow-sm" 
-                            : "text-slate-600 hover:bg-slate-50 hover:text-[#ff791a]"
-                        }`}
-                        id={`sidebar-tab-${item.name.toLowerCase()}`}
-                      >
-                        <span className={`shrink-0 ${isSelected ? "text-white" : "text-slate-400"}`}>
-                          <IconComponent size={16} />
-                        </span>
-                        {!isSidebarCollapsed && (
-                          <span className="ml-3 truncate flex-1 flex items-center justify-between animate-fade-in">
-                            <span>{item.name}</span>
-                            {item.badge && (
-                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase ${
-                                isSelected ? "bg-white/20 text-white" : "bg-orange-50 text-orange-600"
-                              }`}>
-                                {item.badge}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </nav>
-        
-                {/* Sidebar Footer details */}
-                {!isSidebarCollapsed && (
-                  <div className="p-3 border-t border-slate-150 bg-slate-50 text-[10px] text-slate-400 text-center space-y-1" id="sidebar-footer">
-                    <p className="font-bold">v3.5.24 EE Cloud</p>
-                    <p className="truncate">Node Dev Environment Active</p>
-                  </div>
-                )}
-              </aside>
-        
-              {/* 2. RIGHT HAND MAIN VIEWPORT */}
-              <main className="flex-1 flex flex-col overflow-hidden" id="main-content-layout">
-                
-                {/* TOP ORANGE HEADER BAR - OrangeHRM Classic Banner Style */}
-                <header className="bg-gradient-to-r from-[#ff791a] to-[#ff981a] px-4 md:px-6 py-3 md:py-4 flex flex-col md:flex-row md:items-center justify-between text-white shrink-0 shadow-md sticky top-0 z-40 gap-2.5 md:gap-4" id="main-top-banner">
-                  {/* Top row: Hamburger + Title on left, Profile dropdown on right (on mobile) */}
-                  <div className="flex items-center justify-between w-full md:w-auto gap-3">
-                    <div className="flex items-center gap-2.5">
-                      {/* Hamburger button for mobile drawer or trigger toggle (hidden on desktop) */}
-                      <button 
-                        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
-                        className="md:hidden p-1.5 bg-white/10 hover:bg-white/20 rounded text-white mr-1 transition cursor-pointer"
-                        id="hamburger-btn"
-                      >
-                        <Menu size={18} />
-                      </button>
-                      
-                      <div>
-                        <span className="text-[8px] uppercase tracking-widest font-black text-orange-100 opacity-90 block">
-                          {activeSidebarTab} Module
-                        </span>
-                        <h1 className="text-sm md:text-lg font-black tracking-tight flex items-center gap-2" id="top-banner-title">
-                          {activeSidebarTab === "Employees" ? "Employees" : activeSidebarTab}
-                        </h1>
-                      </div>
-                    </div>
-        
-                    {/* Mobile Profile Dropdown (visible only on mobile) */}
-                    <div className="md:hidden relative shrink-0" ref={mobileProfileDropdownRef}>
-                      <button
-                        onClick={() => setIsMobileProfileOpen(!isMobileProfileOpen)}
-                        className="flex items-center gap-1.5 p-1 px-2.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 transition cursor-pointer"
-                        id="mobile-top-profile-selector"
-                      >
-                        <div className="w-6 h-6 rounded-full bg-orange-100 text-[#ff791a] flex items-center justify-center font-bold text-xs ring-2 ring-white/20 shrink-0">
-                          {sessionUser.charAt(0).toUpperCase()}
-                        </div>
-                        <ChevronDown size={10} className={`transition duration-200 ${isMobileProfileOpen ? "rotate-180" : ""}`} />
-                      </button>
-        
-                      {isMobileProfileOpen && (
-                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-slate-800 font-medium animate-fade-in" id="mobile-profile-dropdown-wrapper">
-                          <div className="px-4 py-2 border-b border-slate-100">
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Access Clearance</p>
-                            <p className="text-xs font-bold text-slate-800 truncate mt-0.5">{sessionUser}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setIsMobileProfileOpen(false);
-                              navigateToTab("My Info");
-                              triggerSuccess("Opened administrator account profile.");
-                              setIsSidebarCollapsed(true);
-                            }}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
-                          >
-                            <UserCircle size={14} className="text-slate-400" />
-                            My Account Profile
-                          </button>
-                          <button
-                            onClick={() => {
-                              triggerSuccess("Opened configuration mappings.");
-                              setIsMobileProfileOpen(false);
-                              navigateToTab("Employees");
-                              setActivePimSubTab("Configuration");
-                              setIsSidebarCollapsed(true);
-                            }}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
-                          >
-                            <Settings size={14} className="text-slate-400" />
-                            Portal Settings
-                          </button>
-                          <div className="border-t border-slate-100 my-1"></div>
-                          <button
-                            onClick={handleLogout}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 font-bold transition"
-                            id="mobile-logout-dropdown-btn"
-                          >
-                            <LogOut size={14} className="text-rose-500" />
-                            Sign Out / Logout
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-        
-                  <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-2.5 border-t border-white/10 pt-2 md:border-t-0 md:pt-0">
-                    {/* Universal Month & Year Selectors */}
-                    <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
-                      {/* Universal Month Dropdown */}
-                      <div className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 px-2.5 py-1 md:px-3 md:py-1.5 transition shrink-0 min-w-[9.5rem] justify-center md:justify-start">
-                        <Calendar size={12} className="text-orange-100 shrink-0" />
-                        <span className="text-[9px] md:text-[10px] font-black uppercase tracking-wider text-orange-100/90 shrink-0">Month:</span>
-                        <select id="active-month-name" name="activeMonthName"
-                          value={activeMonthName}
-                          onChange={(e) => {
-                            const newMonth = e.target.value;
-                            const calendarYear = getCalendarYearFromFYRange(newMonth, activeFYRange);
-                            setSelectedMonth(`${newMonth} ${calendarYear}`);
-                          }}
-                          className="min-w-0 flex-1 bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer border-0"
-                          title="Select Active Month"
-                        >
-                          {[
-                            "January", "February", "March", "April", "May", "June",
-                            "July", "August", "September", "October", "November", "December"
-                          ].map(m => (
-                            <option key={m} value={m} className="text-slate-800 font-bold">{m}</option>
-                          ))}
-                        </select>
-                      </div>
-        
-                      {/* Universal Year Dropdown */}
-                      <div className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 px-2.5 py-1 md:px-3 md:py-1.5 transition shrink-0 min-w-[8.5rem] justify-center md:justify-start">
-                        <Calendar size={12} className="text-orange-100 shrink-0" />
-                        <span className="text-[9px] md:text-[10px] font-black uppercase tracking-wider text-orange-100/90 shrink-0">Year:</span>
-                        <select id="active-fyrange" name="activeFYRange"
-                          value={activeFYRange}
-                          onChange={(e) => {
-                            const newFYRange = e.target.value;
-                            const calendarYear = getCalendarYearFromFYRange(activeMonthName, newFYRange);
-                            setSelectedMonth(`${activeMonthName} ${calendarYear}`);
-                          }}
-                          className="min-w-0 flex-1 bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer border-0"
-                          title="Select Active Year"
-                        >
-                          {["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027", "2027-2028", "2028-2029", "2029-2030"].map(fy => (
-                            <option key={fy} value={fy} className="text-slate-800 font-bold">{fy}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-        
-                    {/* Desktop Profile Dropdown with Logout (Hidden on mobile) */}
-                    <div className="hidden md:block relative" ref={profileDropdownRef}>
-                      <button
-                        onClick={() => setIsProfileOpen(!isProfileOpen)}
-                        className="flex items-center gap-2.5 p-1 px-2.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 transition cursor-pointer"
-                        id="top-profile-selector"
-                      >
-                        <div className="w-7 h-7 rounded-full bg-orange-100 text-[#ff791a] flex items-center justify-center font-bold text-xs ring-2 ring-white/20 shrink-0">
-                          {sessionUser.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="hidden md:inline text-xs font-bold font-medium tracking-tight whitespace-nowrap">
-                          {sessionUser}
-                        </span>
-                        <ChevronDown size={12} className={`transition duration-200 ${isProfileOpen ? "rotate-180" : ""}`} />
-                      </button>
-        
-                      {isProfileOpen && (
-                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50 text-slate-800 font-medium animate-fade-in" id="profile-dropdown-wrapper">
-                          <div className="px-4 py-2 border-b border-slate-100">
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Access Clearance</p>
-                            <p className="text-xs font-bold text-slate-800 truncate mt-0.5">{sessionUser}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setIsProfileOpen(false);
-                              navigateToTab("My Info");
-                              triggerSuccess("Opened administrator account profile.");
-                              if (window.innerWidth < 768) {
-                                setIsSidebarCollapsed(true);
-                              }
-                            }}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
-                          >
-                            <UserCircle size={14} className="text-slate-400" />
-                            My Account Profile
-                          </button>
-                          <button
-                            onClick={() => {
-                              triggerSuccess("Opened configuration mappings.");
-                              setIsProfileOpen(false);
-                              navigateToTab("Employees");
-                              setActivePimSubTab("Configuration");
-                              if (window.innerWidth < 768) {
-                                setIsSidebarCollapsed(true);
-                              }
-                            }}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
-                          >
-                            <Settings size={14} className="text-slate-400" />
-                            Portal Settings
-                          </button>
-                          <div className="border-t border-slate-100 my-1"></div>
-                          <button
-                            onClick={handleLogout}
-                            className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 transition font-bold"
-                            id="logout-dropdown-btn"
-                          >
-                            <LogOut size={14} className="text-rose-500" />
-                            Sign Out / Logout
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </header>
-        
-                {/* 3. Employees SUB-HEADER BAND (Like OrangeHRM: Configuration, Employee List, Add Employee, Reports) */}
-                {activeSidebarTab === "Employees" && (
-                  <div className="bg-white border-b border-slate-200 px-6 py-1.5 flex items-center gap-2 shrink-0 overflow-x-auto select-none relative z-30" id="pim-sub-menu-band">
-                    {["Configuration", "Employee List", "Add Employee", "Reports"].map((tab) => {
-                      const isActive = activePimSubTab === tab;
-                      return (
-                        <button
-                          key={tab}
-                          onClick={() => handlePimSubTabClick(tab)}
-                          className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                            isActive 
-                              ? "bg-orange-50 text-[#ff791a] font-extrabold shadow-xs" 
-                              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                          }`}
-                          id={`pim-subtab-btn-${tab.replace(/\s+/g, "-").toLowerCase()}`}
-                        >
-                          {tab}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-        
-                {/* 4. MAIN INNER SCROLLABLE VIEWPORT CONTENT */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin" id="viewport-scroll-shell">
-                  {errorMessage && (
-                    <div className="p-4 bg-rose-50 border-l-4 border-rose-500 rounded-r-lg text-rose-900 text-xs flex items-start gap-2.5 shadow-xs animate-fade-in" id="error-toast-banner">
-                      <div className="p-1 bg-rose-100 text-rose-800 rounded-full shrink-0">!</div>
-                      <div>
-                        <p className="font-bold text-rose-950">System Alert</p>
-                        <p className="mt-0.5">{errorMessage}</p>
-                      </div>
-                    </div>
-                  )}
-    
-                  {successMessage && (
-                    <div className="p-4 bg-emerald-50 border-l-4 border-emerald-500 rounded-r-lg text-emerald-900 text-xs flex items-start gap-2.5 shadow-xs animate-fade-in" id="success-toast-banner">
-                      <div className="p-1 bg-emerald-100 text-emerald-800 rounded-full shrink-0">✓</div>
-                      <div>
-                        <p className="font-bold text-emerald-950">Success Overview</p>
-                        <p className="mt-0.5">{successMessage}</p>
-                      </div>
-                    </div>
-                  )}
-    
-                  <>
-                    {/* VIEW: ACTIVE SIDEBAR MODULES MAPPING */}
-                    {isModuleAccessDenied ? (
-                      <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-lg mx-auto shadow-xs text-center space-y-4" id="module-access-denied-view">
-                        <div className="w-14 h-14 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto text-2xl">
-                          <Lock size={24} />
-                        </div>
-                        <div className="space-y-2">
-                          <h2 className="text-lg font-extrabold text-slate-800">{activeSidebarTab} access restricted</h2>
-                          <p className="text-sm text-slate-500">
-                            Your role does not include view permission for the {activeSidebarTab} module. Contact an administrator if you need access.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setActiveSidebarTab("Employees")}
-                          className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg transition cursor-pointer"
-                        >
-                          Go to Employees
-                        </button>
-                      </div>
-                    ) : activeSidebarTab === "My Info" ? (
-                      /* --- DETAILED ADMINISTRATOR PROFILE & PASSWORD SECURITY MODULE --- */
-                      <div className="max-w-4xl mx-auto space-y-6 animate-fade-in" id="my-info-view-container">
-                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
-                          <div className="border-b border-slate-100 pb-4">
-                            <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                              <UserCircle size={20} className="text-[#ff791a]" /> My Account & Profile Details
-                            </h3>
-                            <p className="text-xs text-slate-400 mt-1">
-                              Manage your personal login credentials, administrator access levels, and security configurations.
-                            </p>
-                          </div>
-          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            {/* Left: Profile Info Cards */}
-                            <div className="space-y-4">
-                              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                <User size={14} className="text-slate-400" /> Account Information
-                              </h4>
-          
-                              {isFetchingProfile ? (
-                                <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 border border-slate-150 rounded-xl">
-                                  <div className="animate-spin w-5 h-5 border-2 border-[#ff791a] border-t-transparent rounded-full mx-auto mb-2"></div>
-                                  Fetching authentic credentials...
-                                </div>
-                              ) : profileLoadingError ? (
-                                <div className="p-4 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-medium">
-                                  Could not synchronize details: {profileLoadingError}
-                                </div>
-                              ) : adminProfileInfo ? (
-                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-orange-100 text-[#ff791a] font-extrabold text-sm flex items-center justify-center shadow-xs">
-                                      {adminProfileInfo.username.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div>
-                                      <p className="font-extrabold text-sm text-slate-800">{adminProfileInfo.username}</p>
-                                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">System Owner</p>
-                                    </div>
-                                  </div>
-          
-                                  <div className="border-t border-slate-200/60 my-2"></div>
-          
-                                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs leading-relaxed">
-                                    <div>
-                                      <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Access Scope</span>
-                                      <span className="font-semibold text-slate-850 flex items-center gap-1 mt-0.5">
-                                        <Shield size={11} className="text-[#ff791a] shrink-0" /> Full System Admin
-                                      </span>
-                                    </div>
-          
-                                    <div>
-                                      <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Active Status</span>
-                                      <span className="font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
-                                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block"></span> Verified Session
-                                      </span>
-                                    </div>
-          
-                                    <div>
-                                      <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Invited By</span>
-                                      <span className="font-semibold text-slate-800 mt-0.5 mt-1 block">{adminProfileInfo.invitedBy || "System Bootstrap"}</span>
-                                    </div>
-          
-                                    <div>
-                                      <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Account Created</span>
-                                      <span className="font-semibold text-slate-850 mt-0.5 mt-1 block">
-                                        {adminProfileInfo.createdAt ? new Date(adminProfileInfo.createdAt).toLocaleDateString() : "System Default"}
-                                      </span>
-                                    </div>
-                                  </div>
-          
-                                  <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-lg text-[11px] text-blue-750 leading-relaxed mt-2">
-                                    💡 <strong>Security Note:</strong> Passwords are stored using secure one-way hashing. Sessions expire after 24 hours and all API routes require a valid authenticated session token.
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center text-xs text-slate-400">
-                                  Admin data not yet processed.
-                                </div>
-                              )}
-                            </div>
-          
-                            {/* Right: Change Password Form */}
-                            <form onSubmit={handlePasswordChangeSubmit} className="space-y-4 p-5 bg-slate-50 border border-slate-200 rounded-xl relative">
-                              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                <Lock size={14} className="text-slate-400" /> Update Security Credentials
-                              </h4>
-          
-                              {changePasswordError && (
-                                <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                  ⚠️ {changePasswordError}
-                                </div>
-                              )}
-          
-                              {changePasswordSuccess && (
-                                <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                  {changePasswordSuccess}
-                                </div>
-                              )}
-          
-                              <div>
-                                <label className="text-[11px] font-bold text-slate-500 block mb-1">Current Password</label>
-                                <PasswordInput id="old-password" name="oldPassword"
-                                  value={oldPassword}
-                                  onChange={(e) => setOldPassword(e.target.value)}
-                                  placeholder="••••••••"
-                                  className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                />
-                              </div>
-          
-                              <div>
-                                <label className="text-[11px] font-bold text-slate-550 block mb-1">New Password</label>
-                                <PasswordInput id="new-password" name="newPassword"
-                                  value={newPassword}
-                                  onChange={(e) => setNewPassword(e.target.value)}
-                                  placeholder="••••••••"
-                                  className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                />
-                              </div>
-          
-                              <div>
-                                <label className="text-[11px] font-bold text-slate-550 block mb-1">Confirm New Password</label>
-                                <PasswordInput id="confirm-new-password" name="confirmNewPassword"
-                                  value={confirmNewPassword}
-                                  onChange={(e) => setConfirmNewPassword(e.target.value)}
-                                  placeholder="••••••••"
-                                  className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                />
-                              </div>
-          
-                              <button
-                                type="submit"
-                                className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm shadow-orange-500/10 transition active:scale-98 cursor-pointer mt-2"
-                              >
-                                Authenticate & Save Password
-                              </button>
-                            </form>
-                          </div>
-                        </div>
-                      </div>
-                    ) : activeSidebarTab === "Admin" ? (
-                       /* --- INTERACTIVE ADMINISTRATOR INVITE & MANAGE MODULE --- */
-                       <div className="max-w-4xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
-                         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-                           <div className="border-b border-slate-100 pb-3">
-                             <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                               <Shield size={18} className="text-[#ff791a]" /> System Administrator Accounts
-                             </h3>
-                             <p className="text-xs text-slate-400 mt-1">
-                               Security overview of authorized logins. Administrators can explicitly register and invite other administrators, but public self-signup is strictly disabled.
-                             </p>
-                           </div>
-          
-                           {inviteError && (
-                             <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                               🚩 {inviteError}
-                             </div>
-                           )}
-          
-                           {inviteSuccess && (
-                             <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                               ✓ {inviteSuccess}
-                             </div>
-                           )}
-          
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                             {/* Create / Invite Form */}
-                             <form onSubmit={handleInviteAdminSubmit} className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                               <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                 Invite / Onboard New Admin
-                               </h4>
-                               
-                               <div>
-                                 <label className="text-[11px] font-bold text-slate-500 block mb-1">New Admin Username</label>
-                                 <input id="invite-username" name="inviteUsername"
-                                   type="text"
-                                   value={inviteUsername}
-                                   onChange={(e) => setInviteUsername(e.target.value)}
-                                   placeholder="e.g. nikhil_admin"
-                                   className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                 />
-                               </div>
-          
-                               <div>
-                                 <label className="text-[11px] font-bold text-slate-500 block mb-1">Temporary Password</label>
-                                 <PasswordInput id="invite-password" name="invitePassword"
-                                   value={invitePassword}
-                                   onChange={(e) => setInvitePassword(e.target.value)}
-                                   placeholder="e.g. securePass123"
-                                   className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                 />
-                               </div>                      <div>
-                                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Assigned Security Role</label>
-                                  <select id="invite-role" name="inviteRole"
-                                    value={inviteRole}
-                                    onChange={(e) => setInviteRole(e.target.value)}
-                                    className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                  >
-                                    <option value="admin">Super-Admin (Full Access)</option>
-                                    {rolesList.map((r) => (
-                                      <option key={r.name} value={r.name}>{r.name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-          
-                                <div>
-                                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Assigned Worksite Locations</label>
-                                  <div className="border border-slate-200 rounded-lg p-2.5 bg-white max-h-36 overflow-y-auto space-y-1.5 shadow-inner">
-                                    {customLocations.map((loc) => {
-                                      const isChecked = inviteLocations.includes(loc);
-                                      return (
-                                        <label key={loc} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 transition font-medium select-none">
-                                          <input id={`invite-loc-${loc}`} name={`inviteLocation_${loc}`}
-                                            type="checkbox"
-                                            checked={isChecked}
-                                            onChange={() => {
-                                              if (isChecked) {
-                                                setInviteLocations(prev => prev.filter(l => l !== loc));
-                                              } else {
-                                                setInviteLocations(prev => [...prev, loc]);
-                                              }
-                                            }}
-                                            className="rounded border-slate-350 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
-                                          />
-                                          <span>{loc}</span>
-                                        </label>
-                                      );
-                                    })}
-                                    {customLocations.length === 0 && (
-                                      <p className="text-[10px] text-slate-400 text-center py-1 font-medium">No locations registered.</p>
-                                    )}
-                                  </div>
-                                  <p className="text-[10px] text-slate-400 mt-1 italic">
-                                    If unchecked, administrator defaults to having full unrestricted access to all locations.
-                                  </p>
-                                </div>
-                               <button
-                                 type="submit"
-                                 className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-98 cursor-pointer"
-                               >
-                                 Grant Administrator Credentials
-                               </button>
-                             </form>
-          
-                             {/* Administrators List */}
-                             <div className="space-y-3">
-                               <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                 Active Administrators ({isFetchingAdmins ? "..." : adminsList.length})
-                               </h4>
-                               
-                               <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden bg-white max-h-64 overflow-y-auto">
-                                 {isFetchingAdmins ? (
-                                   <div className="p-4 text-center text-xs text-slate-400">Loading authorized administrators...</div>
-                                 ) : adminsList.length === 0 ? (
-                                   <div className="p-4 text-center text-xs text-slate-400">No administrators managed.</div>
-                                 ) : (                          adminsList.map((adm) => {
-                                      const isSelf = adm.username.toLowerCase() === sessionUser.toLowerCase();
-                                      const isRootAdmin = adm.username.toLowerCase() === "admin";
-                                      
-                                      if (editingAdminUsername === adm.username) {
-                                        return (
-                                          <div key={adm.username} className="p-3 bg-slate-50 space-y-3 transition text-xs border-b border-slate-100">
-                                            <div className="flex items-center justify-between">
-                                              <span className="font-extrabold text-slate-800">⚙ Edit security: {adm.username}</span>
-                                              <span className="text-[10px] text-slate-400 font-mono">Onboarded: {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}</span>
-                                            </div>
-                                            
-                                            <div className="space-y-2.5 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                              <div>
-                                                <label className="text-[10px] font-bold text-slate-500 block mb-1">Assigned Security Role</label>
-                                                <select id="edit-admin-role" name="editAdminRole"
-                                                  value={editAdminRole}
-                                                  onChange={(e) => setEditAdminRole(e.target.value)}
-                                                  className="w-full px-2 py-1 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                                >
-                                                  <option value="admin">Super-Admin (Full Access)</option>
-                                                  {rolesList.map((r) => (
-                                                    <option key={r.name} value={r.name}>{r.name}</option>
-                                                  ))}
-                                                </select>
-                                              </div>
-          
-                                              {!isRootAdmin && (
-                                                <div>
-                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Login Access Restrictions</label>
-                                                  <select id="editadmindisabled-disabled-active-4793" name="editadmindisabled-disabled-active"
-                                                    value={editAdminDisabled ? "disabled" : "active"}
-                                                    onChange={(e) => setEditAdminDisabled(e.target.value === "disabled")}
-                                                    className="w-full px-2 py-1 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                                  >
-                                                    <option value="active">🟢 Active (Login Allowed)</option>
-                                                    <option value="disabled">🔴 Restricted (Block Login Access)</option>
-                                                  </select>
-                                                </div>
-                                              )}
-          
-                                              <div>
-                                                <label className="text-[10px] font-bold text-slate-500 block mb-1">Assigned Worksite Locations</label>
-                                                <div className="border border-slate-200 rounded-md p-2 bg-slate-50 max-h-28 overflow-y-auto space-y-1.5 shadow-inner">
-                                                  {rawCustomLocations.map((loc) => {
-                                                    const isChecked = editAdminLocations.includes(loc);
-                                                    return (
-                                                      <label key={loc} className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 hover:text-slate-900 transition font-medium select-none">
-                                                        <input id={`edit-admin-loc-${loc}`} name={`editAdminLocation_${loc}`}
-                                                          type="checkbox"
-                                                          checked={isChecked}
-                                                          onChange={() => {
-                                                            if (isChecked) {
-                                                              setEditAdminLocations(prev => prev.filter(l => l !== loc));
-                                                            } else {
-                                                              setEditAdminLocations(prev => [...prev, loc]);
-                                                            }
-                                                          }}
-                                                          className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
-                                                        />
-                                                        <span className="text-[11px]">{loc}</span>
-                                                      </label>
-                                                    );
-                                                  })}
-                                                </div>
-                                              </div>
-          
-                                              <div className="flex items-center gap-2 pt-2 border-t border-slate-100 justify-end">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setEditingAdminUsername(null)}
-                                                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded transition cursor-pointer"
-                                                >
-                                                  Cancel
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleUpdateAdminSubmit(adm.username)}
-                                                  className="px-2.5 py-1 text-[11px] font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded shadow-sm transition cursor-pointer"
-                                                >
-                                                  Save Rules
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-          
-                                      return (
-                                        <div key={adm.username} className="p-3 hover:bg-slate-50/50 flex items-center justify-between transition text-xs">
-                                          <div className="space-y-0.5">
-                                            <p className="font-bold text-slate-800 flex items-center gap-1 flex-wrap">
-                                              <span>👤 {adm.username}</span>
-                                              {adm.disabled ? (
-                                                <span className="bg-rose-50 text-rose-700 border border-rose-200/50 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase scale-90">Restricted</span>
-                                              ) : (
-                                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-250/50 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase scale-90">Active</span>
-                                              )}
-                                              {adm.username === sessionUser && (
-                                                <span className="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0.5 rounded font-normal uppercase scale-90">Current</span>
-                                              )}
-                                            </p>
-                                            <p className="text-[10px] text-slate-400">
-                                              Invited by: {adm.invitedBy || "System"} • Role: <span className="font-semibold text-slate-600 bg-slate-100 px-1 py-0.5 rounded text-[9px]">{adm.role === "admin" ? "Super-Admin" : adm.role || "Super-Admin"}</span>
-                                            </p>
-                                            <p className="text-[10px] text-slate-500 font-medium">
-                                              📍 Locations: {adm.locations && adm.locations.length > 0 ? adm.locations.join(", ") : "All (Unrestricted)"}
-                                            </p>
-                                          </div>
-                                          <div className="text-right flex flex-col items-end gap-1 text-[10px] text-slate-400">
-                                            <p className="font-mono">{adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}</p>
-                                            {adm.username !== "admin" && (
-                                              <button
-                                                onClick={() => {
-                                                  setEditingAdminUsername(adm.username);
-                                                  setEditAdminRole(adm.role || "admin");
-                                                  setEditAdminLocations(adm.locations || []);
-                                                  setEditAdminDisabled(!!adm.disabled);
-                                                }}
-                                                className="px-2 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
-                                              >
-                                                ⚙ Configure
-                                              </button>
-                                            )}
-                                          </div>
-                                        </div>
-                                      );
-                                    })
-                                 )}
-                               </div>
-                             </div>
-                           </div>
-                         </div>
-          
-                         {/* --- CUSTOM ROLES & PERMISSIONS MATRIX --- */}
-                         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 text-left">
-                           <div className="border-b border-slate-100 pb-3">
-                             <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                               <Shield size={18} className="text-[#ff791a]" /> Custom Security Roles & Permissions Matrix
-                             </h3>
-                             <p className="text-xs text-slate-400 mt-1">
-                               Define fine-grained view and edit access permissions for different admin ranks and assistants.
-                             </p>
-                           </div>
-          
-                           {roleError && (
-                             <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                               🚩 {roleError}
-                             </div>
-                           )}
-          
-                           {roleSuccess && (
-                             <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                               ✓ {roleSuccess}
-                             </div>
-                           )}
-          
-                           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                             {/* Role Creation / Editing Form */}
-                             <div className="lg:col-span-2 space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                               <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                 Create / Modify Custom Role
-                               </h4>
-                               
-                               <form onSubmit={handleSaveRoleSubmit} className="space-y-4">
-                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                   <div>
-                                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Role Name</label>
-                                     <input id="role-name-input" name="roleNameInput"
-                                       type="text"
-                                       value={roleNameInput}
-                                       onChange={(e) => setRoleNameInput(e.target.value)}
-                                       placeholder="e.g. HR Assistant"
-                                       className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                     />
-                                   </div>
-          
-                                   <div>
-                                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Description</label>
-                                     <input id="role-desc-input" name="roleDescInput"
-                                       type="text"
-                                       value={roleDescInput}
-                                       onChange={(e) => setRoleDescInput(e.target.value)}
-                                       placeholder="e.g. Access to daily markings..."
-                                       className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                     />
-                                   </div>
-                                 </div>
-          
-                                 {/* Permission Grid Table */}
-                                 <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                   <table className="w-full border-collapse text-left text-xs">
-                                     <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
-                                       <tr>
-                                         <th className="p-2.5">Feature Module</th>
-                                         <th className="p-2.5 text-center w-24">View Module</th>
-                                         <th className="p-2.5 text-center w-24">Edit/Save</th>
-                                       </tr>
-                                     </thead>
-                                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                                       {[
-                                         { key: "employees", name: "Employees Database" },
-                                         { key: "attendance", name: "Attendance Sheets" },
-                                         { key: "salary", name: "Salary Sheet" },
-                                         { key: "ledger", name: "Advance & Penalty Ledger" },
-                                         { key: "leave", name: "Leave Requests" },
-                                         { key: "birthdays", name: "Birthday Calendar" },
-                                         { key: "directory", name: "Directory Contacts" },
-                                         { key: "admin", name: "Admin Panel" }
-                                       ].map((mod) => (
-                                         <tr key={mod.key} className="hover:bg-slate-50/50">
-                                           <td className="p-2.5 font-semibold text-slate-800">{mod.name}</td>
-                                           <td className="p-2.5 text-center">
-                                             <input id={`role-perm-view-${mod.key}`} name={`rolePermView_${mod.key}`}
-                                               type="checkbox"
-                                               checked={!!rolePermsInput[mod.key]?.view}
-                                               onChange={(e) => {
-                                                 const val = e.target.checked;
-                                                 setRolePermsInput(prev => ({
-                                                   ...prev,
-                                                   [mod.key]: {
-                                                     ...prev[mod.key],
-                                                     view: val,
-                                                     // Automatically disable edit if view is disabled
-                                                     edit: val ? prev[mod.key]?.edit : false
-                                                   }
-                                                 }));
-                                               }}
-                                               className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer"
-                                             />
-                                           </td>
-                                           <td className="p-2.5 text-center">
-                                             <input id={`role-perm-view-${mod.key}`} name={`rolePermView_${mod.key}`}
-                                               type="checkbox"
-                                               checked={!!rolePermsInput[mod.key]?.edit}
-                                               disabled={!rolePermsInput[mod.key]?.view}
-                                               onChange={(e) => {
-                                                 setRolePermsInput(prev => ({
-                                                   ...prev,
-                                                   [mod.key]: {
-                                                     ...prev[mod.key],
-                                                     edit: e.target.checked
-                                                   }
-                                                 }));
-                                               }}
-                                               className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer disabled:opacity-40"
-                                             />
-                                           </td>
-                                         </tr>
-                                       ))}
-                                     </tbody>
-                                   </table>
-                                 </div>
-          
-                                 <button
-                                   type="submit"
-                                   className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-98 cursor-pointer"
-                                 >
-                                   Save Custom Role Matrix
-                                 </button>
-                               </form>
-                             </div>
-          
-                             {/* Roles Overview List */}
-                             <div className="space-y-3">
-                               <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                 Configured Roles ({isFetchingRoles ? "..." : rolesList.length})
-                               </h4>
-          
-                               <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden bg-white max-h-96 overflow-y-auto">
-                                 {isFetchingRoles ? (
-                                   <div className="p-4 text-center text-xs text-slate-400">Loading custom roles...</div>
-                                 ) : rolesList.length === 0 ? (
-                                   <div className="p-4 text-center text-xs text-slate-400">No custom roles defined.</div>
-                                 ) : (
-                                   rolesList.map((role) => (
-                                     <div key={role.name} className="p-3 hover:bg-slate-50/50 space-y-1.5 transition text-xs relative group">
-                                       <div className="flex items-start justify-between">
-                                         <div className="space-y-0.5">
-                                           <p className="font-extrabold text-slate-800 flex items-center gap-1.5">
-                                             🛡️ {role.name}
-                                           </p>
-                                           <p className="text-[10px] text-slate-400">{role.description || "No description provided."}</p>
-                                         </div>                               <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setRoleNameInput(role.name);
-                                                setRoleDescInput(role.description || "");
-                                                setRolePermsInput(role.permissions || {
-                                                  employees: { view: false, edit: false },
-                                                  salary: { view: false, edit: false },
-                                                  ledger: { view: false, edit: false },
-                                                  attendance: { view: false, edit: false },
-                                                  leave: { view: false, edit: false },
-                                                  birthdays: { view: false, edit: false },
-                                                  directory: { view: false, edit: false },
-                                                  admin: { view: false, edit: false }
-                                                });
-                                                triggerSuccess(`Loaded security mappings for "${role.name}" into editor.`);
-                                              }}
-                                              className="text-slate-500 hover:text-slate-800 p-1 transition cursor-pointer text-xs"
-                                              title="Edit security mappings"
-                                            >
-                                              ✏️
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDeleteRole(role.name)}
-                                              className="text-rose-600 hover:text-rose-800 p-1 transition cursor-pointer text-xs"
-                                              title="Delete custom role"
-                                            >
-                                              🗑️
-                                            </button>
-                                          </div>
-                                       </div>
-                                       
-                                       {/* Quick permissions badges */}
-                                       <div className="flex flex-wrap gap-1 mt-1">
-                                         {Object.entries(role.permissions || {}).map(([mod, perm]: any) => {
-                                           if (!perm.view) return null;
-                                           return (
-                                             <span key={mod} className={`text-[9px] px-1.5 py-0.5 rounded font-bold capitalize ${perm.edit ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
-                                               {mod}: {perm.edit ? "Edit" : "View"}
-                                             </span>
-                                           );
-                                         })}
-                                       </div>
-                                     </div>
-                                   ))
-                                 )}
-                               </div>
-                             </div>
-                           </div>
-                         </div>
-                       </div>
-                     ) : activeSidebarTab === "Audit Logs" ? (
-                        /* --- ENTERPRISE SECURITY AUDIT TRAIL & EVENT LOGS --- */
-                        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in text-left" id="audit-trail-viewport">
-                          
-                          {/* 1. Page Header & Clear Button */}
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
-                            <div>
-                              <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                <FileText size={20} className="text-[#ff791a]" /> Enterprise Security Audit Trail
-                              </h3>
-                              <p className="text-xs text-slate-400 mt-1">
-                                Persistent database-backed records of administrative operations, security breaches, logins, status locks, and system telemetry.
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={fetchAuditLogs}
-                                className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition flex items-center gap-1 cursor-pointer"
-                                title="Reload Audit Logs"
-                              >
-                                <RotateCw size={13} className={isFetchingAuditLogs ? "animate-spin" : ""} /> Refresh Logs
-                              </button>
-                              
-                              {sessionUser.toLowerCase() === "admin" && (
-                                <button
-                                  onClick={openFlushAuditModal}
-                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold text-rose-700 transition flex items-center gap-1 cursor-pointer"
-                                  title="Permanently Flush Security Logs"
-                                >
-                                  <Trash2 size={13} /> Flush Security Trail
-                                </button>
-                              )}
-                            </div>
-                          </div>
-          
-                          {/* 2. Advanced High-End Visual Stats */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {/* Card 1: Total Security Events */}
-                            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center justify-between">
-                              <div className="space-y-1">
-                                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Total Logged Events</p>
-                                <p className="text-2xl font-black text-slate-800">{auditLogsList.length}</p>
-                                <p className="text-[10px] text-slate-400">Max limit of 2000 active records</p>
-                              </div>
-                              <div className="w-12 h-12 bg-orange-50 text-[#ff791a] rounded-xl flex items-center justify-center font-bold text-lg shadow-xs">
-                                <FileText size={22} />
-                              </div>
-                            </div>
-          
-                            {/* Card 2: Performing Operators */}
-                            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center justify-between">
-                              <div className="space-y-1">
-                                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Active Performers</p>
-                                <p className="text-2xl font-black text-slate-800">
-                                  {new Set(auditLogsList.map(l => l.username || "System")).size}
-                                </p>
-                                <p className="text-[10px] text-slate-400">Authorized administrators & system</p>
-                              </div>
-                              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center font-bold text-lg shadow-xs">
-                                <Users size={22} />
-                              </div>
-                            </div>
-          
-                            {/* Card 3: Mutated Entity Payload Diffs */}
-                            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center justify-between">
-                              <div className="space-y-1">
-                                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Mutated Operations</p>
-                                <p className="text-2xl font-black text-slate-800">
-                                  {auditLogsList.filter(l => l.action !== 'LOGIN_SUCCESS' && l.action !== 'LOGIN_FAILURE').length}
-                                </p>
-                                <p className="text-[10px] text-slate-400">Registry changes with payload diffs</p>
-                              </div>
-                              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-lg shadow-xs">
-                                <Wrench size={22} />
-                              </div>
-                            </div>
-                          </div>
-          
-                          {/* 3. Advanced Filtering Control Bar */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-                            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                <Filter size={14} className="text-[#ff791a]" /> Interactive Filter Dashboard
-                              </h4>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={handleExportAuditExcel}
-                                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-250 text-emerald-700 font-bold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer"
-                                  title="Download Trail in Green Excel Sheet"
-                                >
-                                  <FileSpreadsheet size={13} /> Export to Excel
-                                </button>
-                                <button
-                                  onClick={handleExportAuditPDF}
-                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-250 text-rose-700 font-bold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer"
-                                  title="Download Trail in High-Fidelity PDF Document"
-                                >
-                                  <FileText size={13} /> Export to PDF
-                                </button>
-                              </div>
-                            </div>
-          
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                              {/* Filter 1: Full Payload Search */}
-                              <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Search Registry Event Logs</label>
-                                <div className="relative">
-                                  <input id="audit-search" name="auditSearch"
-                                    type="text"
-                                    value={auditSearch}
-                                    onChange={(e) => setAuditSearch(e.target.value)}
-                                    placeholder="e.g. employeeCode, admin, update..."
-                                    className="w-full pl-8 pr-3 py-2 border border-slate-250 rounded-lg text-xs focus:outline-none focus:border-orange-500 transition"
-                                  />
-                                  <span className="absolute left-2.5 top-2.5 text-slate-400"><Search size={13} /></span>
-                                </div>
-                              </div>
-          
-                              {/* Filter 2: Performing Operator */}
-                              <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Filter Performer</label>
-                                <select id="audit-filter-admin" name="auditFilterAdmin"
-                                  value={auditFilterAdmin}
-                                  onChange={(e) => setAuditFilterAdmin(e.target.value)}
-                                  className="w-full px-3 py-2 border border-slate-250 rounded-lg text-xs bg-white focus:outline-none focus:border-orange-500 transition"
-                                >
-                                  <option value="">All Administrators</option>
-                                  {Array.from(new Set(auditLogsList.map(l => l.username || "System")))
-                                    .filter(Boolean)
-                                    .map((user: string) => (
-                                      <option key={user} value={user}>{user}</option>
-                                    ))
-                                  }
-                                </select>
-                              </div>
-          
-                              {/* Filter 3: Action Type */}
-                              <div>
-                                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Filter Action Category</label>
-                                <select id="audit-filter-action" name="auditFilterAction"
-                                  value={auditFilterAction}
-                                  onChange={(e) => setAuditFilterAction(e.target.value)}
-                                  className="w-full px-3 py-2 border border-slate-250 rounded-lg text-xs bg-white focus:outline-none focus:border-orange-500 transition"
-                                >
-                                  <option value="">All Security Actions</option>
-                                  {Array.from(new Set(auditLogsList.map(l => l.action)))
-                                    .filter(Boolean)
-                                    .map((act: string) => (
-                                      <option key={act} value={act}>{act}</option>
-                                    ))
-                                  }
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-          
-                          {/* 4. Results Database Grid */}
-                          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs text-slate-700 text-left">
-                                <thead className="bg-[#fbfbfb] text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
-                                  <tr>
-                                    <th className="px-6 py-4 font-black">Event ID</th>
-                                    <th className="px-6 py-4 font-black">Date & Time</th>
-                                    <th className="px-6 py-4 font-black">Performer</th>
-                                    <th className="px-6 py-4 font-black">Action Category</th>
-                                    <th className="px-6 py-4 font-black">Task Description</th>
-                                    <th className="px-6 py-4 text-center font-black">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 font-medium">
-                                  {isFetchingAuditLogs ? (
-                                    <tr>
-                                      <td colSpan={6} className="text-center py-10">
-                                        <div className="flex flex-col items-center gap-2">
-                                          <RotateCw className="animate-spin text-orange-500 shrink-0" size={20} />
-                                          <span className="text-xs text-slate-400 font-bold">Querying local secure logs database...</span>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ) : filteredAuditLogs.length === 0 ? (
-                                    <tr>
-                                      <td colSpan={6} className="text-center py-10 text-slate-400 font-bold">
-                                        No security audit events matched active dashboard filters.
-                                      </td>
-                                    </tr>
-                                  ) : (
-                                    filteredAuditLogs.map((log: any) => {
-                                      const isExpanded = expandedLogId === log.id;
-                                      
-                                      // Dynamic Action Badges Colors
-                                      let badgeStyle = "bg-blue-50 text-blue-700 border-blue-100";
-                                      const act = log.action || "";
-                                      if (act.includes("ADD") || act.includes("IMPORT") || act.includes("INVITE")) {
-                                        badgeStyle = "bg-emerald-50 text-emerald-700 border-emerald-100";
-                                      } else if (act.includes("DELETE") || act.includes("SCRUB")) {
-                                        badgeStyle = "bg-rose-50 text-rose-700 border-rose-100";
-                                      } else if (act.includes("UPDATE") || act.includes("SAVE") || act.includes("RENAME")) {
-                                        badgeStyle = "bg-amber-50 text-amber-700 border-amber-100";
-                                      }
-          
-                                      return (
-                                        <React.Fragment key={log.id}>
-                                          <tr className="hover:bg-slate-50/50 transition">
-                                            <td className="px-6 py-4 font-mono font-bold text-slate-400">#{log.id || "N/A"}</td>
-                                            <td className="px-6 py-4 text-slate-500 whitespace-nowrap">{new Date(log.timestamp).toLocaleString()}</td>
-                                            <td className="px-6 py-4 font-bold text-slate-800">{log.username || "System"}</td>
-                                            <td className="px-6 py-4">
-                                              <span className={`px-2 py-0.5 border text-[10px] rounded-full uppercase font-bold ${badgeStyle}`}>
-                                                {act}
-                                              </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-slate-600 whitespace-normal min-w-[360px] max-w-[520px]">
-                                              <p className="text-sm leading-relaxed" title={log.target}>{log.target || "N/A"}</p>
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                              <button
-                                                onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
-                                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded text-[10px] transition cursor-pointer"
-                                              >
-                                                {isExpanded ? "Collapse" : "View Details"}
-                                              </button>
-                                            </td>
-                                          </tr>
-          
-                                          {isExpanded && (
-                                            <tr>
-                                              <td colSpan={6} className="bg-slate-50 px-8 py-4 border-y border-slate-200">
-                                                <div className="space-y-4 animate-fade-in">
-                                                  <div>
-                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 mb-2">
-                                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Plain-Language Task Breakdown
-                                                    </p>
-                                                    <div className="bg-white rounded-lg p-4 border border-slate-200 text-sm text-slate-700 leading-relaxed space-y-1">
-                                                      {formatAuditLogDetails(act, log.details).map((line, idx) =>
-                                                        line ? (
-                                                          <p key={idx} className={line.startsWith("  •") ? "pl-3 text-slate-600" : ""}>
-                                                            {line}
-                                                          </p>
-                                                        ) : (
-                                                          <div key={idx} className="h-2" />
-                                                        )
-                                                      )}
-                                                    </div>
-                                                  </div>
-
-                                                  <div>
-                                                    <div className="flex items-center justify-between mb-2">
-                                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span> Raw Forensic Payload (JSON)
-                                                      </p>
-                                                      <span className="text-[9px] font-mono text-slate-400">Machine-readable schema</span>
-                                                    </div>
-                                                    <div className="bg-[#1e293b] rounded-lg p-4 border border-slate-800 text-slate-100 font-mono text-xs overflow-x-auto shadow-inner max-h-[350px] relative">
-                                                      <pre className="text-left text-orange-200">
-                                                        {JSON.stringify(log.details, null, 2)}
-                                                      </pre>
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                        </React.Fragment>
-                                      );
-                                    })
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-          
-                        </div>
-                      ) : activeSidebarTab === "Salary" ? (
-                        /* --- SALARY CALCULATION SHEET & PERK ALLOCATION --- */
-                        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="salary-calculations-module-view">
-                          {/* 1. Dynamic Premium Advanced Filters Panel */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 text-left">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                              <div>
-                                <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                                  <Filter size={16} className="text-[#f57416]" /> Custom Salary Filters (Advanced)
-                                </h4>
-                                <p className="text-[11px] text-slate-450 mt-0.5">
-                                  Configure targeted custom payroll filters, matching employee demographics, statutory status, and month-wise ledger scopes.
-                                </p>
-                              </div>
-          
-                              <div className="flex flex-wrap items-center gap-3 shrink-0">
-                                {/* Payroll Month Select */}
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">🗓️ Month:</span>
-                                  <select id="salary-month-select" name="selectedMonth"
-                                    value={MONTHS_LIST.includes(selectedMonth) ? selectedMonth : (MONTHS_LIST[0] || selectedMonth)}
-                                    onChange={(e) => setSelectedMonth(normalizeMonthKey(e.target.value))}
-                                    className="px-2.5 py-1 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-orange-500 shadow-sm transition"
-                                  >
-                                    {MONTHS_LIST.map((m) => (
-                                      <option key={m} value={m}>{m}</option>
-                                    ))}
-                                  </select>
-                                </div>
-          
-                                {/* Quick Balance segmented filter */}
-                                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                                  {[
-                                    { id: "all", label: "All Balances" },
-                                    { id: "advances", label: "Advances Only" },
-                                    { id: "penalties", label: "Penalties Only" },
-                                    { id: "perks", label: "Perks Only" }
-                                  ].map((t) => {
-                                    const isSel = salaryFilterType === t.id;
-                                    return (
-                                      <button
-                                        key={t.id}
-                                        type="button"
-                                        onClick={() => setSalaryFilterType(t.id as any)}
-                                        className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
-                                          isSel ? "bg-[#ff791a] text-white shadow-sm" : "text-slate-650 hover:text-slate-900"
-                                        }`}
-                                      >
-                                        {t.label}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-          
-                            {/* Criteria Grid */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-150">
-                              {/* Search query input */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Search Employee</label>
-                                <div className="relative">
-                                  <input id="salary-search-query" name="salarySearchQuery"
-                                    type="text"
-                                    value={salarySearchQuery}
-                                    onChange={(e) => setSalarySearchQuery(e.target.value)}
-                                    placeholder="Search code or name..."
-                                    className="w-full pl-8 pr-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                  <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
-                                </div>
-                              </div>
-          
-                              {/* Location Filter */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Branch/Work Location</label>
-                                <select id="salary-location-filter" name="salaryLocationFilter"
-                                  value={salaryLocationFilter}
-                                  onChange={(e) => setSalaryLocationFilter(e.target.value)}
-                                  className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                >
-                                  <option value="All">All Locations</option>
-                                  {salaryUniqueLocations.map((loc) => (
-                                    <option key={loc} value={loc}>{loc}</option>
-                                  ))}
-                                </select>
-                              </div>
-          
-                              {/* PF Joining Date Range */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">PF Joining Date Range</label>
-                                <div className="grid grid-cols-2 gap-1 items-center">
-                                  <input id="salary-join-start-filter" name="salaryJoinStartFilter"
-                                    type="date"
-                                    value={salaryJoinStartFilter}
-                                    onChange={(e) => setSalaryJoinStartFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                  <input id="salary-join-end-filter" name="salaryJoinEndFilter"
-                                    type="date"
-                                    value={salaryJoinEndFilter}
-                                    onChange={(e) => setSalaryJoinEndFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                </div>
-                              </div>
-          
-                              {/* Exit Date Range */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Exit/Leaving Date Range</label>
-                                <div className="grid grid-cols-2 gap-1 items-center">
-                                  <input id="salary-exit-start-filter" name="salaryExitStartFilter"
-                                    type="date"
-                                    value={salaryExitStartFilter}
-                                    onChange={(e) => setSalaryExitStartFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                  <input id="salary-exit-end-filter" name="salaryExitEndFilter"
-                                    type="date"
-                                    value={salaryExitEndFilter}
-                                    onChange={(e) => setSalaryExitEndFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                </div>
-                              </div>
-          
-                              {/* Monthly Gross Salary Range */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Monthly Gross Salary (Rs.)</label>
-                                <div className="grid grid-cols-2 gap-1 items-center">
-                                  <input id="salary-min-salary-filter" name="salaryMinSalaryFilter"
-                                    type="number"
-                                    placeholder="Min"
-                                    value={salaryMinSalaryFilter}
-                                    onChange={(e) => setSalaryMinSalaryFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                  <input id="salary-max-salary-filter" name="salaryMaxSalaryFilter"
-                                    type="number"
-                                    placeholder="Max"
-                                    value={salaryMaxSalaryFilter}
-                                    onChange={(e) => setSalaryMaxSalaryFilter(e.target.value)}
-                                    className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                </div>
-                              </div>
-          
-                              {/* Gender Filter */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gender</label>
-                                <select id="salary-gender-filter" name="salaryGenderFilter"
-                                  value={salaryGenderFilter}
-                                  onChange={(e) => setSalaryGenderFilter(e.target.value)}
-                                  className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                >
-                                  <option value="All">All Genders</option>
-                                  <option value="Male">Male</option>
-                                  <option value="Female">Female</option>
-                                  <option value="Other">Other</option>
-                                </select>
-                              </div>
-          
-                              {/* Marital Status Filter */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Marital Status</label>
-                                <select id="salary-marital-filter" name="salaryMaritalFilter"
-                                  value={salaryMaritalFilter}
-                                  onChange={(e) => setSalaryMaritalFilter(e.target.value)}
-                                  className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                >
-                                  <option value="All">All Statuses</option>
-                                  <option value="Single">Single</option>
-                                  <option value="Married">Married</option>
-                                  <option value="Divorced">Divorced</option>
-                                  <option value="Widowed">Widowed</option>
-                                </select>
-                              </div>
-          
-                              {/* ESIC Coverage Filter */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">ESIC Insured Status</label>
-                                <select id="salary-esic-filter" name="salaryEsicFilter"
-                                  value={salaryEsicFilter}
-                                  onChange={(e) => setSalaryEsicFilter(e.target.value)}
-                                  className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                >
-                                  <option value="All">All Coverage</option>
-                                  <option value="Yes">Yes (Insured)</option>
-                                  <option value="No">No (Exempt/Excluded)</option>
-                                </select>
-                              </div>
-          
-                              {/* Skill Category Filter */}
-                              <div className="space-y-1.5 relative" id="salary-skill-multiselect-container">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Skill Category</label>
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsSalarySkillDropdownOpen(!isSalarySkillDropdownOpen);
-                                      setIsSalaryRoleDropdownOpen(false);
-                                    }}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                  >
-                                    <span className="truncate">
-                                      {salarySkillFilters.length === 0 
-                                        ? "All Categories" 
-                                        : `${salarySkillFilters.length} Selected`}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400">▼</span>
-                                  </button>
-                                  
-                                  {isSalarySkillDropdownOpen && (
-                                    <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                      <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                        <span className="text-[10px] text-slate-400 font-bold">Categories</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => setSalarySkillFilters([])}
-                                          className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                        >
-                                          Clear All
-                                        </button>
-                                      </div>
-                                      {["Highly Skilled", "Skilled", "Semi Skilled", "Unskilled"].map(cat => {
-                                        const isChecked = salarySkillFilters.includes(cat);
-                                        const toggle = () => {
-                                          if (isChecked) {
-                                            setSalarySkillFilters(prev => prev.filter(c => c !== cat));
-                                          } else {
-                                            setSalarySkillFilters(prev => [...prev, cat]);
-                                          }
-                                        };
-                                        return (
-                                          <label key={cat} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                            <input id="checkbox-field-5587" name="checkbox_5587"
-                                              type="checkbox"
-                                              checked={isChecked}
-                                              onChange={toggle}
-                                              className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                            />
-                                            <span className="font-medium">{cat}</span>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-          
-                              {/* Job Role Filter */}
-                              <div className="space-y-1.5 relative" id="salary-role-multiselect-container">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Job Role</label>
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsSalaryRoleDropdownOpen(!isSalaryRoleDropdownOpen);
-                                      setIsSalarySkillDropdownOpen(false);
-                                    }}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                  >
-                                    <span className="truncate">
-                                      {salaryRoleFilters.length === 0 
-                                        ? "All Roles" 
-                                        : `${salaryRoleFilters.length} Selected`}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400">▼</span>
-                                  </button>
-                                  
-                                  {isSalaryRoleDropdownOpen && (
-                                    <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-56 overflow-y-auto">
-                                      <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                        <span className="text-[10px] text-slate-400 font-bold">Roles</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => setSalaryRoleFilters([])}
-                                          className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                        >
-                                          Clear All
-                                        </button>
-                                      </div>
-                                      {customRoles.map(role => {
-                                        const isChecked = salaryRoleFilters.includes(role);
-                                        const toggle = () => {
-                                          if (isChecked) {
-                                            setSalaryRoleFilters(prev => prev.filter(r => r !== role));
-                                          } else {
-                                            setSalaryRoleFilters(prev => [...prev, role]);
-                                          }
-                                        };
-                                        return (
-                                          <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                            <input id="checkbox-field-5645" name="checkbox_5645"
-                                              type="checkbox"
-                                              checked={isChecked}
-                                              onChange={toggle}
-                                              className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                            />
-                                            <span className="font-medium">{role}</span>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-          
-                              {/* Payment Status Filter */}
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Payment Status</label>
-                                <select id="salary-payment-status-filter" name="salaryPaymentStatusFilter"
-                                  value={salaryPaymentStatusFilter}
-                                  onChange={(e) => setSalaryPaymentStatusFilter(e.target.value as "All" | "Unpaid" | "Paid" | "Hold")}
-                                  className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                >
-                                  <option value="All">All Statuses</option>
-                                  <option value="Unpaid">Unpaid</option>
-                                  <option value="Paid">Paid</option>
-                                  <option value="Hold">Hold</option>
-                                </select>
-                              </div>
-          
-                              {/* Action Result / Matched Employees Box */}
-                              <div className="col-span-1 sm:col-span-2 md:col-span-4 flex justify-between items-center bg-[#f57416]/10 border border-[#f57416]/20 rounded-xl p-3 mt-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-2.5 h-2.5 bg-[#f57416] rounded-full animate-pulse"></span>
-                                  <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">Active Criteria Applied</span>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase block">Matched Personnel</span>
-                                  <span className="text-sm font-black text-[#f57416]">{filteredSalaryEmployees.length} records</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-          
-                          {/* 2. Summary Dashboard Metrics (Reactive to Active Month & Filters) */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="payroll-overview-bento">
-                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-orange-50 text-[#ff791a] flex items-center justify-center text-lg shadow-xs shrink-0">
-                                💰
-                              </div>
-                              <div className="min-w-0 flex-1 text-left">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Gross Payroll</span>
-                                <span className="text-sm font-extrabold text-slate-800 block truncate mt-0.5">
-                                  ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Gross Salary (Monthly)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
-                                </span>
-                              </div>
-                            </div>
-          
-                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg shadow-xs shrink-0">
-                                🏦
-                              </div>
-                              <div className="min-w-0 flex-1 text-left">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Net Payable</span>
-                                <span className="text-sm font-extrabold text-emerald-700 block truncate mt-0.5">
-                                  ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Net Payable", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
-                                </span>
-                              </div>
-                            </div>
-          
-                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center text-lg shadow-xs shrink-0">
-                                📉
-                              </div>
-                              <div className="min-w-0 flex-1 text-left">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Deductions ({selectedMonth})</span>
-                                <span className="text-sm font-extrabold text-rose-700 block truncate mt-0.5">
-                                  ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Total Deductions", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
-                                </span>
-                              </div>
-                            </div>
-          
-                            <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg shadow-xs shrink-0">
-                                🏢
-                              </div>
-                              <div className="min-w-0 flex-1 text-left">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Employer Liability</span>
-                                <span className="text-sm font-extrabold text-indigo-700 block truncate mt-0.5">
-                                  ₹{filteredSalaryEmployees.reduce((sum, e) => {
-                                    const erPf = Number(getSalaryColumnValue(e, "Employer PF (13%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0;
-                                    const erEsic = Number(getSalaryColumnValue(e, "Employer ESIC (3.25%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0;
-                                    return sum + erPf + erEsic;
-                                  }, 0).toLocaleString("en-IN")}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-          
-                          {/* 3. Scrollable Payroll Sheet Table & Action Buttons */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col space-y-4">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4 text-left">
-                              <div>
-                                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                  Payroll Calculation Sheet — {selectedMonth}
-                                </h4>
-                                <p className="text-[11px] text-slate-400 mt-0.5">
-                                  Live computations based on active filters ({filteredSalaryEmployees.length} shown). Double-click or select perks to edit values dynamically.
-                                </p>
-                                {selectedSalaryEmployeeIds.length > 0 && (
-                                  <div className="flex items-center gap-2 mt-1.5 animate-fade-in">
-                                    <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200/50 shadow-2xs">
-                                      {selectedSalaryEmployeeIds.length} employee{selectedSalaryEmployeeIds.length > 1 ? 's' : ''} selected
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedSalaryEmployeeIds([])}
-                                      className="text-[10px] font-extrabold text-slate-400 hover:text-slate-600 underline cursor-pointer transition uppercase"
-                                    >
-                                      Clear Selection
-                                    </button>
-          
-                                    <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200/60 pl-3">
-                                      <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Bulk Status:</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleBulkUpdatePaymentStatus("Paid")}
-                                        disabled={!userPermissions.salary?.edit}
-                                        className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
-                                      >
-                                        Mark Paid
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleBulkUpdatePaymentStatus("Hold")}
-                                        disabled={!userPermissions.salary?.edit}
-                                        className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
-                                      >
-                                        Hold Salary
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleBulkUpdatePaymentStatus("Unpaid")}
-                                        disabled={!userPermissions.salary?.edit}
-                                        className="px-2 py-0.5 bg-slate-550 hover:bg-slate-600 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
-                                      >
-                                        Mark Unpaid
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const dataToDownload = selectedSalaryEmployeeIds.length > 0
-                                      ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
-                                      : filteredSalaryEmployees;
-                                    const headers = [
-                                      "Employee Code",
-                                      "Employee Name",
-                                      "Total Salary",
-                                      "Gross Salary (Monthly)",
-                                      "Employer PF (13%)",
-                                      "Employer ESIC (3.25%)",
-                                      "Employee PF (12%)",
-                                      "Employee ESIC (0.75%)",
-                                      "Professional Tax (PT)",
-                                      "Advance Bal. (" + selectedMonth + ")",
-                                      "Uniform Bal. (" + selectedMonth + ")",
-                                      "Penalty Bal. (" + selectedMonth + ")",
-                                      "Net Salary",
-                                      "Total Deductions",
-                                      "Food Perk",
-                                      "Accommodation Perk",
-                                      "Conveyance Perk",
-                                      "Net Payable",
-                                      "Payment Status"
-                                    ];
-                                    const rows = dataToDownload.map(e => {
-                                      const monthData = attendanceDb[selectedMonth] || {};
-                                      const empData = monthData[e.id] || {};
-                                      const daysInMonth = getDaysInSelectedMonth(selectedMonth);
-                                      let presents = 0;
-                                      for (let i = 1; i <= daysInMonth; i++) {
-                                        if (isEmployeeExitedOnDayStatic(e, selectedMonth, i)) {
-                                          continue;
-                                        }
-                                        if (empData[i] === "P") presents++;
-                                      }
-          
-                                      const rawGross = safeNumber(e.grossSalary);
-                                      const rawBasic = safeNumber(e.basicSalary);
-                                      const gross = prorateSalaryByAttendance(rawGross, daysInMonth, presents, empData);
-                                      const basic = prorateSalaryByAttendance(rawBasic, daysInMonth, presents, empData);
-          
-                                      const isLocCompliant = e.location ? !!locationCompliance[e.location] : false;
-                                      const isEmpCompliant = e.complianceEnabled !== false;
-                                      const isCompliant = isLocCompliant && isEmpCompliant;
-          
-                                      const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
-                                        mode: e.pfCalculationMode,
-                                        isCompliant,
-                                      });
-                                      const isEsicCovered = isEmployeeEsicCovered(gross, esicEligibilityLimit, isCompliant, e.esic);
-                                      const erEsic = isEsicCovered ? (gross * 0.0325) : 0;
-                                      const empEsic = isEsicCovered ? (gross * 0.0075) : 0;
-                                      const pt = calculateProfessionalTax(gross, {
-                                        isCompliant,
-                                        locationPtAmount: resolveLocationPtAmount(e.location, locationPtAmounts),
-                                      });
-                                      
-                                      const ledger = e.monthlyLedger?.[selectedMonth];
-                                      const adv = ledger ? safeNumber(ledger.advance) : 0;
-                                      const pen = ledger ? safeNumber(ledger.penalty) : 0;
-                                      const uniform = ledger ? safeNumber(ledger.uniform) : 0;
-                                      
-                                      const food = ledger ? safeNumber(ledger.foodPerk) : 0;
-                                      const acc = ledger ? safeNumber(ledger.accommodationPerk) : 0;
-                                      const conv = ledger ? safeNumber(ledger.conveyancePerk) : 0;
-                                      
-                                      const netSalaryVal = safeNumber(gross) - safeNumber(empPf) - safeNumber(empEsic) - safeNumber(pt);
-                                      const totalDeductionsVal = safeNumber(empPf) + safeNumber(empEsic) + safeNumber(pt) + safeNumber(adv) + safeNumber(pen) + safeNumber(uniform);
-                                      const netPayableVal = safeNumber(netSalaryVal) - safeNumber(adv) - safeNumber(pen) - safeNumber(uniform) + safeNumber(food) + safeNumber(acc) + safeNumber(conv);
-                                      return [
-                                        e.employeeCode,
-                                        e.nameAsPerAadharColumn || e.nameAsPerAadhar,
-                                        rawGross,
-                                        gross,
-                                        isCompliant ? Math.round(erPf) : "",
-                                        isCompliant ? Math.round(erEsic) : "",
-                                        isCompliant ? Math.round(empPf) : "",
-                                        isCompliant ? Math.round(empEsic) : "",
-                                        isCompliant ? pt : "",
-                                        adv,
-                                        uniform,
-                                        pen,
-                                        Math.round(netSalaryVal),
-                                        Math.round(totalDeductionsVal),
-                                        food,
-                                        acc,
-                                        conv,
-                                        Math.round(Math.max(0, netPayableVal)),
-                                        ledger?.paymentStatus || "Unpaid"
-                                      ];
-                                    });
-                                    const csvContent = "data:text/csv;charset=utf-8," 
-                                      + [headers.map(h => quoteCSVValue(h)).join(","), ...rows.map(r => r.map(c => quoteCSVValue(c)).join(","))].join("\n");
-                                    const encodedUri = encodeURI(csvContent);
-                                    const link = document.createElement("a");
-                                    link.setAttribute("href", encodedUri);
-                                    link.setAttribute("download", `FlexHRM_Salary_${selectedMonth.replace(/\s+/g, '_')}_Sheet_${new Date().toISOString().split('T')[0]}.csv`);
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
-                                    triggerSuccess(`Payroll sheet for ${selectedMonth} exported successfully.`);
-          
-                                    fetch("/api/audit-logs", {
-                                      method: "POST",
-                                      headers: { "Content-Type": "application/json" },
-                                      body: JSON.stringify({
-                                        action: "DOWNLOAD_SALARY_CSV",
-                                        target: `Salary CSV Sheet: Downloaded payroll calculations CSV sheet for ${selectedMonth} containing details of ${dataToDownload.length} employees.`,
-                                        details: { month: selectedMonth, recordCount: dataToDownload.length, format: "CSV" }
-                                      })
-                                    }).then(() => fetchAuditLogs()).catch(err => console.error("Audit log error:", err));
-                                  }}
-                                  className="px-3.5 py-1.5 bg-[#f57416] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
-                                >
-                                  <FileSpreadsheet size={13} className="stroke-[2.5]" /> Export CSV {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}
-                                </button>
-          
-                                <button
-                                  type="button"
-                                  disabled={filteredSalaryEmployees.length === 0 || selectedSalaryColumns.length === 0}
-                                  onClick={() => {
-                                    const dataToDownload = selectedSalaryEmployeeIds.length > 0
-                                      ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
-                                      : filteredSalaryEmployees;
-                                    downloadSalaryExcel(dataToDownload, selectedSalaryColumns, salaryLocationFilter, selectedMonth);
-                                  }}
-                                  className="px-3.5 py-1.5 bg-[#107c41] hover:bg-[#0d6233] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
-                                >
-                                  <FileSpreadsheet size={13} className="stroke-[2.5]" /> Export Excel {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}
-                                </button>
-          
-                                <button
-                                  type="button"
-                                  disabled={filteredSalaryEmployees.length === 0 || selectedSalaryColumns.length === 0}
-                                  onClick={() => {
-                                    const dataToDownload = selectedSalaryEmployeeIds.length > 0
-                                      ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
-                                      : filteredSalaryEmployees;
-                                    downloadSalaryPDF(dataToDownload, selectedSalaryColumns, salaryLocationFilter, selectedMonth);
-                                  }}
-                                  className="px-3.5 py-1.5 bg-[#d62222] hover:bg-[#b51c1c] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
-                                >
-                                  <FileText size={13} className="stroke-[2.5]" /> Export PDF {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}
-                                </button>
-          
-                                <button
-                                  type="button"
-                                  disabled={filteredSalaryEmployees.length === 0 || isExportingBulkPay}
-                                  onClick={() => {
-                                    const dataToDownload = selectedSalaryEmployeeIds.length > 0
-                                      ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
-                                      : filteredSalaryEmployees;
-                                    handleExportAxisBulkPay(dataToDownload.map((e) => e.id));
-                                  }}
-                                  className="px-3.5 py-1.5 bg-[#7c3aed] hover:bg-[#6d28d9] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
-                                  title="Generate, download, and save Axis Bank Bulk Pay file (Excel 97–2003)"
-                                >
-                                  {isExportingBulkPay ? (
-                                    <><RotateCw size={13} className="stroke-[2.5] animate-spin" /> Saving...</>
-                                  ) : (
-                                    <><IndianRupee size={13} className="stroke-[2.5]" /> Bulk Pay {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}</>
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-          
-                            {lastSavedBulkPay && activeSidebarTab === "Salary" && (
-                              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
-                                <div>
-                                  <p className="text-xs font-black text-violet-800 uppercase tracking-wider flex items-center gap-1.5">
-                                    <CheckCircle2 size={14} /> Bulk Pay Saved
-                                  </p>
-                                  <p className="text-[11px] text-violet-700 mt-1 font-mono truncate" title={lastSavedBulkPay.filename}>
-                                    {lastSavedBulkPay.filename}
-                                  </p>
-                                  <p className="text-[10px] text-violet-500 mt-0.5">
-                                    {lastSavedBulkPay.month} {lastSavedBulkPay.year} · {lastSavedBulkPay.recordCount} records · ₹{Number(lastSavedBulkPay.totalAmount || 0).toLocaleString("en-IN")}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadBulkPayArchive(lastSavedBulkPay.id, lastSavedBulkPay.filename)}
-                                    className="px-3 py-1.5 bg-[#7c3aed] hover:bg-[#6d28d9] text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
-                                  >
-                                    <Download size={11} />
-                                    Re-download
-                                    <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-black leading-none">
-                                      {lastSavedBulkPay.downloadCount ?? 0}
-                                    </span>
-                                  </button>
-                                  {userPermissions.salary?.edit && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteBulkPayArchive(lastSavedBulkPay.id)}
-                                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[10px] font-bold cursor-pointer"
-                                    >
-                                      Delete
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveSidebarTab("Saved Bulk Pay")}
-                                    className="px-3 py-1.5 bg-white hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-lg text-[10px] font-bold cursor-pointer"
-                                  >
-                                    View All
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-          
-                            {/* Calculation Columns & Templates Configuration Panel */}
-                            <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-4 text-left animate-fade-in">
-                              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/60 pb-3">
-                                <div>
-                                  <h5 className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Wrench size={13} className="text-[#f57416]" /> Configure Calculations Columns & Templates
-                                  </h5>
-                                  <p className="text-[10px] text-slate-400 mt-0.5">
-                                    Customize columns displayed in the calculation sheet and export documents. Save layouts as custom templates for future use.
-                                  </p>
-                                </div>
-          
-                                {/* Template Management (Unified) */}
-                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shrink-0 max-w-full">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider whitespace-nowrap">📋 Template:</span>
-                                    <select id="active-salary-template-name" name="activeSalaryTemplateName"
-                                      value={activeSalaryTemplateName}
-                                      onChange={(e) => handleLoadSalaryTemplate(e.target.value)}
-                                      className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-bold text-slate-800 focus:outline-none min-w-[110px] max-w-[140px] truncate"
-                                    >
-                                      <option value="">-- Layout --</option>
-                                      {savedSalaryTemplates.map((t: any) => (
-                                        <option key={t.name} value={t.name}>{t.name}</option>
-                                      ))}
-                                    </select>
-                                    {activeSalaryTemplateName && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteSalaryTemplate(activeSalaryTemplateName)}
-                                        className="text-red-500 hover:text-red-700 font-extrabold text-[9px] hover:bg-red-50 px-1 py-0.5 rounded cursor-pointer transition uppercase"
-                                        title="Delete template"
-                                      >
-                                        ✕
-                                      </button>
-                                    )}
-                                  </div>
-          
-                                  <span className="hidden sm:inline text-slate-350">|</span>
-          
-                                  <form onSubmit={handleSaveSalaryTemplate} className="flex items-center gap-1">
-                                    <input id="new-salary-template-name" name="newSalaryTemplateName"
-                                      type="text"
-                                      placeholder="Save layout name..."
-                                      value={newSalaryTemplateName}
-                                      onChange={(e) => setNewSalaryTemplateName(e.target.value)}
-                                      className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-medium text-slate-700 focus:outline-none focus:border-[#f57416] w-[110px]"
-                                    />
-                                    <button
-                                      type="submit"
-                                      disabled={!newSalaryTemplateName.trim()}
-                                      className="px-2 py-0.5 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white font-extrabold text-[9px] uppercase tracking-wider rounded transition cursor-pointer shrink-0"
-                                    >
-                                      Save
-                                    </button>
-                                  </form>
-                                </div>
-                              </div>
-          
-                              {/* Dynamic Bento Box Categories */}
-                              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
-                                {[
-                                  {
-                                    name: "Details",
-                                    color: "bg-slate-100/75 text-slate-750 border-slate-200",
-                                    headers: ["Employee Code", "Employee Name", "Skill Category", "Job Role", "Present Days", "Payment Status"]
-                                  },
-                                  {
-                                    name: "Gross Pay",
-                                    color: "bg-slate-100/75 text-slate-750 border-slate-200",
-                                    headers: ["Total Salary", "Gross Salary (Monthly)", "Basic Salary"]
-                                  },
-                                  {
-                                    name: "Employer Liability",
-                                    color: "bg-blue-50/80 text-blue-700 border-blue-200",
-                                    headers: ["Employer PF (13%)", "Employer ESIC (3.25%)"]
-                                  },
-                                  {
-                                    name: "Employee Deductions",
-                                    color: "bg-rose-50/80 text-rose-700 border-rose-200",
-                                    headers: ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"]
-                                  },
-                                  {
-                                    name: "Net Salary",
-                                    color: "bg-amber-50/80 text-amber-700 border-amber-200",
-                                    headers: ["Net Salary"]
-                                  },
-                                  {
-                                    name: "Total Deductions",
-                                    color: "bg-rose-100/60 text-rose-800 border-rose-200",
-                                    headers: ["Total Deductions"]
-                                  },
-                                  {
-                                    name: "Extra Perks",
-                                    color: "bg-indigo-50/80 text-indigo-700 border-indigo-200",
-                                    headers: ["Food Perk", "Accommodation Perk", "Conveyance Perk"]
-                                  },
-                                  {
-                                    name: "Net Payable",
-                                    color: "bg-emerald-50/80 text-emerald-800 border-emerald-250",
-                                    headers: ["Net Payable"]
-                                  }
-                                ].map(group => {
-                                  const groupCheckedCount = group.headers.filter(h => selectedSalaryColumns.includes(h)).length;
-                                  const isAllGroupChecked = groupCheckedCount === group.headers.length;
-                                  const isSomeGroupChecked = groupCheckedCount > 0 && !isAllGroupChecked;
-          
-                                  const toggleGroup = () => {
-                                    if (isAllGroupChecked) {
-                                      setSelectedSalaryColumns(prev => prev.filter(h => !group.headers.includes(h)));
-                                    } else {
-                                      setSelectedSalaryColumns(prev => Array.from(new Set([...prev, ...group.headers])));
-                                    }
-                                  };
-          
-                                  return (
-                                    <div key={group.name} className="border border-slate-200 rounded-lg overflow-hidden bg-white flex flex-col text-left text-[11px] shadow-2xs">
-                                      {/* Group Header Checkbox */}
-                                      <div className={`px-2 py-1 border-b border-inherit flex items-center justify-between font-bold ${group.color}`}>
-                                        <label className="flex items-center gap-1.5 min-w-0 cursor-pointer select-none w-full">
-                                          <input id="checkbox-field-6083" name="checkbox_6083"
-                                            type="checkbox"
-                                            ref={el => {
-                                              if (el) el.indeterminate = isSomeGroupChecked;
-                                            }}
-                                            checked={isAllGroupChecked}
-                                            onChange={toggleGroup}
-                                            className="w-3 h-3 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
-                                          />
-                                          <span className="text-[9px] font-black uppercase tracking-wider truncate">{group.name}</span>
-                                        </label>
-                                      </div>
-          
-                                      {/* Group Sub-headers (Children Checkboxes) */}
-                                      <div className="p-2 space-y-1 grow bg-white">
-                                        {group.headers.map(header => {
-                                          const isChecked = selectedSalaryColumns.includes(header);
-                                          const toggleHeader = () => {
-                                            if (isChecked) {
-                                              setSelectedSalaryColumns(prev => prev.filter(h => h !== header));
-                                            } else {
-                                              setSelectedSalaryColumns(prev => [...prev, header]);
-                                            }
-                                          };
-                                          
-                                          // Shorten names for clean fit inside small columns
-                                          let displayName = header;
-                                          if (header === "Skill Category") displayName = "Skill Cat.";
-                                          else if (header === "Job Role") displayName = "Role";
-                                          else if (header === "Total Salary") displayName = "Total Sal";
-                                          else if (header === "Gross Salary (Monthly)") displayName = "Gross";
-                                          else if (header === "Basic Salary") displayName = "Basic";
-                                          else if (header === "Employer PF (13%)") displayName = "PF (13%)";
-                                          else if (header === "Employer ESIC (3.25%)") displayName = "ESIC (3.25%)";
-                                          else if (header === "Employee PF (12%)") displayName = "PF (12%)";
-                                          else if (header === "Employee ESIC (0.75%)") displayName = "ESIC (0.75%)";
-                                          else if (header === "Professional Tax (PT)") displayName = "PT";
-                                          else if (header === "Advance Balance") displayName = "Advance";
-                                          else if (header === "Uniform Deductions") displayName = "Uniform";
-                                          else if (header === "Penalty Balance") displayName = "Penalty";
-                                          else if (header === "Food Perk") displayName = "Food";
-                                          else if (header === "Accommodation Perk") displayName = "Accom.";
-                                          else if (header === "Conveyance Perk") displayName = "Conv.";
-                                          else if (header === "Payment Status") displayName = "Status";
-                                          
-                                          return (
-                                            <label key={header} className="flex items-start gap-1.5 text-[10px] text-slate-650 hover:text-slate-900 cursor-pointer select-none">
-                                              <input id="checkbox-field-6130" name="checkbox_6130"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggleHeader}
-                                                className="w-3 h-3 mt-0.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-semibold text-slate-700 leading-tight break-words">{displayName}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-          
-                            {/* Responsive Scrollable Table Container */}
-                            <div className="overflow-x-auto border border-slate-200 rounded-lg max-h-[480px] overflow-y-auto shadow-sm" id="salary-sheet-scroller">
-                              <table className="w-full text-xs text-left border-collapse bg-white table-fixed">
-                                <colgroup>
-                                  <col className="w-[48px]" />
-                                  {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                    <col className="w-[200px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Skill Category") && (
-                                    <col className="w-[120px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Job Role") && (
-                                    <col className="w-[120px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Present Days") && (
-                                    <col className="w-[85px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Total Salary") && (
-                                    <col className="w-[125px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                    <col className="w-[125px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Basic Salary") && (
-                                    <col className="w-[125px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Employer PF (13%)") && (
-                                    <col className="w-[110px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                    <col className="w-[110px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Employee PF (12%)") && (
-                                    <col className="w-[110px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                    <col className="w-[110px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Professional Tax (PT)") && (
-                                    <col className="w-[95px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Advance Balance") && (
-                                    <col className="w-[100px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Uniform Deductions") && (
-                                    <col className="w-[100px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Penalty Balance") && (
-                                    <col className="w-[100px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Net Salary") && (
-                                    <col className="w-[125px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Total Deductions") && (
-                                    <col className="w-[125px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Food Perk") && (
-                                    <col className="w-[105px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Accommodation Perk") && (
-                                    <col className="w-[105px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Conveyance Perk") && (
-                                    <col className="w-[105px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Net Payable") && (
-                                    <col className="w-[140px]" />
-                                  )}
-                                  {selectedSalaryColumns.includes("Payment Status") && (
-                                    <col className="w-[110px]" />
-                                  )}
-                                </colgroup>
-                                <thead className="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200">
-                                  <tr>
-                                    <th rowSpan={2} className="sticky top-0 z-30 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] align-middle">
-                                      <input
-                                        id="salary-select-all"
-                                        name="salarySelectAll"
-                                        type="checkbox"
-                                        checked={filteredSalaryEmployees.length > 0 && selectedSalaryEmployeeIds.length === filteredSalaryEmployees.length}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setSelectedSalaryEmployeeIds(filteredSalaryEmployees.map(emp => emp.id));
-                                          } else {
-                                            setSelectedSalaryEmployeeIds([]);
-                                          }
-                                        }}
-                                        className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
-                                        title="Select All Employees"
-                                      />
-                                    </th>
-                                    {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100">Employee Details</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Skill Category") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Job Role") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Job Role</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Present Days") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Days</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Total Salary") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Total Salary</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Gross Pay</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Basic Salary") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Basic Pay</th>
-                                    )}
-                                    {(() => {
-                                      const count = ["Employer PF (13%)", "Employer ESIC (3.25%)"].filter(c => selectedSalaryColumns.includes(c)).length;
-                                      return count > 0 ? (
-                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-blue-50 text-blue-700 text-center" colSpan={count}>Employer Liability</th>
-                                      ) : null;
-                                    })()}
-                                    {(() => {
-                                      const count = ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"].filter(c => selectedSalaryColumns.includes(c)).length;
-                                      return count > 0 ? (
-                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
-                                      ) : null;
-                                    })()}
-                                    {selectedSalaryColumns.includes("Net Salary") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Total Deductions") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-800 text-center">Total Deductions</th>
-                                    )}
-                                    {(() => {
-                                      const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => selectedSalaryColumns.includes(c)).length;
-                                      return count > 0 ? (
-                                        <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks (Click to Edit)</th>
-                                      ) : null;
-                                    })()}
-                                    {selectedSalaryColumns.includes("Net Payable") && (
-                                      <th className="sticky top-0 z-20 px-3 py-2.5 bg-emerald-50 text-emerald-800 text-right">Net Payable</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Payment Status") && (
-                                      <th rowSpan={2} className="sticky top-0 z-30 px-3 py-2.5 border-l border-slate-200 bg-violet-50 text-violet-900 text-center font-bold align-middle">Status</th>
-                                    )}
-                                  </tr>
-                                  <tr className="border-t border-slate-200">
-                                    {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold">Code & Name</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Skill Category") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Skill Category</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Job Role") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Job Role</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Present Days") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Present Days</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Total Salary") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Total Salary (Full Month)</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Gross (Monthly)</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Basic Salary") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Basic Salary</th>
-                                    )}
-                                    
-                                    {selectedSalaryColumns.includes("Employer PF (13%)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">PF</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">ESIC</th>
-                                    )}
-                                    
-                                    {selectedSalaryColumns.includes("Employee PF (12%)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PF</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">ESIC</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Professional Tax (PT)") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PT</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Advance Balance") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Adv</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Uniform Deductions") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Uniform</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Penalty Balance") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Pen</th>
-                                    )}
-                                    
-                                    {selectedSalaryColumns.includes("Net Salary") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-800 text-center font-bold">Net Salary</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Total Deductions") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-900 text-center font-bold">Total Ded.</th>
-                                    )}
-                                    
-                                    {selectedSalaryColumns.includes("Food Perk") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Food</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Accommodation Perk") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Accom</th>
-                                    )}
-                                    {selectedSalaryColumns.includes("Conveyance Perk") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Conv</th>
-                                    )}
-                                    
-                                    {selectedSalaryColumns.includes("Net Payable") && (
-                                      <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-emerald-50 text-emerald-800 text-right font-black">Net Payable</th>
-                                    )}
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-150">
-                                  {filteredSalaryEmployees.length === 0 ? (
-                                    <tr>
-                                      <td 
-                                        colSpan={
-                                          1 +
-                                          ((selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) ? 1 : 0) +
-                                          ["Skill Category", "Job Role", "Present Days", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => selectedSalaryColumns.includes(c)).length
-                                        } 
-                                        className="p-8 text-center text-xs text-slate-400 font-medium"
-                                      >
-                                        No employee calculation data available matching filters.
-                                      </td>
-                                    </tr>
-                                  ) : (
-                                    filteredSalaryEmployees.map((emp) => {
-                                      const monthData = attendanceDb[selectedMonth] || {};
-                                      const empData = monthData[emp.id] || {};
-                                      const daysInMonth = getDaysInSelectedMonth(selectedMonth);
-                                      let presents = 0;
-                                      for (let i = 1; i <= daysInMonth; i++) {
-                                        if (isEmployeeExitedOnDayStatic(emp, selectedMonth, i)) {
-                                          continue;
-                                        }
-                                        if (empData[i] === "P") presents++;
-                                      }
-          
-                                       const rawGross = safeNumber(emp.grossSalary);
-                                       const rawBasic = safeNumber(emp.basicSalary);
-          
-                                       const gross = prorateSalaryByAttendance(rawGross, daysInMonth, presents, empData);
-                                       const basic = prorateSalaryByAttendance(rawBasic, daysInMonth, presents, empData);
-          
-                                       const isLocCompliant = emp.location ? !!locationCompliance[emp.location] : false;
-                                       const isEmpCompliant = emp.complianceEnabled !== false;
-                                       const isCompliant = isLocCompliant && isEmpCompliant;
-          
-                                       const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
-                                         mode: emp.pfCalculationMode,
-                                         isCompliant,
-                                       });
-                                       const isEsicCovered = isEmployeeEsicCovered(gross, esicEligibilityLimit, isCompliant, emp.esic);
-                                       const erEsic = isEsicCovered ? (gross * 0.0325) : 0;
-                                       const ledger = emp.monthlyLedger?.[selectedMonth];
-                                       const adv = ledger ? safeNumber(ledger.advance) : 0;
-                                       const pen = ledger ? safeNumber(ledger.penalty) : 0;
-                                       const uniform = ledger ? safeNumber(ledger.uniform) : 0;
-                                       
-                                       const food = ledger ? safeNumber(ledger.foodPerk) : 0;
-                                       const acc = ledger ? safeNumber(ledger.accommodationPerk) : 0;
-                                       const conv = ledger ? safeNumber(ledger.conveyancePerk) : 0;
-                                       
-                                       const empEsic = isEsicCovered ? (gross * 0.0075) : 0;
-                                       const pt = calculateProfessionalTax(gross, {
-                                         isCompliant,
-                                         locationPtAmount: resolveLocationPtAmount(emp.location, locationPtAmounts),
-                                       });
-                                       
-                                       const netSalaryValue = safeNumber(gross) - safeNumber(empPf) - safeNumber(empEsic) - safeNumber(pt);
-                                       const totalDeductionsValue = safeNumber(empPf) + safeNumber(empEsic) + safeNumber(pt) + safeNumber(adv) + safeNumber(pen) + safeNumber(uniform);
-                                       const netPayableValue = safeNumber(netSalaryValue) - safeNumber(adv) - safeNumber(pen) - safeNumber(uniform) + safeNumber(food) + safeNumber(acc) + safeNumber(conv);
-                                      
-                                      const isSelected = selectedSalaryEmployeeIds.includes(emp.id);
-                                      
-                                      return (
-                                        <tr 
-                                          key={emp.id} 
-                                          className={`hover:bg-slate-50/40 transition border-b border-slate-150 align-middle ${
-                                            isSelected ? "bg-orange-50/20 hover:bg-orange-50/30" : ""
-                                          }`}
-                                        >
-                                          <td className="px-2.5 py-2.5 border-r border-slate-150 text-center w-[48px] align-middle bg-slate-50/10">
-                                            <input id={`salary-select-${emp.id}`} name={`salarySelect_${emp.id}`}
-                                              type="checkbox"
-                                              checked={isSelected}
-                                              onChange={() => {
-                                                setSelectedSalaryEmployeeIds(prev => 
-                                                  prev.includes(emp.id)
-                                                    ? prev.filter(id => id !== emp.id)
-                                                    : [...prev, emp.id]
-                                                );
-                                              }}
-                                              className="w-3.5 h-3.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
-                                            />
-                                          </td>
-                                          {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 bg-slate-50/20 text-left truncate">
-                                              {selectedSalaryColumns.includes("Employee Name") && (
-                                                <div className="truncate" title={emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}>{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</div>
-                                              )}
-                                              {selectedSalaryColumns.includes("Employee Code") && (
-                                                <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate" title={`${emp.employeeCode} • ${emp.location || "No Site"}`}>{emp.employeeCode} • {emp.location || "No Site"}</div>
-                                              )}
-                                            </td>
-                                          )}
-          
-                                          {selectedSalaryColumns.includes("Skill Category") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.skillCategory || "-"}>
-                                              {emp.skillCategory || "-"}
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Job Role") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.role || "-"}>
-                                              {emp.role || "-"}
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Present Days") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-[#f57416] bg-orange-50/10">
-                                              {presents}
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Total Salary") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{rawGross.toLocaleString("en-IN")}</td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium">₹{gross.toLocaleString("en-IN")}</td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Basic Salary") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium text-slate-655 bg-slate-50/10">₹{basic.toLocaleString("en-IN")}</td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Employer PF (13%)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erPf).toLocaleString("en-IN")}` : ""}</td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erEsic).toLocaleString("en-IN")}` : ""}</td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Employee PF (12%)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empPf).toLocaleString("en-IN")}` : ""}</td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empEsic).toLocaleString("en-IN")}` : ""}</td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Professional Tax (PT)") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-medium">{isCompliant ? `₹${pt}` : ""}</td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Advance Balance") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
-                                              {adv > 0 ? <span className="font-semibold text-blue-700">₹{adv}</span> : "-"}
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Uniform Deductions") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
-                                              {uniform > 0 ? <span className="font-semibold text-rose-600">₹{uniform}</span> : "-"}
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Penalty Balance") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
-                                              {pen > 0 ? <span className="font-semibold text-rose-600">₹{pen}</span> : "-"}
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Net Salary") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-amber-800 bg-amber-50/10 font-semibold">
-                                              ₹{Math.round(netSalaryValue).toLocaleString("en-IN")}
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Total Deductions") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-100/10 font-semibold">
-                                              ₹{Math.round(totalDeductionsValue).toLocaleString("en-IN")}
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Food Perk") && (
-                                            <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                              <input id={`salary-food-${emp.id}`} name={`salaryFood_${emp.id}`}
-                                                key={`food-${emp.id}-${selectedMonth}-${food}`}
-                                                type="number"
-                                                defaultValue={food || ""}
-                                                onBlur={(e) => handleUpdatePerkValue(emp.id, "foodPerk", e.target.value)}
-                                                disabled={!userPermissions.salary?.edit}
-                                                onKeyDown={(e) => {
-                                                  if (e.key === "Enter") {
-                                                    e.currentTarget.blur();
-                                                  }
-                                                }}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-indigo-700 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 text-xs shadow-2xs"
-                                              />
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Accommodation Perk") && (
-                                            <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                              <input id={`salary-accom-${emp.id}`} name={`salaryAccom_${emp.id}`}
-                                                key={`accom-${emp.id}-${selectedMonth}-${acc}`}
-                                                type="number"
-                                                defaultValue={acc || ""}
-                                                onBlur={(e) => handleUpdatePerkValue(emp.id, "accommodationPerk", e.target.value)}
-                                                disabled={!userPermissions.salary?.edit}
-                                                onKeyDown={(e) => {
-                                                  if (e.key === "Enter") {
-                                                    e.currentTarget.blur();
-                                                  }
-                                                }}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-indigo-700 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 text-xs shadow-2xs"
-                                              />
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Conveyance Perk") && (
-                                            <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                              <input id={`salary-conv-${emp.id}`} name={`salaryConv_${emp.id}`}
-                                                key={`conv-${emp.id}-${selectedMonth}-${conv}`}
-                                                type="number"
-                                                defaultValue={conv || ""}
-                                                onBlur={(e) => handleUpdatePerkValue(emp.id, "conveyancePerk", e.target.value)}
-                                                disabled={!userPermissions.salary?.edit}
-                                                onKeyDown={(e) => {
-                                                  if (e.key === "Enter") {
-                                                    e.currentTarget.blur();
-                                                  }
-                                                }}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-[#ff791a] focus:outline-none focus:border-orange-450 focus:ring-1 focus:ring-orange-450 text-xs shadow-2xs"
-                                              />
-                                            </td>
-                                          )}
-                                          
-                                          {selectedSalaryColumns.includes("Net Payable") && (
-                                            <td className="px-3 py-2.5 border-r border-slate-150 bg-emerald-50 text-emerald-800 text-right font-black text-xs">
-                                              ₹{Math.round(Math.max(0, netPayableValue)).toLocaleString("en-IN")}
-                                            </td>
-                                          )}
-                                          {selectedSalaryColumns.includes("Payment Status") && (
-                                            <td className={`px-2 py-1.5 border-l border-r border-slate-150 text-center align-middle bg-violet-50 ${isSelected ? "!bg-orange-50" : ""}`}>
-                                              <select id={`payment-status-${emp.id}`} name={`paymentStatus_${emp.id}`}
-                                                value={ledger?.paymentStatus || "Unpaid"}
-                                                disabled={!userPermissions.salary?.edit}
-                                                onChange={(e) => handleUpdatePaymentStatus(emp.id, e.target.value as "Unpaid" | "Paid" | "Hold")}
-                                                className={`px-2 py-1 rounded text-xs font-bold focus:outline-none transition border cursor-pointer ${
-                                                  (ledger?.paymentStatus || "Unpaid") === "Paid"
-                                                    ? "bg-emerald-55 bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
-                                                    : (ledger?.paymentStatus || "Unpaid") === "Hold"
-                                                    ? "bg-amber-50 border-amber-250 text-amber-700 hover:bg-amber-100"
-                                                    : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200"
-                                                }`}
-                                              >
-                                                <option value="Unpaid">Unpaid</option>
-                                                <option value="Paid">Paid</option>
-                                                <option value="Hold">Hold</option>
-                                              </select>
-                                            </td>
-                                          )}
-                                        </tr>
-                                      );
-                                    })
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                      ) : activeSidebarTab === "Saved Bulk Pay" ? (
-                        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="saved-bulk-pay-module-view">
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                              <div>
-                                <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                  <Archive size={20} className="text-[#7c3aed]" /> Saved Bulk Pay Files
-                                </h3>
-                                <p className="text-xs text-slate-400 mt-1">
-                                  Axis Bank bulk pay files archived on the server — includes bank upload rows plus the full salary calculation sheet (all selected columns) for preview and re-download.
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                                {bulkPayArchiveYears.length > 0 && (
-                                  <select
-                                    id="bulk-pay-year-filter"
-                                    value={bulkPayArchiveYearFilter}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      setBulkPayArchiveYearFilter(value);
-                                      fetchBulkPayArchives(value);
-                                    }}
-                                    className="px-3 py-1.5 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:border-[#7c3aed] transition"
-                                  >
-                                    <option value="">All Years</option>
-                                    {bulkPayArchiveYears.map((y) => (
-                                      <option key={y} value={y}>{y}</option>
-                                    ))}
-                                  </select>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => fetchBulkPayArchives()}
-                                  className="px-3.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
-                                >
-                                  <RotateCw size={13} /> Refresh
-                                </button>
-                              </div>
-                            </div>
-          
-                            {lastSavedBulkPay && highlightedBulkPayId === lastSavedBulkPay.id && (
-                              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-xs font-black text-violet-800 uppercase tracking-wider flex items-center gap-1.5">
-                                    <CheckCircle2 size={14} /> Just Saved
-                                  </p>
-                                  <p className="text-[11px] text-violet-700 mt-1 font-mono truncate" title={lastSavedBulkPay.filename}>
-                                    {lastSavedBulkPay.filename}
-                                  </p>
-                                  <p className="text-[10px] text-violet-500 mt-0.5">
-                                    {lastSavedBulkPay.month} {lastSavedBulkPay.year} · {lastSavedBulkPay.recordCount} records · ₹{Number(lastSavedBulkPay.totalAmount || 0).toLocaleString("en-IN")}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleViewBulkPayArchive(lastSavedBulkPay.id, lastSavedBulkPay.filename)}
-                                    className="px-3 py-1.5 bg-white hover:bg-violet-100 text-violet-700 border border-violet-200 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Eye size={11} /> View Excel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadBulkPayArchive(lastSavedBulkPay.id, lastSavedBulkPay.filename)}
-                                    className="px-3 py-1.5 bg-[#7c3aed] hover:bg-[#6d28d9] text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
-                                  >
-                                    <Download size={11} />
-                                    Re-download
-                                    <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-black leading-none">
-                                      {lastSavedBulkPay.downloadCount ?? 0}
-                                    </span>
-                                  </button>
-                                  {userPermissions.salary?.edit && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteBulkPayArchive(lastSavedBulkPay.id)}
-                                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[10px] font-bold cursor-pointer"
-                                    >
-                                      Delete
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-          
-                            {isFetchingBulkPayArchives ? (
-                              <p className="text-sm text-slate-500">Loading saved files...</p>
-                            ) : filteredBulkPayArchives.length === 0 ? (
-                              <div className="text-center py-12 space-y-2">
-                                <Archive size={32} className="mx-auto text-slate-300" />
-                                <p className="text-sm text-slate-500 font-semibold">No bulk pay files saved yet</p>
-                                <p className="text-xs text-slate-400">
-                                  Export bulk pay from the Salary module to automatically archive the Excel sheet here.
-                                </p>
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveSidebarTab("Salary")}
-                                  className="mt-2 px-4 py-2 bg-[#7c3aed] hover:bg-[#6d28d9] text-white font-bold text-xs rounded-lg cursor-pointer transition"
-                                >
-                                  Go to Salary
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs">
-                                  <thead>
-                                    <tr className="text-slate-500 uppercase tracking-wide border-b border-slate-200">
-                                      <th className="py-2.5 pr-4 font-bold">Saved On</th>
-                                      <th className="py-2.5 pr-4 font-bold">Month</th>
-                                      <th className="py-2.5 pr-4 font-bold">Year</th>
-                                      <th className="py-2.5 pr-4 font-bold">Filename</th>
-                                      <th className="py-2.5 pr-4 font-bold">Records</th>
-                                      <th className="py-2.5 pr-4 font-bold">Total Amount</th>
-                                      <th className="py-2.5 pr-4 font-bold">Exported By</th>
-                                      <th className="py-2.5 font-bold">Actions</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {filteredBulkPayArchives.map((item: any) => {
-                                      const displayMonth = item.year
-                                        ? item.month
-                                        : parseMonthYear(item.month).month;
-                                      const displayYear = item.year || parseMonthYear(item.month).year;
-                                      const isHighlighted = highlightedBulkPayId === item.id;
-                                      return (
-                                        <tr
-                                          key={item.id}
-                                          className={`border-b border-slate-50 hover:bg-slate-50/70 ${isHighlighted ? "bg-violet-50 ring-1 ring-inset ring-violet-200" : ""}`}
-                                        >
-                                          <td className="py-2.5 pr-4 whitespace-nowrap text-slate-600">
-                                            {item.createdAt ? new Date(item.createdAt).toLocaleString() : "—"}
-                                          </td>
-                                          <td className="py-2.5 pr-4 font-semibold text-slate-700">{displayMonth || "—"}</td>
-                                          <td className="py-2.5 pr-4 font-semibold text-slate-700">{displayYear || "—"}</td>
-                                          <td className="py-2.5 pr-4 max-w-[260px]" title={item.filename}>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleViewBulkPayArchive(item.id, item.filename)}
-                                              className="flex items-center gap-1.5 min-w-0 text-left hover:text-[#7c3aed] cursor-pointer group"
-                                              title="Click to preview Excel in browser"
-                                            >
-                                              <FileSpreadsheet size={14} className="text-emerald-600 shrink-0 group-hover:text-[#7c3aed]" />
-                                              <span className="truncate font-mono text-[11px] text-slate-700 underline-offset-2 group-hover:underline">{item.filename}</span>
-                                            </button>
-                                          </td>
-                                          <td className="py-2.5 pr-4">{item.recordCount ?? 0}</td>
-                                          <td className="py-2.5 pr-4 font-mono">
-                                            ₹{Number(item.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                          </td>
-                                          <td className="py-2.5 pr-4">{item.username || "—"}</td>
-                                          <td className="py-2.5 whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                              <button
-                                                type="button"
-                                                onClick={() => handleViewBulkPayArchive(item.id, item.filename)}
-                                                className="px-2.5 py-1 bg-white hover:bg-violet-50 text-violet-700 border border-violet-200 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                              >
-                                                <Eye size={11} /> View
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => handleDownloadBulkPayArchive(item.id, item.filename)}
-                                                className="px-2.5 py-1 bg-[#7c3aed] hover:bg-[#6d28d9] text-white rounded text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
-                                              >
-                                                <Download size={11} />
-                                                Re-download
-                                                <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-black leading-none">
-                                                  {item.downloadCount ?? 0}
-                                                </span>
-                                              </button>
-                                              {userPermissions.salary?.edit && (
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteBulkPayArchive(item.id)}
-                                                  className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[10px] font-bold cursor-pointer"
-                                                >
-                                                  Delete
-                                                </button>
-                                              )}
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                     ) : activeSidebarTab === "Advance & Penalty" ? (
-                        /* --- ADVANCE & PENALTY LEDGER VIEW --- */
-                        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="advance-penalty-module-view">
-                          {/* 1. Module Header */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div className="text-left">
-                              <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                <Calculator size={20} className="text-[#ff791a]" /> Monthly Settlement & Penalty Ledger
-                              </h3>
-                              <p className="text-xs text-slate-400 mt-1">
-                                Perform batch monthly settlements for advances, penalties, and perks. All entries are keyed and saved per-month dynamically.
-                              </p>
-                            </div>
-                            
-                            {/* Month Selection Sync */}
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-xs font-bold text-slate-500">Active Month:</span>
-                              <select id="ledger-month-select" name="selectedMonth"
-                                value={MONTHS_LIST.includes(selectedMonth) ? selectedMonth : (MONTHS_LIST[0] || selectedMonth)}
-                                onChange={(e) => setSelectedMonth(normalizeMonthKey(e.target.value))}
-                                className="px-3.5 py-1.5 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:border-orange-500 transition"
-                              >
-                                {MONTHS_LIST.map((m) => (
-                                  <option key={m} value={m}>{m}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-          
-                          {/* 2. Top Summary metrics computed for the selected Month */}
-                          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                            <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
-                              <span className="text-[9px] text-blue-500 font-bold uppercase tracking-wider block">Advances ({selectedMonth})</span>
-                              <span className="text-base font-extrabold text-blue-800 block mt-0.5">
-                                ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.advance || 0)), 0).toLocaleString("en-IN")}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
-                              <span className="text-[9px] text-rose-500 font-bold uppercase tracking-wider block">Penalties ({selectedMonth})</span>
-                              <span className="text-base font-extrabold text-rose-800 block mt-0.5">
-                                ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.penalty || 0)), 0).toLocaleString("en-IN")}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
-                              <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Food Perks ({selectedMonth})</span>
-                              <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.foodPerk || 0)), 0).toLocaleString("en-IN")}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
-                              <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Accom. Perks ({selectedMonth})</span>
-                              <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.accommodationPerk || 0)), 0).toLocaleString("en-IN")}
-                              </span>
-                            </div>
-                            <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left col-span-2 lg:col-span-1">
-                              <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Conv. Perks ({selectedMonth})</span>
-                              <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.conveyancePerk || 0)), 0).toLocaleString("en-IN")}
-                              </span>
-                            </div>
-                          </div>
-                          {/* 3. Grid split: 2/5 Interactive Search & Checklist and 3/5 Ledger Entry rows */}
-                          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                            {/* Left Column: Interactive Employee checklist with search */}
-                            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
-                              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                  1. Select Employees
-                                </h4>
-                                <div className="flex gap-2 text-[10px]">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const matchedIds = employees
-                                        .filter(emp => {
-                                          if (isEmployeeExitedForMonth(emp, selectedMonth)) return false;
-                                          const q = ledgerSearchQuery.toLowerCase().trim();
-                                          const matchesSearch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                          const matchesLocation = ledgerLocationFilters.length === 0 || ledgerLocationFilters.some(f => (emp.location || "").toLowerCase() === f.toLowerCase());
-                                          const matchesSkill = employeeMatchesSkillFilters(emp, ledgerSkillFilters);
-                                          const matchesRole = ledgerRoleFilters.length === 0 || ledgerRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
-                                          return matchesSearch && matchesLocation && matchesSkill && matchesRole;
-                                        })
-                                        .map(e => e.id);
-                                      setLedgerSelectedEmployeeIds(prev => Array.from(new Set([...prev, ...matchedIds])));
-                                    }}
-                                    className="text-orange-600 hover:text-orange-700 font-bold uppercase tracking-wider cursor-pointer"
-                                  >
-                                    Select All
-                                  </button>
-                                  <span className="text-slate-350">|</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setLedgerSelectedEmployeeIds([])}
-                                    className="text-slate-500 hover:text-slate-650 font-bold uppercase tracking-wider cursor-pointer"
-                                  >
-                                    Clear
-                                  </button>
-                                </div>
-                              </div>
-          
-                              {/* Premium Spacious Dynamic Filters Grid */}
-                              <div className="grid grid-cols-1 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-150 text-[10px] text-left">
-                                {/* Location Filter */}
-                                <div className="space-y-1 relative" id="ledger-location-multiselect-container">
-                                  <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Branch/Site</span>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsLedgerLocationDropdownOpen(!isLedgerLocationDropdownOpen);
-                                        setIsLedgerSkillDropdownOpen(false);
-                                        setIsLedgerRoleDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {ledgerLocationFilters.length === 0 
-                                          ? "All Sites" 
-                                          : `${ledgerLocationFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[8px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isLedgerLocationDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[9px] text-slate-400 font-bold">Branches</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setLedgerLocationFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-[#ff791a] cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {ledgerUniqueLocations.map(loc => {
-                                          const isChecked = ledgerLocationFilters.some(f => f.toLowerCase() === loc.toLowerCase());
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setLedgerLocationFilters(prev => prev.filter(c => c.toLowerCase() !== loc.toLowerCase()));
-                                            } else {
-                                              setLedgerLocationFilters(prev => [...prev, loc]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={loc} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-[10px] text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-6761" name="checkbox_6761"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#ff791a] focus:ring-[#ff791a]"
-                                              />
-                                              <span className="font-semibold">{loc}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* Skill Filter */}
-                                <div className="space-y-1 relative" id="ledger-skill-multiselect-container">
-                                  <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Skill Category</span>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsLedgerSkillDropdownOpen(!isLedgerSkillDropdownOpen);
-                                        setIsLedgerLocationDropdownOpen(false);
-                                        setIsLedgerRoleDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {ledgerSkillFilters.length === 0 
-                                          ? "All Categories" 
-                                          : `${ledgerSkillFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[8px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isLedgerSkillDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[9px] text-slate-400 font-bold">Categories</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setLedgerSkillFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-[#ff791a] cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {ledgerUniqueSkills.map(sk => {
-                                          const isChecked = ledgerSkillFilters.some(f => f.toLowerCase() === sk.toLowerCase());
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setLedgerSkillFilters(prev => prev.filter(c => c.toLowerCase() !== sk.toLowerCase()));
-                                            } else {
-                                              setLedgerSkillFilters(prev => [...prev, sk]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={sk} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-[10px] text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-6820" name="checkbox_6820"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#ff791a] focus:ring-[#ff791a]"
-                                              />
-                                              <span className="font-semibold">{sk}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* Role Filter */}
-                                <div className="space-y-1 relative" id="ledger-role-multiselect-container">
-                                  <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Job Role</span>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsLedgerRoleDropdownOpen(!isLedgerRoleDropdownOpen);
-                                        setIsLedgerLocationDropdownOpen(false);
-                                        setIsLedgerSkillDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {ledgerRoleFilters.length === 0 
-                                          ? "All Roles" 
-                                          : `${ledgerRoleFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[8px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isLedgerRoleDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[9px] text-slate-400 font-bold">Roles</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setLedgerRoleFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-[#ff791a] cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {ledgerUniqueRoles.map(role => {
-                                          const isChecked = ledgerRoleFilters.some(f => f.toLowerCase() === role.toLowerCase());
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setLedgerRoleFilters(prev => prev.filter(c => c.toLowerCase() !== role.toLowerCase()));
-                                            } else {
-                                              setLedgerRoleFilters(prev => [...prev, role]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-[10px] text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-6879" name="checkbox_6879"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#ff791a] focus:ring-[#ff791a]"
-                                              />
-                                              <span className="font-semibold">{role}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-          
-                              {/* Search box for checklist */}
-                              <div className="relative">
-                                <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
-                                <input id="ledger-search-query" name="ledgerSearchQuery"
-                                  type="text"
-                                  placeholder="Search by code or name..."
-                                  value={ledgerSearchQuery}
-                                  onChange={(e) => setLedgerSearchQuery(e.target.value)}
-                                  className="w-full pl-8 pr-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500"
-                                />
-                              </div>
-          
-                              {/* Employees list checkboxes */}
-                              <div className="flex-1 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg p-2 bg-slate-50/30">
-                                {employees.filter(emp => {
-                                  if (isEmployeeExitedForMonth(emp, selectedMonth)) return false;
-                                  const q = ledgerSearchQuery.toLowerCase().trim();
-                                  const matchesSearch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                  const matchesLocation = ledgerLocationFilters.length === 0 || ledgerLocationFilters.some(f => (emp.location || "").toLowerCase() === f.toLowerCase());
-                                  const matchesSkill = employeeMatchesSkillFilters(emp, ledgerSkillFilters);
-                                  const matchesRole = ledgerRoleFilters.length === 0 || ledgerRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
-                                  return matchesSearch && matchesLocation && matchesSkill && matchesRole;
-                                }).length === 0 ? (
-                                  <div className="p-8 text-center text-xs text-slate-450">No matching employees found.</div>
-                                ) : (
-                                  employees.filter(emp => {
-                                    if (isEmployeeExitedForMonth(emp, selectedMonth)) return false;
-                                    const q = ledgerSearchQuery.toLowerCase().trim();
-                                    const matchesSearch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                    const matchesLocation = ledgerLocationFilters.length === 0 || ledgerLocationFilters.some(f => (emp.location || "").toLowerCase() === f.toLowerCase());
-                                    const matchesSkill = employeeMatchesSkillFilters(emp, ledgerSkillFilters);
-                                    const matchesRole = ledgerRoleFilters.length === 0 || ledgerRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
-                                    return matchesSearch && matchesLocation && matchesSkill && matchesRole;
-                                  }).map((emp) => {
-                                    const isChecked = ledgerSelectedEmployeeIds.includes(emp.id);
-                                    return (
-                                      <label key={emp.id} className="flex items-center gap-3 py-2 px-1.5 hover:bg-white rounded-md cursor-pointer transition select-none">
-                                        <input
-                                          type="checkbox"
-                                          checked={isChecked}
-                                          onChange={(e) => {
-                                            if (e.target.checked) {
-                                              setLedgerSelectedEmployeeIds(prev => [...prev, emp.id]);
-                                            } else {
-                                              setLedgerSelectedEmployeeIds(prev => prev.filter(id => id !== emp.id));
-                                            }
-                                          }}
-                                          className="w-3.5 h-3.5 rounded text-[#ff791a] focus:ring-orange-500 accent-orange-500 border-slate-300"
-                                        />
-                                        <div className="min-w-0 flex-1">
-                                          <p className="text-xs font-bold text-slate-700 truncate text-left">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</p>
-                                          <p className="text-[10px] font-mono text-slate-400 mt-0.5 text-left">{emp.employeeCode} • {emp.location || "No site"}</p>
-                                        </div>
-                                      </label>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            </div>
-          
-                            {/* Right Column: Dynamic inputs for each selected employee */}
-                            <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
-                              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider pb-2 border-b border-slate-100 flex items-center justify-between">
-                                <span>2. Record Monthly Settled Ledger Rows</span>
-                                <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">{ledgerSelectedEmployeeIds.length} Selected</span>
-                              </h4>
-          
-                              {ledgerSelectedEmployeeIds.length === 0 ? (
-                                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-3">
-                                  <div className="w-12 h-12 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center text-2xl">
-                                    ✍️
-                                  </div>
-                                  <div className="space-y-1">
-                                    <p className="text-xs font-bold text-slate-600">Settlement Workspace Empty</p>
-                                    <p className="text-[11px] text-slate-400 max-w-xs">
-                                      Select one or multiple employees from the list on the left to record monthly advances, penalties, perks, and reasons for {selectedMonth}.
-                                    </p>
-                                  </div>
-                                </div>
-                              ) : (
-                                <form onSubmit={handleSaveBatchLedgerRecords} className="flex flex-col flex-1 overflow-hidden">
-                                  {/* Scrollable list of employee rows */}
-                                  <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 scrollbar-thin">
-                                    {ledgerSelectedEmployeeIds.map((empId) => {
-                                      const emp = employees.find(e => e.id === empId);
-                                      if (!emp) return null;
-          
-                                      const entry = tempLedgerEntries[empId] || {
-                                        advance: "0",
-                                        penalty: "0",
-                                        foodPerk: "0",
-                                        accommodationPerk: "0",
-                                        conveyancePerk: "0",
-                                        penaltyReason: ""
-                                      };
-          
-                                      const updateField = (field: keyof typeof entry, val: string) => {
-                                        setTempLedgerEntries(prev => ({
-                                          ...prev,
-                                          [empId]: {
-                                            ...(prev[empId] || entry),
-                                            [field]: val
-                                          }
-                                        }));
-                                      };
-          
-                                      return (
-                                        <div key={empId} className="p-3 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2.5 relative text-left">
-                                          <button
-                                            type="button"
-                                            onClick={() => setLedgerSelectedEmployeeIds(prev => prev.filter(id => id !== empId))}
-                                            className="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-extrabold text-xs cursor-pointer"
-                                            title="Remove from settlement list"
-                                          >
-                                            ✕
-                                          </button>
-          
-                                          <div className="pr-6">
-                                            <span className="text-xs font-black text-slate-800">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</span>
-                                            <span className="text-[9px] font-mono text-slate-400 ml-1.5">({emp.employeeCode})</span>
-                                          </div>
-          
-                                          {/* Ledger inputs grid */}
-                                          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-                                            <div>
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">💰 Advance</label>
-                                              <input id={`ledger-advance-${empId}`} name={`ledgerAdvance_${empId}`}
-                                                type="number"
-                                                value={entry.advance}
-                                                onChange={(e) => updateField("advance", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                            <div>
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">👕 Uniform</label>
-                                              <input id={`ledger-uniform-${empId}`} name={`ledgerUniform_${empId}`}
-                                                type="number"
-                                                value={entry.uniform}
-                                                onChange={(e) => updateField("uniform", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-[#f57416] focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                            <div>
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">⚠️ Penalty</label>
-                                              <input id={`ledger-penalty-${empId}`} name={`ledgerPenalty_${empId}`}
-                                                type="number"
-                                                value={entry.penalty}
-                                                onChange={(e) => updateField("penalty", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                            <div>
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🍔 Food</label>
-                                              <input id={`ledger-food-${empId}`} name={`ledgerFood_${empId}`}
-                                                type="number"
-                                                value={entry.foodPerk}
-                                                onChange={(e) => updateField("foodPerk", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                            <div>
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🏠 Accom.</label>
-                                              <input id={`ledger-accom-${empId}`} name={`ledgerAccom_${empId}`}
-                                                type="number"
-                                                value={entry.accommodationPerk}
-                                                onChange={(e) => updateField("accommodationPerk", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                            <div className="col-span-2 sm:col-span-1">
-                                              <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🚗 Conv.</label>
-                                              <input id={`ledger-conv-${empId}`} name={`ledgerConv_${empId}`}
-                                                type="number"
-                                                value={entry.conveyancePerk}
-                                                onChange={(e) => updateField("conveyancePerk", e.target.value)}
-                                                placeholder="0"
-                                                className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
-                                              />
-                                            </div>
-                                          </div>
-          
-                                          {/* Textfield to remember penalty reason */}
-                                          <div>
-                                            <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📝 Settlement Reason / Penalty Notes</label>
-                                            <input id={`ledger-penalty-reason-${empId}`} name={`ledgerPenaltyReason_${empId}`}
-                                              type="text"
-                                              value={entry.penaltyReason}
-                                              onChange={(e) => updateField("penaltyReason", e.target.value)}
-                                              placeholder="Enter reason for penalty, advance remarks, or perk approvals..."
-                                              className="w-full px-2.5 py-1 border border-slate-200 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-orange-400"
-                                            />
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-          
-                                  {/* Save Button */}
-                                  <div className="pt-3 border-t border-slate-100 flex gap-2">
-                                    <button
-                                      type="submit"
-                                      disabled={!userPermissions.ledger?.edit}
-                                      className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md transition active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                      💾 Save Monthly Ledger Rows ({selectedMonth})
-                                    </button>
-                                  </div>
-                                </form>
-                              )}
-                            </div>
-                          </div>
-          
-                          {/* 4. Bottom Section: Statement Overview Table for the Selected Month */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col space-y-4">
-                            <div className="text-left">
-                              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                Ledger Overview Sheet for {selectedMonth}
-                              </h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
-                                Visual registry of all recorded ledger records settled for the active month. Click [Clear] next to any component to reset individual fields dynamically.
-                              </p>
-                            </div>
-                            <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col">
-                              <div className="bg-slate-100/50 px-4 py-2 border-b border-slate-200 grid grid-cols-10 text-[10px] font-black text-slate-500 uppercase tracking-wider text-left select-none">
-                                <span className="col-span-2">Employee</span>
-                                <span>Advance</span>
-                                <span>Uniform</span>
-                                <span>Penalty</span>
-                                <span>Food</span>
-                                <span>Accom.</span>
-                                <span>Conv.</span>
-                                <span className="col-span-2 text-center">Settlement Reason / Notes</span>
-                              </div>
-          
-                              <div className="divide-y divide-slate-150 max-h-[350px] overflow-y-auto" id="ledger-records-container">
-                                {employees.length === 0 ? (
-                                  <div className="p-8 text-center text-xs text-slate-450 font-medium">No employees registered in the system database.</div>
-                                ) : (
-                                  employees.map((emp) => {
-                                    const monthLedger = emp.monthlyLedger?.[selectedMonth];
-                                    const adv = monthLedger ? safeNumber(monthLedger.advance) : 0;
-                                    const uniform = monthLedger ? safeNumber(monthLedger.uniform) : 0;
-                                    const pen = monthLedger ? safeNumber(monthLedger.penalty) : 0;
-                                    const food = monthLedger ? safeNumber(monthLedger.foodPerk) : 0;
-                                    const acc = monthLedger ? safeNumber(monthLedger.accommodationPerk) : 0;
-                                    const conv = monthLedger ? safeNumber(monthLedger.conveyancePerk) : 0;
-                                    const reason = monthLedger ? monthLedger.penaltyReason : "";
-          
-                                    const hasAnyEntry = adv > 0 || uniform > 0 || pen > 0 || food > 0 || acc > 0 || conv > 0 || reason;
-          
-                                    return (
-                                      <div key={emp.id} className={`px-4 py-3 grid grid-cols-10 items-center hover:bg-slate-50/50 transition text-xs border-b border-slate-100 text-left ${hasAnyEntry ? "bg-orange-50/15" : ""}`}>
-                                        <div className="col-span-2 space-y-0.5 pr-2">
-                                          <p className="font-bold text-slate-800 truncate">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</p>
-                                          <p className="font-mono text-[9px] text-slate-450">{emp.employeeCode} • {emp.location || "Unassigned"}</p>
-                                        </div>
-          
-                                        {/* Advance */}
-                                        <div>
-                                          {adv > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "advance", adv, "text-blue-700")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Uniform */}
-                                        <div>
-                                          {uniform > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "uniform", uniform, "text-rose-600")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Penalty */}
-                                        <div>
-                                          {pen > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "penalty", pen, "text-rose-600")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Food */}
-                                        <div>
-                                          {food > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "foodPerk", food, "text-indigo-700")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Accommodation */}
-                                        <div>
-                                          {acc > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "accommodationPerk", acc, "text-indigo-700")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Conveyance */}
-                                        <div>
-                                          {conv > 0 ? (
-                                            renderClearButtonOrConfirm(emp.id, "conveyancePerk", conv, "text-indigo-700")
-                                          ) : (
-                                            <span className="text-slate-350 font-mono">-</span>
-                                          )}
-                                        </div>
-          
-                                        {/* Reason Column */}
-                                        <div className="col-span-2 text-slate-500 italic pr-2 font-medium truncate text-center" title={reason || "No remarks"}>
-                                          {reason ? (
-                                            <span className="not-italic text-slate-700 font-semibold text-[11px] block truncate">{reason}</span>
-                                          ) : (
-                                            <span className="text-slate-300 font-normal">None recorded</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : activeSidebarTab === "Birthdays" ? (
-                        <BirthdaysTab
-                          birthdaySearchMonth={birthdaySearchMonth}
-                          setBirthdaySearchMonth={setBirthdaySearchMonth}
-                          birthdayTodayList={birthdayTodayList}
-                          birthdayMonthList={birthdayMonthList}
-                          birthdayTodayLabel={birthdayTodayLabel}
-                          isFetchingBirthdays={isFetchingBirthdays}
-                          employees={employees}
-                          simulatedBirthdayEmpIds={simulatedBirthdayEmpIds}
-                          setSimulatedBirthdayEmpIds={setSimulatedBirthdayEmpIds}
-                          setShowConfetti={setShowConfetti}
-                          triggerSuccess={triggerSuccess}
-                        />
-                      ) : activeSidebarTab === "Directory" ? (
-                        /* --- ENTERPRISE DIRECTORY VIEW --- */
-                        <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="directory-tab-view">
-                          {/* 1. Sub navigation controls & Header */}
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-left">
-                            <div>
-                              <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                <Contact size={20} className="text-[#ff791a]" /> HRMS Corporate Contacts Directory
-                              </h3>
-                              <p className="text-xs text-slate-400 mt-1">
-                                Lookup team profiles, department hierarchies, or official client/support desk numbers instantly.
-                              </p>
-                            </div>
-          
-                            {/* Sub tab selectors */}
-                            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => setActiveDirectorySubTab("employees")}
-                                className={`px-4 py-1.5 text-xs font-extrabold rounded-md transition-all cursor-pointer ${
-                                  activeDirectorySubTab === "employees"
-                                    ? "bg-[#ff791a] text-white shadow-sm"
-                                    : "bg-transparent text-slate-600 hover:text-slate-900"
-                                }`}
-                              >
-                                👥 Employee Profiles
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setActiveDirectorySubTab("contacts")}
-                                className={`px-4 py-1.5 text-xs font-extrabold rounded-md transition-all cursor-pointer ${
-                                  activeDirectorySubTab === "contacts"
-                                    ? "bg-[#ff791a] text-white shadow-sm"
-                                    : "bg-transparent text-slate-600 hover:text-slate-900"
-                                }`}
-                              >
-                                ☎️ Important Helplines
-                              </button>
-                            </div>
-                          </div>
-          
-                          {/* 2. EMPLOYEE PROFILES VIEW */}
-                          {activeDirectorySubTab === "employees" ? (
-                            <div className="space-y-6 animate-fade-in">
-                              {/* Filters bar for directory */}
-                              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
-                                {/* Search */}
-                                <div>
-                                  <label htmlFor="directory-search" className="directory-field-label">Search Directory</label>
-                                  <div className="relative">
-                                    <input id="directory-search" name="directorySearch"
-                                      type="text"
-                                      value={directorySearch}
-                                      onChange={(e) => setDirectorySearch(e.target.value)}
-                                      placeholder="Search by name, designation, code or phone..."
-                                      className="directory-field !pl-8"
-                                    />
-                                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                                  </div>
-                                </div>
-          
-                                {/* Location Filter */}
-                                <div>
-                                  <label htmlFor="directory-location" className="directory-field-label">Location / Site</label>
-                                  <select id="directory-location" name="directoryLocation"
-                                    value={directoryLocation}
-                                    onChange={(e) => setDirectoryLocation(e.target.value)}
-                                    className="directory-field-select"
-                                  >
-                                    <option value="">All Locations</option>
-                                    {salaryUniqueLocations.map((loc) => (
-                                      <option key={loc} value={loc}>{loc}</option>
-                                    ))}
-                                  </select>
-                                </div>
-          
-                                {/* Gender Filter */}
-                                <div>
-                                  <label htmlFor="directory-gender" className="directory-field-label">Gender</label>
-                                  <select id="directory-gender" name="directoryGender"
-                                    value={directoryGender}
-                                    onChange={(e) => setDirectoryGender(e.target.value)}
-                                    className="directory-field-select"
-                                  >
-                                    <option value="">All Genders</option>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                    <option value="Other">Other</option>
-                                  </select>
-                                </div>
-                              </div>
-          
-                              {/* Employee phone directory */}
-                              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                {(() => {
-                                  const filtered = employees.filter(emp => {
-                                    const q = directorySearch.toLowerCase().trim();
-                                    if (q) {
-                                      const codeMatch = emp.employeeCode.toLowerCase().includes(q);
-                                      const nameMatch = (emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                      const phoneRaw = resolveEmployeePhone(emp);
-                                      const phoneMatch =
-                                        phoneRaw.toLowerCase().includes(q) ||
-                                        formatPhoneDisplay(phoneRaw).toLowerCase().includes(q);
-                                      const roleMatch = (emp.role || "").toLowerCase().includes(q);
-                                      if (!codeMatch && !nameMatch && !phoneMatch && !roleMatch) return false;
-                                    }
-                                    if (directoryLocation && emp.location !== directoryLocation) return false;
-                                    if (directoryGender && emp.gender?.toLowerCase() !== directoryGender.toLowerCase()) return false;
-                                    return true;
-                                  });
-          
-                                  if (filtered.length === 0) {
-                                    return (
-                                      <div className="col-span-full bg-white border border-slate-200 rounded-xl p-16 text-center space-y-3">
-                                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center text-2xl mx-auto">
-                                          🕵️
-                                        </div>
-                                        <div>
-                                          <p className="text-xs font-bold text-slate-600">No matching employee records found</p>
-                                          <p className="text-[11px] text-slate-400">Try modifying your text query or location/gender filter criteria.</p>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-          
-                                  return filtered.map(emp => {
-                                    const name = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || "Unknown";
-                                    const phone = resolveEmployeePhone(emp);
-                                    const location = emp.location || "Unassigned Site";
-                                    const designation = emp.role || emp.employeeCode || "Employee";
-          
-                                    return (
-                                      <DirectoryContactCard
-                                        key={emp.id}
-                                        name={name}
-                                        designation={designation}
-                                        location={location}
-                                        phone={phone}
-                                        badge={emp.employeeCode}
-                                        badgeTone="slate"
-                                        onCall={(contact) =>
-                                          handleCallInitiate(contact.name, contact.phone, contact.designation)
-                                        }
-                                        onActionSuccess={triggerSuccess}
-                                      />
-                                    );
-                                  });
-                                })()}
-                              </div>
-                            </div>
-                          ) : (
-                            /* 3. IMPORTANT OFFICIAL CONTACTS HELPLINES WITH DYNAMIC LOCATION-MAPPED HELP DESKS */
-                            <div className="space-y-6 animate-fade-in" id="helplines-workspace">
-                              {/* Search & location filters */}
-                              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-                                <div>
-                                  <label htmlFor="helpline-search-query" className="directory-field-label">Search Helplines</label>
-                                  <div className="relative">
-                                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                                    <input id="helpline-search-query" name="helplineSearchQuery"
-                                      type="text"
-                                      placeholder="Search by name, role or desk..."
-                                      value={helplineSearchQuery}
-                                      onChange={(e) => setHelplineSearchQuery(e.target.value)}
-                                      className="directory-field !pl-8"
-                                    />
-                                  </div>
-                                </div>
-                                <div>
-                                  <label htmlFor="helpline-location-filter" className="directory-field-label">Work Location</label>
-                                  <select id="helpline-location-filter" name="helplineLocationFilter"
-                                    value={helplineLocationFilter}
-                                    onChange={(e) => setHelplineLocationFilter(e.target.value)}
-                                    className="directory-field-select"
-                                  >
-                                    <option value="All Locations">All Work Locations</option>
-                                    {customLocations.map(loc => (
-                                      <option key={loc} value={loc}>{loc}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-          
-                              {/* Quick Onboarding Form for new Helplines */}
-                              <form onSubmit={handleAddHelpline} className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3 text-left">
-                                <p className="directory-field-label !mb-0">Help Desk Registry</p>
-                                <div className="flex flex-col gap-3 md:flex-row md:items-end">
-                                  <div className="min-w-0 flex-1">
-                                    <label htmlFor="new-helpline-name" className="directory-field-label">Desk Name / Facility</label>
-                                    <input id="new-helpline-name" name="newHelplineName"
-                                      type="text"
-                                      required
-                                      placeholder="e.g. Pune Help Desk"
-                                      value={newHelplineName}
-                                      onChange={(e) => setNewHelplineName(e.target.value)}
-                                      className="directory-field"
-                                    />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <label htmlFor="new-helpline-phone" className="directory-field-label">Official Helpline Phone</label>
-                                    <input id="new-helpline-phone" name="newHelplinePhone"
-                                      type="text"
-                                      required
-                                      placeholder="e.g. +91 98765 00000"
-                                      value={newHelplinePhone}
-                                      onChange={(e) => setNewHelplinePhone(e.target.value)}
-                                      className="directory-field font-mono font-bold"
-                                    />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <label htmlFor="new-helpline-role" className="directory-field-label">Specific Role / Scope</label>
-                                    <input id="new-helpline-role" name="newHelplineRole"
-                                      type="text"
-                                      placeholder="e.g. Network infrastructure"
-                                      value={newHelplineRole}
-                                      onChange={(e) => setNewHelplineRole(e.target.value)}
-                                      className="directory-field"
-                                    />
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <label htmlFor="new-helpline-category" className="directory-field-label">Desk Category</label>
-                                    <select id="new-helpline-category" name="newHelplineCategory"
-                                      value={newHelplineCategory}
-                                      onChange={(e) => setNewHelplineCategory(e.target.value)}
-                                      className="directory-field-select"
-                                    >
-                                      <option value="IT Helpdesk">IT Desk</option>
-                                      <option value="Corporate Support">Corporate</option>
-                                      <option value="Client Office">Site Office</option>
-                                      <option value="Operations Desk">Operations</option>
-                                      <option value="⚠️ Emergency Desk">Emergency</option>
-                                    </select>
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <label htmlFor="new-helpline-location" className="directory-field-label">Branch Location</label>
-                                    <select id="new-helpline-location" name="newHelplineLocation"
-                                      value={newHelplineLocation}
-                                      onChange={(e) => setNewHelplineLocation(e.target.value)}
-                                      className="directory-field-select"
-                                    >
-                                      <option value="All Locations">All Locations</option>
-                                      {customLocations.map(loc => (
-                                        <option key={loc} value={loc}>{loc}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="w-full shrink-0 md:w-[11.5rem]">
-                                    <label className="directory-field-label invisible select-none" aria-hidden="true">&nbsp;</label>
-                                    <button
-                                      type="submit"
-                                      className="directory-field !flex items-center justify-center gap-1 border-[#ff791a] bg-[#ff791a] font-bold text-white shadow-sm transition hover:bg-[#e4640c] cursor-pointer"
-                                    >
-                                      <Plus size={14} className="stroke-[2.5]" /> Register Helpline
-                                    </button>
-                                  </div>
-                                </div>
-                              </form>
-          
-                              {/* Helplines phone directory */}
-                              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                {(() => {
-                                  const filtered = helplines.filter(contact => {
-                                    const q = helplineSearchQuery.toLowerCase().trim();
-                                    if (q) {
-                                      const nameMatch = contact.name.toLowerCase().includes(q);
-                                      const roleMatch = contact.role.toLowerCase().includes(q);
-                                      const catMatch = contact.category.toLowerCase().includes(q);
-                                      const phoneMatch =
-                                        (contact.phone || "").toLowerCase().includes(q) ||
-                                        formatPhoneDisplay(contact.phone).toLowerCase().includes(q);
-                                      if (!nameMatch && !roleMatch && !catMatch && !phoneMatch) return false;
-                                    }
-                                    if (helplineLocationFilter !== "All Locations" && contact.location !== "All Locations" && contact.location !== helplineLocationFilter) {
-                                      return false;
-                                    }
-                                    return true;
-                                  });
-          
-                                  if (filtered.length === 0) {
-                                    return (
-                                      <div className="col-span-full bg-white border border-slate-200 rounded-xl p-16 text-center space-y-3">
-                                        <div className="w-12 h-12 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center text-2xl mx-auto">
-                                          ☎️
-                                        </div>
-                                        <div>
-                                          <p className="text-xs font-bold text-slate-600">No matching helplines found</p>
-                                          <p className="text-[11px] text-slate-400">Try modifying your search query or location filter, or register a new helpline above.</p>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-          
-                                  return filtered.map((contact, idx) => {
-                                    const badgeTone = contact.category.includes("Emergency")
-                                      ? "rose"
-                                      : contact.category.includes("IT")
-                                      ? "blue"
-                                      : contact.category.includes("Client")
-                                      ? "indigo"
-                                      : "orange";
-
-                                    return (
-                                      <DirectoryContactCard
-                                        key={contact._id || contact.name + idx}
-                                        name={contact.name}
-                                        designation={contact.role || "General Support"}
-                                        location={contact.location === "All Locations" ? "All Locations" : contact.location}
-                                        phone={contact.phone}
-                                        badge={contact.category}
-                                        badgeTone={badgeTone}
-                                        headerAction={
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteHelpline(contact.name)}
-                                            className="rounded-lg p-1.5 text-slate-350 transition hover:bg-rose-50 hover:text-red-500 cursor-pointer"
-                                            title={`Delete "${contact.name}"`}
-                                          >
-                                            <Trash2 size={14} />
-                                          </button>
-                                        }
-                                        onCall={(entry) =>
-                                          handleCallInitiate(entry.name, entry.phone, contact.category)
-                                        }
-                                        onActionSuccess={triggerSuccess}
-                                      />
-                                    );
-                                  });
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : activeSidebarTab === "Attendance" ? (
-                        /* --- ENTERPRISE ATTENDANCE WORKSPACE ("TIME" MODULE) --- */
-                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 animate-fade-in" id="attendance-workspace-panel">
-                          {attendanceSubView === "wizard" ? (
-                            /* --- NEW SCREEN: INTERACTIVE WIZARD VIEW --- */
-                            <div className="space-y-6">
-                              <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                                <div className="text-left">
-                                  <button
-                                    type="button"
-                                    onClick={() => setAttendanceSubView("grid")}
-                                    className="flex items-center gap-1 text-slate-500 hover:text-[#ff791a] text-xs font-bold transition cursor-pointer mb-2"
-                                  >
-                                    ← Back to Daily Attendance Sheet
-                                  </button>
-                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5 mt-1">
-                                    ⚡ Bulk Mark Attendance Wizard
-                                  </h4>
-                                  <p className="text-[11px] text-slate-455 mt-0.5">
-                                    Mark large cohorts as present across multiple worksite locations, cycle months, and custom calendar dates quickly.
-                                  </p>
-                                </div>
-                                
-                                {/* Navigation tabs styled premium */}
-                                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
-                                  {[
-                                    { id: "employees", label: "1. Select Staff", icon: Users },
-                                    { id: "dates", label: "2. Select Dates", icon: Calendar },
-                                    { id: "review", label: "3. Review & Submit", icon: CheckCircle }
-                                  ].map((stepItem) => {
-                                    const Icon = stepItem.icon;
-                                    const isDone = (stepItem.id === "employees" && (bulkWizardStep === "dates" || bulkWizardStep === "review")) || (stepItem.id === "dates" && bulkWizardStep === "review");
-                                    const isActive = bulkWizardStep === stepItem.id;
-                                    return (
-                                      <button
-                                        key={stepItem.id}
-                                        type="button"
-                                        onClick={() => {
-                                          if (stepItem.id === "employees") setBulkWizardStep("employees");
-                                          else if (stepItem.id === "dates" && bulkSelEmployees.length > 0) setBulkWizardStep("dates");
-                                          else if (stepItem.id === "review" && bulkSelEmployees.length > 0 && bulkSelDates.length > 0) setBulkWizardStep("review");
-                                        }}
-                                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
-                                          isActive ? "bg-[#ff791a] text-white shadow-xs" : isDone ? "text-emerald-700 bg-emerald-50 border border-emerald-100" : "text-slate-500 hover:bg-slate-100"
-                                        }`}
-                                      >
-                                        <Icon size={14} className={isDone ? "text-emerald-600 animate-bounce" : ""} />
-                                        {stepItem.label}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-          
-                              {bulkWizardStep === "employees" && (
-                                    <div className="space-y-5 animate-fade-in">
-                                      {/* Grid for Locations & Months */}
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        
-                                        {/* 1. Locations Selection Panel */}
-                                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                                          <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                                            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                              🏢 Select Worksite Location(s)
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                if (bulkSelLocations.length === customLocations.length) {
-                                                  setBulkSelLocations([]);
-                                                } else {
-                                                  setBulkSelLocations([...customLocations]);
-                                                }
-                                              }}
-                                              className="text-[10px] font-bold text-orange-600 hover:text-orange-850 cursor-pointer"
-                                            >
-                                              {bulkSelLocations.length === customLocations.length ? "Deselect All" : "Select All"}
-                                            </button>
-                                          </div>
-                                          <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
-                                            {customLocations.map(loc => {
-                                              const isSel = bulkSelLocations.includes(loc);
-                                              const toggle = () => {
-                                                if (isSel) setBulkSelLocations(prev => prev.filter(x => x !== loc));
-                                                else setBulkSelLocations(prev => [...prev, loc]);
-                                              };
-                                              return (
-                                                <button
-                                                  key={loc}
-                                                  type="button"
-                                                  onClick={toggle}
-                                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer select-none ${
-                                                    isSel 
-                                                      ? "bg-orange-50 border-orange-200 text-[#e4640c]" 
-                                                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                                                  }`}
-                                                >
-                                                  {loc}
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-          
-                                        {/* 2. Months Selection Panel */}
-                                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                                          <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                                            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                              📅 Select Cycle Month(s)
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                if (bulkSelMonths.length === MONTHS_LIST.length) {
-                                                  setBulkSelMonths([]);
-                                                } else {
-                                                  setBulkSelMonths([...MONTHS_LIST]);
-                                                }
-                                              }}
-                                              className="text-[10px] font-bold text-orange-600 hover:text-orange-850 cursor-pointer"
-                                            >
-                                              {bulkSelMonths.length === MONTHS_LIST.length ? "Deselect All" : "Select All"}
-                                            </button>
-                                          </div>
-                                          <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
-                                            {MONTHS_LIST.map(m => {
-                                              const isSel = bulkSelMonths.includes(m);
-                                              const toggle = () => {
-                                                if (isSel) setBulkSelMonths(prev => prev.filter(x => x !== m));
-                                                else setBulkSelMonths(prev => [...prev, m]);
-                                              };
-                                              return (
-                                                <button
-                                                  key={m}
-                                                  type="button"
-                                                  onClick={toggle}
-                                                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer select-none ${
-                                                    isSel 
-                                                      ? "bg-orange-50 border-orange-200 text-[#e4640c]" 
-                                                      : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                                                  }`}
-                                                >
-                                                  {m}
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        </div>
-          
-                                      </div>
-          
-                                      {/* 3. Targeted Employees List */}
-                                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                                        <div className="flex flex-col sm:flex-row justify-between sm:items-center pb-2 border-b border-slate-200 gap-2 text-left">
-                                          <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                            👥 Targeted Employees ({bulkSelEmployees.length} Selected)
-                                          </span>
-                                          <div className="flex flex-wrap items-center gap-3">
-                                            
-                                            {/* Bulk Wizard Role Filter */}
-                                            <div className="flex items-center gap-1.5 text-xs relative" id="bulk-wizard-role-multiselect-container">
-                                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Role:</span>
-                                              <div className="relative">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setIsBulkWizardRoleDropdownOpen(!isBulkWizardRoleDropdownOpen);
-                                                    setIsBulkWizardSkillDropdownOpen(false);
-                                                  }}
-                                                  className="px-2.5 py-1 bg-white border border-slate-250 text-[11px] rounded-lg font-bold focus:outline-none flex justify-between items-center min-w-[130px] hover:bg-slate-50 transition cursor-pointer"
-                                                >
-                                                  <span className="truncate">
-                                                    {bulkWizardRoleFilters.length === 0 
-                                                      ? "All Job Roles" 
-                                                      : `${bulkWizardRoleFilters.length} Selected`}
-                                                  </span>
-                                                  <span className="text-[9px] text-slate-400 ml-1">▼</span>
-                                                </button>
-                                                
-                                                {isBulkWizardRoleDropdownOpen && (
-                                                  <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-48 text-left">
-                                                    <div className="flex justify-between items-center border-b border-slate-100 pb-1 mb-1">
-                                                      <span className="text-[9px] text-slate-400 font-bold">Roles</span>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setBulkWizardRoleFilters([])}
-                                                        className="text-[8px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                                      >
-                                                        Clear All
-                                                      </button>
-                                                    </div>
-                                                    {customRoles.map(role => {
-                                                      const isChecked = bulkWizardRoleFilters.includes(role);
-                                                      const toggle = () => {
-                                                        if (isChecked) {
-                                                          setBulkWizardRoleFilters(prev => prev.filter(r => r !== role));
-                                                        } else {
-                                                          setBulkWizardRoleFilters(prev => [...prev, role]);
-                                                        }
-                                                      };
-                                                      return (
-                                                        <label key={role} className="flex items-center gap-2 px-1.5 py-0.5 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                                          <input id="checkbox-field-8039" name="checkbox_8039"
-                                                            type="checkbox"
-                                                            checked={isChecked}
-                                                            onChange={toggle}
-                                                            className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                                          />
-                                                          <span className="font-medium text-[11px]">{role}</span>
-                                                        </label>
-                                                      );
-                                                    })}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            </div>
-          
-                                            {/* Bulk Wizard Skill Filter */}
-                                            <div className="flex items-center gap-1.5 text-xs relative" id="bulk-wizard-skill-multiselect-container">
-                                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Skill:</span>
-                                              <div className="relative">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setIsBulkWizardSkillDropdownOpen(!isBulkWizardSkillDropdownOpen);
-                                                    setIsBulkWizardRoleDropdownOpen(false);
-                                                  }}
-                                                  className="px-2.5 py-1 bg-white border border-slate-250 text-[11px] rounded-lg font-bold focus:outline-none flex justify-between items-center min-w-[130px] hover:bg-slate-50 transition cursor-pointer"
-                                                >
-                                                  <span className="truncate">
-                                                    {bulkWizardSkillFilters.length === 0 
-                                                      ? "All Categories" 
-                                                      : `${bulkWizardSkillFilters.length} Selected`}
-                                                  </span>
-                                                  <span className="text-[9px] text-slate-400 ml-1">▼</span>
-                                                </button>
-                                                
-                                                {isBulkWizardSkillDropdownOpen && (
-                                                  <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-44 text-left">
-                                                    <div className="flex justify-between items-center border-b border-slate-100 pb-1 mb-1">
-                                                      <span className="text-[9px] text-slate-400 font-bold">Categories</span>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setBulkWizardSkillFilters([])}
-                                                        className="text-[8px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                                      >
-                                                        Clear All
-                                                      </button>
-                                                    </div>
-                                                    {["Highly Skilled", "Skilled", "Semi Skilled", "Unskilled"].map(cat => {
-                                                      const isChecked = bulkWizardSkillFilters.includes(cat);
-                                                      const toggle = () => {
-                                                        if (isChecked) {
-                                                          setBulkWizardSkillFilters(prev => prev.filter(c => c !== cat));
-                                                        } else {
-                                                          setBulkWizardSkillFilters(prev => [...prev, cat]);
-                                                        }
-                                                      };
-                                                      return (
-                                                        <label key={cat} className="flex items-center gap-2 px-1.5 py-0.5 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                                          <input id="checkbox-field-8097" name="checkbox_8097"
-                                                            type="checkbox"
-                                                            checked={isChecked}
-                                                            onChange={toggle}
-                                                            className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                                          />
-                                                          <span className="font-medium text-[11px]">{cat}</span>
-                                                        </label>
-                                                      );
-                                                    })}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            </div>
-          
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                const matching = employees
-                                                  .filter(e => bulkSelLocations.includes(e.location || ""))
-                                                  .filter(e => bulkWizardRoleFilters.length === 0 || bulkWizardRoleFilters.some(f => (e.role || "").toLowerCase() === f.toLowerCase()))
-                                                  .filter(e => employeeMatchesSkillFilters(e, bulkWizardSkillFilters))
-                                                  .map(e => e.id);
-                                                setBulkSelEmployees(matching);
-                                              }}
-                                              className="text-[10px] font-bold text-orange-600 hover:text-orange-850 cursor-pointer"
-                                            >
-                                              Select Matching
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setBulkSelEmployees([])}
-                                              className="text-[10px] font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
-                                            >
-                                              Deselect All
-                                            </button>
-                                          </div>
-                                        </div>
-          
-                                        {bulkSelLocations.length === 0 ? (
-                                          <div className="p-6 text-center text-xs text-slate-400 font-medium">
-                                            💡 Please select at least one worksite location above to filter targeted employees.
-                                          </div>
-                                        ) : (
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-[220px] overflow-y-auto pr-1 pt-1">
-                                            {employees
-                                              .filter(emp => bulkSelLocations.includes(emp.location || ""))
-                                              .filter(emp => bulkWizardRoleFilters.length === 0 || bulkWizardRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase()))
-                                              .filter(emp => employeeMatchesSkillFilters(emp, bulkWizardSkillFilters))
-                                              .map(emp => {
-                                                const isSel = bulkSelEmployees.includes(emp.id);
-                                                const toggle = () => {
-                                                  if (isSel) setBulkSelEmployees(prev => prev.filter(id => id !== emp.id));
-                                                  else setBulkSelEmployees(prev => [...prev, emp.id]);
-                                                };
-                                                return (
-                                                  <div 
-                                                    key={emp.id}
-                                                    onClick={toggle}
-                                                    className={`p-2.5 border rounded-lg flex items-center gap-2 cursor-pointer transition select-none ${
-                                                      isSel 
-                                                        ? "bg-orange-50/60 border-orange-200" 
-                                                        : "bg-white border-slate-200 hover:bg-slate-50/55"
-                                                    }`}
-                                                  >
-                                                    <input id="checkbox-field-8162" name="checkbox_8162"
-                                                      type="checkbox"
-                                                      checked={isSel}
-                                                      onChange={() => {}} // toggled by parent div click
-                                                      className="w-3.5 h-3.5 rounded text-[#f57416] focus:ring-[#f57416] shrink-0"
-                                                    />
-                                                    <div className="min-w-0 text-left">
-                                                      <p className="text-xs font-bold text-slate-700 truncate">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</p>
-                                                      <p className="text-[10px] font-mono text-slate-400 truncate">{emp.employeeCode} • {emp.location}</p>
-                                                    </div>
-                                                  </div>
-                                                );
-                                              })
-                                            }
-                                          </div>
-                                        )}
-                                      </div>
-          
-                                      {/* Navigation button for Step 1 */}
-                                      <div className="flex justify-end pt-2 border-t border-slate-100">
-                                        <button
-                                          type="button"
-                                          disabled={bulkSelEmployees.length === 0}
-                                          onClick={() => setBulkWizardStep("dates")}
-                                          className={`px-5 py-2 text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer ${
-                                            bulkSelEmployees.length > 0 
-                                              ? "bg-[#ff791a] hover:bg-[#e4640c] text-white" 
-                                              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                                          }`}
-                                        >
-                                          Continue to Date Selection →
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-          
-                                  {bulkWizardStep === "dates" && (
-                                    <div className="space-y-5 animate-fade-in">
-                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                                        
-                                        {/* Selection Info */}
-                                        <div className="md:col-span-1 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5 text-left">
-                                          <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider block pb-1 border-b border-slate-200">
-                                            📋 Selection Summary
-                                          </span>
-                                          <div className="space-y-2 text-xs">
-                                            <p className="text-slate-500 font-semibold">Location(s): <strong className="text-slate-800">{bulkSelLocations.join(", ")}</strong></p>
-                                            <p className="text-slate-500 font-semibold">Months(s): <strong className="text-slate-800">{bulkSelMonths.join(", ")}</strong></p>
-                                            <p className="text-slate-500 font-semibold">Staff Enrolled: <strong className="text-slate-800">{bulkSelEmployees.length} employee(s)</strong></p>
-                                            <p className="text-slate-500 font-semibold">Dates Selected: <strong className="text-[#f57416]">{bulkSelDates.length} day(s)</strong></p>
-                                          </div>
-                                          
-                                          <div className="pt-2 border-t border-slate-200 space-y-2">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                const allDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-                                                setBulkSelDates(allDays);
-                                              }}
-                                              className="w-full py-1.5 bg-orange-50 hover:bg-orange-100 text-[#e4640c] border border-orange-100 font-extrabold text-[10.5px] uppercase tracking-wider rounded-lg transition cursor-pointer"
-                                            >
-                                              Select All Month Days
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setBulkSelDates([])}
-                                              className="w-full py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 font-extrabold text-[10.5px] uppercase tracking-wider rounded-lg transition cursor-pointer"
-                                            >
-                                              Reset Dates
-                                            </button>
-                                          </div>
-          
-                                          {/* Smart range selection presets */}
-                                          <div className="pt-2.5 border-t border-slate-200 space-y-2">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">
-                                              ⚡ Smart Presets
-                                            </span>
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                  const matching = Array.from({ length: Math.min(15, daysInMonth) }, (_, i) => i + 1);
-                                                  setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
-                                                }}
-                                                className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
-                                              >
-                                                First 15 Days
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                  const matching = Array.from({ length: daysInMonth - 15 }, (_, i) => i + 16);
-                                                  setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
-                                                }}
-                                                className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
-                                              >
-                                                Last 15 Days
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                  const matching = Array.from({ length: Math.min(7, daysInMonth) }, (_, i) => i + 1);
-                                                  setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
-                                                }}
-                                                className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
-                                              >
-                                                First Week
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                  const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => d % 2 !== 0);
-                                                  setBulkSelDates(matching);
-                                                }}
-                                                className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
-                                              >
-                                                Odd Days
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                  const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => d % 2 === 0);
-                                                  setBulkSelDates(matching);
-                                                }}
-                                                className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center col-span-2"
-                                              >
-                                                Even Days
-                                              </button>
-                                            </div>
-                                          </div>
-                                        </div>
-          
-                                        {/* Interactive Calendar for Date Selection */}
-                                        <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
-                                          <div className="flex justify-between items-center pb-1.5 border-b border-slate-200">
-                                            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                              📅 Calendar Date Picker
-                                            </span>
-                                            {/* Sync month picker for calendar display */}
-                                            <select id="bulk-calendar-month" name="bulkCalendarMonth"
-                                              value={bulkCalendarMonth}
-                                              onChange={(e) => setBulkCalendarMonth(e.target.value)}
-                                              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs cursor-pointer focus:outline-none"
-                                            >
-                                              {bulkSelMonths.map(m => (
-                                                <option key={m} value={m}>{m}</option>
-                                              ))}
-                                            </select>
-                                          </div>
-          
-                                          {/* Calendar grid of numbers */}
-                                          <div>
-                                            <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-1 mb-2 text-left">
-                                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Click dates below to select/deselect them:</p>
-                                              <span className="text-orange-500 font-extrabold text-[9px]">⚡ Click C1-C7 (Columns) or W1-W5 (Weeks) to bulk toggle</span>
-                                            </div>
-                                            
-                                            {/* Main grid with week togglers on the left and column togglers on top */}
-                                            <div className="grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-1.5 items-center">
-                                              {/* Empty corner space */}
-                                              <div className="w-8"></div>
-                                              
-                                              {/* Column Toggles */}
-                                              <div className="grid grid-cols-7 gap-1.5">
-                                                {Array.from({ length: 7 }, (_, colIdx) => {
-                                                  const colNum = colIdx + 1;
-                                                  const handleColumnToggle = () => {
-                                                    const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                    const colDays: number[] = [];
-                                                    for (let d = colNum; d <= daysInMonth; d += 7) {
-                                                      colDays.push(d);
-                                                    }
-                                                    const allSelected = colDays.every(d => bulkSelDates.includes(d));
-                                                    if (allSelected) {
-                                                      setBulkSelDates(prev => prev.filter(d => !colDays.includes(d)));
-                                                    } else {
-                                                      setBulkSelDates(prev => [...new Set([...prev, ...colDays])].sort((a,b)=>a-b));
-                                                    }
-                                                  };
-                                                  return (
-                                                    <button
-                                                      key={colIdx}
-                                                      type="button"
-                                                      onClick={handleColumnToggle}
-                                                      className="h-6 w-full text-[9px] font-black bg-slate-200 hover:bg-slate-350 text-slate-600 rounded-md transition cursor-pointer select-none"
-                                                      title={`Toggle all days in Column ${colNum}`}
-                                                    >
-                                                      C{colNum}
-                                                    </button>
-                                                  );
-                                                })}
-                                              </div>
-          
-                                              {/* Calendar rows and row-wise / week-wise toggles */}
-                                              {(() => {
-                                                const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                const weeks: number[][] = [];
-                                                let currentWeek: number[] = [];
-                                                for (let d = 1; d <= daysInMonth; d++) {
-                                                  currentWeek.push(d);
-                                                  if (currentWeek.length === 7 || d === daysInMonth) {
-                                                    weeks.push(currentWeek);
-                                                    currentWeek = [];
-                                                  }
-                                                }
-          
-                                                return weeks.map((weekDays, weekIdx) => {
-                                                  const weekNum = weekIdx + 1;
-                                                  const handleWeekToggle = () => {
-                                                    const allSelected = weekDays.every(d => bulkSelDates.includes(d));
-                                                    if (allSelected) {
-                                                      setBulkSelDates(prev => prev.filter(d => !weekDays.includes(d)));
-                                                    } else {
-                                                      setBulkSelDates(prev => [...new Set([...prev, ...weekDays])].sort((a,b)=>a-b));
-                                                    }
-                                                  };
-          
-                                                  return (
-                                                    <React.Fragment key={weekIdx}>
-                                                      <button
-                                                        type="button"
-                                                        onClick={handleWeekToggle}
-                                                        className="h-9 w-8 text-[9px] font-black bg-orange-100/60 hover:bg-orange-100 text-[#e4640c] rounded-lg transition cursor-pointer select-none"
-                                                        title={`Toggle all days in Week ${weekNum}`}
-                                                      >
-                                                        W{weekNum}
-                                                      </button>
-                                                      
-                                                      <div className="grid grid-cols-7 gap-1.5">
-                                                        {weekDays.map(dayNum => {
-                                                          const isSel = bulkSelDates.includes(dayNum);
-                                                          const toggle = () => {
-                                                            if (isSel) setBulkSelDates(prev => prev.filter(x => x !== dayNum));
-                                                            else setBulkSelDates(prev => [...prev, dayNum]);
-                                                          };
-                                                          return (
-                                                            <button
-                                                              key={dayNum}
-                                                              type="button"
-                                                              onClick={toggle}
-                                                              className={`h-9 w-full flex items-center justify-center font-bold text-xs rounded-lg border transition cursor-pointer select-none ${
-                                                                isSel 
-                                                                  ? "bg-[#ff791a] border-orange-500 text-white shadow-xs" 
-                                                                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                                                              }`}
-                                                            >
-                                                              {dayNum}
-                                                            </button>
-                                                          );
-                                                        })}
-                                                        {weekDays.length < 7 && Array.from({ length: 7 - weekDays.length }).map((_, i) => (
-                                                          <div key={`empty-${i}`} className="h-9 w-full"></div>
-                                                        ))}
-                                                      </div>
-                                                    </React.Fragment>
-                                                  );
-                                                });
-                                              })()}
-                                            </div>
-                                          </div>
-                                        </div>
-          
-                                      </div>
-          
-                                      {/* Bottom navigation footer for Step 2 */}
-                                      <div className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl p-3 mt-4">
-                                        <button
-                                          type="button"
-                                          onClick={() => setBulkWizardStep("employees")}
-                                          className="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-650 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
-                                        >
-                                          ← Back to Staff Selection
-                                        </button>
-                                        
-                                        <button
-                                          type="button"
-                                          disabled={bulkSelDates.length === 0}
-                                          onClick={() => setBulkWizardStep("review")}
-                                          className={`px-5 py-2 text-xs font-bold rounded-lg shadow-sm transition flex items-center gap-1.5 cursor-pointer ${
-                                            bulkSelDates.length > 0 
-                                              ? "bg-[#ff791a] hover:bg-[#e4640c] text-white" 
-                                              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                                          }`}
-                                        >
-                                          Continue to Review & Submit →
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-          
-                                  {bulkWizardStep === "review" && (
-                                    <div className="space-y-5 animate-fade-in">
-                                      {/* Confirmation Grid Details */}
-                                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
-                                        <h5 className="text-[11px] font-black text-slate-700 uppercase tracking-wider pb-2 border-b border-slate-200 text-left">
-                                          📝 Verification & Cohort summary
-                                        </h5>
-          
-                                        {/* List of Targeted Months & Staff Names (Collapsible / Badges) */}
-                                        <div className="space-y-2 text-xs font-semibold text-slate-755 text-left">
-                                          <div>
-                                            <span className="font-extrabold text-slate-500 uppercase tracking-wider text-[9px] block mb-1">Target Months:</span>
-                                            <div className="flex flex-wrap gap-1">
-                                              {bulkSelMonths.map(m => (
-                                                <span key={m} className="px-2 py-0.5 bg-blue-50 border border-blue-100 text-blue-700 rounded-md font-bold text-[10.5px]">{m}</span>
-                                              ))}
-                                            </div>
-                                          </div>
-                                          <div>
-                                            <span className="font-extrabold text-slate-500 uppercase tracking-wider text-[9px] block mb-1">Employees ({bulkSelEmployees.length}):</span>
-                                            <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-1">
-                                              {employees.filter(e => bulkSelEmployees.includes(e.id)).map(e => (
-                                                <span key={e.id} className="px-2 py-0.5 bg-orange-50 border border-orange-100 text-[#e4640c] rounded-md font-bold text-[10px]">{e.nameAsPerAadharColumn || e.nameAsPerAadhar} ({e.employeeCode})</span>
-                                              ))}
-                                            </div>
-                                          </div>
-                                          <div>
-                                            <span className="font-extrabold text-slate-500 uppercase tracking-wider text-[9px] block mb-1">Target Days ({bulkSelDates.length}):</span>
-                                            <div className="flex flex-wrap gap-0.5">
-                                              {bulkSelDates.sort((a,b)=>a-b).map(d => (
-                                                <span key={d} className="w-5 h-5 flex items-center justify-center bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px]">{d}</span>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-          
-                                      {/* Bottom navigation footer for Step 3 */}
-                                      <div className="flex justify-between items-center bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-4">
-                                        <button
-                                          type="button"
-                                          onClick={() => setBulkWizardStep("dates")}
-                                          className="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-650 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
-                                        >
-                                          ← Back to Date Selection
-                                        </button>
-                                        
-                                        <button
-                                          type="button"
-                                          onClick={handleApplyBulkWizardAttendance}
-                                          className="px-6 py-2.5 text-xs font-bold rounded-lg shadow-md transition-all cursor-pointer flex items-center gap-1.5 bg-[#ff791a] hover:bg-[#e4640c] text-white scale-105"
-                                        >
-                                          ⚡ Confirm & Mark Bulk Present
-                                        </button>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                            /* --- STANDARD DAILY ATTENDANCE GRID SHEET VIEW --- */
-                            <>
-                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                                <div>
-                                  <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5">
-                                    <Clock className="text-orange-500" size={18} /> Enterprise Attendance & Worksite Workspace
-                                  </h3>
-                                  <p className="text-xs text-slate-400 mt-0.5">Track daily staff rosters, assign status codes, and execute bulk presence stamping.</p>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setAttendanceSubView("wizard");
-                                      setBulkWizardStep("employees");
-                                    }}
-                                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-[#ff791a] hover:from-orange-600 hover:to-[#e4640c] text-white text-xs font-extrabold rounded-lg transition cursor-pointer shadow-md hover:shadow-lg active:scale-95 animate-pulse-once"
-                                  >
-                                    <Clock size={13} className="stroke-[2.5]" /> Bulk Mark Attendance
-                                  </button>
-                                  <button
-                                    onClick={downloadAttendanceExcel}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer shadow-xs"
-                                  >
-                                    <FileSpreadsheet size={13} className="text-green-600" /> Export Excel (Landscape)
-                                  </button>
-                                  <button
-                                    onClick={downloadAttendancePDF}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f57416] hover:bg-[#e4640c] text-white text-xs font-bold rounded-lg transition cursor-pointer shadow-sm"
-                                  >
-                                    <FileText size={13} /> Export PDF (Landscape)
-                                  </button>
-                                </div>
-                              </div>
-          
-                              {/* Grid controls: Worksite branch & Search filters */}
-                              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-150">
-                                <div className="flex flex-col gap-1 text-left">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Search Employees</label>
-                                  <div className="relative">
-                                    <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
-                                    <input id="attendance-search-query" name="attendanceSearchQuery"
-                                      type="text"
-                                      placeholder="Search by code or name..."
-                                      value={attendanceSearchQuery}
-                                      onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                                      className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-250 text-xs rounded-lg text-slate-800 font-semibold focus:outline-none"
-                                    />
-                                  </div>
-                                </div>
-                                <div className="flex flex-col gap-1 text-left">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Worksite Branch Location</label>
-                                  <select id="attendance-location-filter" name="attendanceLocationFilter"
-                                    value={attendanceLocationFilter}
-                                    onChange={(e) => setAttendanceLocationFilter(e.target.value)}
-                                    className="w-full px-3 py-1.5 bg-white border border-slate-250 text-xs rounded-lg text-slate-800 font-bold focus:outline-none animate-none"
-                                  >
-                                    <option value="All">All Corporate Branches</option>
-                                    {customLocations.map(loc => (
-                                      <option key={loc} value={loc}>{loc}</option>
-                                    ))}
-                                  </select>
-                                </div>
-          
-                                {/* Attendance Job Role Filter */}
-                                <div className="flex flex-col gap-1 text-left relative" id="attendance-role-multiselect-container">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Job Role</label>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsAttendanceRoleDropdownOpen(!isAttendanceRoleDropdownOpen);
-                                        setIsAttendanceSkillDropdownOpen(false);
-                                      }}
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded-lg text-xs font-bold text-slate-800 focus:outline-none text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {attendanceRoleFilters.length === 0 
-                                          ? "All Job Roles" 
-                                          : `${attendanceRoleFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isAttendanceRoleDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-full text-left">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[10px] text-slate-400 font-bold">Roles</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAttendanceRoleFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {customRoles.map(role => {
-                                          const isChecked = attendanceRoleFilters.includes(role);
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setAttendanceRoleFilters(prev => prev.filter(r => r !== role));
-                                            } else {
-                                              setAttendanceRoleFilters(prev => [...prev, role]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-8623" name="checkbox_8623"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-medium">{role}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* Attendance Skill Category Filter */}
-                                <div className="flex flex-col gap-1 text-left relative" id="attendance-skill-multiselect-container">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Skill Category</label>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsAttendanceSkillDropdownOpen(!isAttendanceSkillDropdownOpen);
-                                        setIsAttendanceRoleDropdownOpen(false);
-                                      }}
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded-lg text-xs font-bold text-slate-800 focus:outline-none text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {attendanceSkillFilters.length === 0 
-                                          ? "All Categories" 
-                                          : `${attendanceSkillFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isAttendanceSkillDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-full text-left">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[10px] text-slate-400 font-bold">Categories</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAttendanceSkillFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {["Highly Skilled", "Skilled", "Semi Skilled", "Unskilled"].map(cat => {
-                                          const isChecked = attendanceSkillFilters.includes(cat);
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setAttendanceSkillFilters(prev => prev.filter(c => c !== cat));
-                                            } else {
-                                              setAttendanceSkillFilters(prev => [...prev, cat]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={cat} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-8681" name="checkbox_8681"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-medium">{cat}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                <div className="flex flex-col gap-1 text-left">
-                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Cycle Month</label>
-                                  <select id="attendance-month-select" name="selectedMonth"
-                                    value={MONTHS_LIST.includes(selectedMonth) ? selectedMonth : (MONTHS_LIST[0] || selectedMonth)}
-                                    onChange={(e) => setSelectedMonth(normalizeMonthKey(e.target.value))}
-                                    className="w-full px-3 py-1.5 bg-white border border-slate-250 text-xs rounded-lg text-slate-800 font-bold focus:outline-none"
-                                  >
-                                    {MONTHS_LIST.map(m => (
-                                      <option key={m} value={m}>{m}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-          
-                              {/* Interactive Grid Table */}
-                          <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                            <div className="overflow-x-auto max-w-full">
-                              <table className="w-full text-left border-collapse min-w-[1200px]">
-                                <thead>
-                                  <tr className="bg-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                                    <th className="px-3 py-2 w-12 text-center">SR</th>
-                                    <th className="px-3 py-2 w-28">Emp Code</th>
-                                    <th className="px-3 py-2 w-48">Employee Name</th>
-                                    <th className="px-3 py-2 w-36">Worksite Location</th>
-                                    {Array.from({ length: getDaysInSelectedMonth(selectedMonth) }, (_, i) => (
-                                      <th key={i} className="px-1 py-2 text-center w-8 font-mono">{i + 1}</th>
-                                    ))}
-                                    <th className="px-3 py-2 text-center w-16">P</th>
-                                    <th className="px-3 py-2 text-center w-16">A</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 text-xs">
-                                  {(() => {
-                                    const filtered = employees.filter(emp => {
-                                      if (isEmployeeExitedForMonth(emp, selectedMonth)) return false;
-                                      const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
-                                      const roleMatch = attendanceRoleFilters.length === 0 || attendanceRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
-                                      const skillMatch = employeeMatchesSkillFilters(emp, attendanceSkillFilters);
-                                      const q = attendanceSearchQuery.toLowerCase().trim();
-                                      const searchMatch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                      return locMatch && searchMatch && roleMatch && skillMatch;
-                                    });
-          
-                                    if (filtered.length === 0) {
-                                      return (
-                                        <tr>
-                                          <td colSpan={getDaysInSelectedMonth(selectedMonth) + 6} className="px-6 py-10 text-center text-slate-400">
-                                            No onboarded staff detected under active worksite location or search criteria.
-                                          </td>
-                                        </tr>
-                                      );
-                                    }
-          
-                                    return filtered.map((emp, index) => {
-                                      const monthData = attendanceDb[selectedMonth] || {};
-                                      const empData = monthData[emp.id] || {};
-                                      const daysCount = getDaysInSelectedMonth(selectedMonth);
-          
-                                      let presents = 0;
-                                      let absents = 0;
-                                      for (let d = 1; d <= daysCount; d++) {
-                                        if (isEmployeeExitedOnDayStatic(emp, selectedMonth, d)) {
-                                          continue;
-                                        }
-                                        const status = empData[d] || "";
-                                        if (status === "P") presents++;
-                                        else if (status === "A") absents++;
-                                      }
-          
-                                      return (
-                                        <tr key={emp.id} className="hover:bg-slate-50/50">
-                                          <td className="px-3 py-2 text-center text-slate-400 font-bold">{index + 1}</td>
-                                          <td className="px-3 py-2 font-mono font-bold text-slate-800">{emp.employeeCode}</td>
-                                          <td className="px-3 py-2 font-semibold text-slate-700">{emp.nameAsPerAadhar}</td>
-                                          <td className="px-3 py-2 text-slate-500 font-medium truncate max-w-[120px]" title={emp.location || "Unassigned"}>
-                                            {emp.location || "—"}
-                                          </td>
-                                          {Array.from({ length: daysCount }, (_, i) => {
-                                            const dayNum = i + 1;
-                                            const currentStatus = empData[dayNum] || "";
-                                            const isExitedToday = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
-                                            return (
-                                              <td key={i} className="px-0.5 py-1 text-center">
-                                                {isExitedToday ? (
-                                                  <span 
-                                                    className="text-[9px] font-bold text-slate-400 select-none bg-slate-100 rounded px-1.5 py-0.5 border border-slate-200"
-                                                    title="Exited / Inactive"
-                                                  >
-                                                    —
-                                                  </span>
-                                                ) : (
-                                                  <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
-                                                    value={currentStatus}
-                                                    onChange={(e) => handleCellAttendanceChange(emp.id, dayNum, e.target.value)}
-                                                    disabled={!userPermissions.attendance?.edit}
-                                                    className={`text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer ${
-                                                      currentStatus === "P" ? "bg-emerald-100 text-emerald-800" :
-                                                      currentStatus === "A" ? "bg-rose-100 text-rose-800" :
-                                                      currentStatus === "L" ? "bg-amber-100 text-amber-800" :
-                                                      currentStatus === "H" ? "bg-blue-100 text-blue-800" :
-                                                      "bg-slate-100 text-slate-400 font-semibold"
-                                                    }`}
-                                                  >
-                                                    <option value="">—</option>
-                                                    <option value="P">P</option>
-                                                    <option value="A">A</option>
-                                                    <option value="L">L</option>
-                                                    <option value="H">H</option>
-                                                  </select>
-                                                )}
-                                              </td>
-                                            );
-                                          })}
-                                          <td className="px-3 py-2 text-center font-bold text-emerald-600">{presents}</td>
-                                          <td className="px-3 py-2 text-center font-bold text-rose-600">{absents}</td>
-                                        </tr>
-                                      );
-                                    });
-                                  })()}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                            </>
-                          )}
-                        </div>
-                      ) : activeSidebarTab !== "Employees" ? (
-                       /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
-                       <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">
-                        <div className="w-16 h-16 bg-orange-50 text-[#ff791a] rounded-full flex items-center justify-center mx-auto text-3xl shadow-sm">
-                          ⚡
-                        </div>
-                        <div className="space-y-2">
-                          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">
-                            {activeSidebarTab} Module clearance Active
-                          </h2>
-                          <p className="text-sm text-slate-500 max-w-md mx-auto">
-                            You are logged into FlexHRM enterprise as <strong className="text-slate-800">{sessionUser}</strong>. All employee datasets, CSV bulk tools, and exports remain fully loaded in the Employees module.
-                          </p>
-                        </div>
-                        <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-150 inline-block text-left text-xs max-w-md w-full">
-                          <span className="font-bold text-slate-700 block mb-2 flex items-center gap-1">
-                            <Info size={14} className="text-blue-500" /> Executive Metadata Overview
-                          </span>
-                          <ul className="text-slate-500 space-y-1 font-mono">
-                            <li>• Total Employee Records: {employees.length}</li>
-                            <li>• Mapped Locations: {dashboardStats.uniqueLocsCount}</li>
-                            <li>• Base Branch: {companyBranch}</li>
-                          </ul>
-                        </div>
-                        <div>
-                          <button
-                            onClick={() => setActiveSidebarTab("Employees")}
-                            className="px-5 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg shadow transition cursor-pointer"
-                          >
-                            Return to Employees Module
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* --- CENTRAL EMPLOYEES MODULE ACTIVE --- */
-                      <>
-                        {/* Employees SUB-TAB 1: CONFIGURATION PLAYGROUND PANEL */}
-                        {activePimSubTab === "Configuration" && (
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 animate-fade-in" id="view-configuration-panel">
-                            <div>
-                              <h3 className="text-base font-extrabold text-slate-800 tracking-tight">HRMS System Rules Configurations</h3>
-                              <p className="text-xs text-slate-400 mt-1">Amend systemic ESIC thresholds and payroll allocation matrices</p>
-                            </div>
-          
-                            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(300px,1.35fr)_minmax(0,1fr)] gap-6 pt-2">
-                              {/* Left side: Rules, Percent, and Mapped Branch */}
-                              <div className="space-y-6 flex flex-col">
-                                <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-150 flex-1">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <IndianRupee size={14} className="text-orange-500" /> ESIC Ceiling Limit (INR)
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                                    Specify the salary ceiling threshold. Employees earning Gross Salary below or equal to this ceiling will automatically be enrolled.
-                                  </p>
-                                  <div className="pt-2 flex items-center gap-3">
-                                    <input id="esic-eligibility-limit" name="esicEligibilityLimit"
-                                      type="number"
-                                      value={esicEligibilityLimit}
-                                      onChange={(e) => setEsicEligibilityLimit(Math.max(0, parseInt(e.target.value) || 0))}
-                                      className="px-3 py-1.5 border border-slate-250 bg-white rounded text-xs font-mono font-bold text-slate-800 w-36 focus:outline-none focus:border-orange-500"
-                                    />
-                                    <span className="text-[11px] font-semibold text-slate-500">Currently: Gross ≤ Rs. {esicEligibilityLimit.toLocaleString("en-IN")}</span>
-                                  </div>
-                                </div>
-          
-                                <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-150 flex-1">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <PercentIcon size={14} className="text-orange-500" /> Basic Salary Computation (% of Gross)
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                                    Control how the Basic Salary component is evaluated on manual addition. The industry standard maps this as 50% of the Monthly Gross.
-                                  </p>
-                                  <div className="pt-2 flex items-center gap-3">
-                                    <select id="basic-salary-percentage" name="basicSalaryPercentage"
-                                      value={basicSalaryPercentage}
-                                      onChange={(e) => setBasicSalaryPercentage(parseInt(e.target.value))}
-                                      className="px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 font-bold focus:outline-none"
-                                    >
-                                      <option value="40">40% of Gross Salary</option>
-                                      <option value="50">50% of Gross Salary (Default)</option>
-                                      <option value="60">60% of Gross Salary</option>
-                                    </select>
-                                  </div>
-                                </div>
-          
-                                <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-150 flex-1">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Building size={14} className="text-orange-500" /> Mapped Branch Office
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400">
-                                    Default corporate branch for new, manual employee registration.
-                                  </p>
-                                  <input id="company-branch" name="companyBranch"
-                                    type="text"
-                                    value={companyBranch}
-                                    onChange={(e) => setCompanyBranch(e.target.value)}
-                                    placeholder="e.g. Hyderabad Branch"
-                                    className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 font-semibold focus:outline-none"
-                                  />
-                                </div>
-                              </div>
-          
-                              {/* Middle: Office Locations Registry */}
-                              <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-150 flex flex-col h-full">
-                                <div>
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Map size={14} className="text-orange-500" /> Office Locations Registry
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    Create, maintain, and edit corporate branch office designations. Renaming a branch updates all associated employee records in bulk automatically.
-                                  </p>
-                                </div>
-          
-                                {/* Add new branch option row */}
-                                <div className="space-y-2.5 w-full">
-                                  <div className="flex flex-col gap-2">
-                                    <input id="new-loc-name-input" name="newLocNameInput"
-                                      type="text"
-                                      placeholder="Enter a brand new office location name..."
-                                      value={newLocNameInput}
-                                      onChange={(e) => setNewLocNameInput(e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          e.preventDefault();
-                                          const val = newLocNameInput.trim();
-                                          if (val) {
-                                            handleAddLocationFromConfig(val, newLocCompliance);
-                                            setNewLocNameInput("");
-                                          }
-                                        }
-                                      }}
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white text-xs text-slate-800 rounded placeholder-slate-400 focus:outline-none focus:border-orange-500 transition"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const val = newLocNameInput.trim();
-                                        if (val) {
-                                          handleAddLocationFromConfig(val, newLocCompliance);
-                                          setNewLocNameInput("");
-                                        }
-                                      }}
-                                      className="w-full px-3.5 py-1.5 bg-[#f57416] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg shadow-sm flex items-center justify-center gap-1 cursor-pointer transition"
-                                    >
-                                      <Plus size={14} className="stroke-[2.5]" /> Add Branch
-                                    </button>
-                                  </div>
-                                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 space-y-2">
-                                    <label htmlFor="new-loc-compliance" className="flex items-start gap-2 cursor-pointer select-none">
-                                      <input
-                                        type="checkbox"
-                                        id="new-loc-compliance"
-                                        checked={newLocCompliance}
-                                        onChange={(e) => setNewLocCompliance(e.target.checked)}
-                                        className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
-                                      />
-                                      <span className="text-[11px] font-bold text-slate-650 leading-snug">
-                                        Enable Compliance (PF, ESIC, PT)
-                                      </span>
-                                    </label>
-                                    <div className="flex items-center justify-between gap-3 pt-0.5 border-t border-slate-100">
-                                      <label htmlFor="new-loc-pt-amount" className="text-[11px] font-bold text-slate-650 whitespace-nowrap">
-                                        Default PT (₹)
-                                      </label>
-                                      <input
-                                        type="number"
-                                        id="new-loc-pt-amount"
-                                        min={0}
-                                        step={1}
-                                        value={newLocPtAmount}
-                                        onChange={(e) => setNewLocPtAmount(e.target.value)}
-                                        className="w-24 px-2 py-1 border border-slate-250 bg-white text-xs text-slate-800 rounded focus:outline-none focus:border-orange-500 text-right font-semibold"
-                                        title="Professional Tax amount when monthly gross exceeds ₹10,000"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-          
-                                {/* Bulk delete action bar */}
-                                {selectedLocs.length > 0 && (
-                                  <div className="bg-orange-50 px-4 py-2 border border-orange-100 rounded-lg flex items-center justify-between animate-fade-in">
-                                    <span className="text-[11px] font-bold text-slate-700">
-                                      {selectedLocs.length} location{selectedLocs.length > 1 ? "s" : ""} selected
-                                    </span>
-                                    <div className="flex gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteLocations(selectedLocs)}
-                                        className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg flex items-center gap-1 cursor-pointer transition shadow-sm"
-                                      >
-                                        <Trash2 size={11} className="stroke-[2.5]" /> Delete Selected
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setSelectedLocs([])}
-                                        className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-[10px] uppercase tracking-wider rounded-lg cursor-pointer transition"
-                                      >
-                                        Clear
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-          
-                                {/* Display scrollable list of locations */}
-                                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden flex flex-col min-w-0">
-                                  <div className="bg-slate-100/50 px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
-                                    <label className="flex items-center gap-2 min-w-0 cursor-pointer select-none">
-                                      <input id="loc-select-all" name="locSelectAll"
-                                        type="checkbox"
-                                        checked={customLocations.length > 0 && selectedLocs.length === customLocations.length}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setSelectedLocs([...customLocations]);
-                                          } else {
-                                            setSelectedLocs([]);
-                                          }
-                                        }}
-                                        className="w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
-                                      />
-                                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider truncate">
-                                        All locations ({customLocations.length})
-                                      </span>
-                                    </label>
-                                  </div>
-                                  <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto overflow-x-hidden" id="locations-scrollable-list">
-                                    {customLocations.length === 0 ? (
-                                      <p className="px-3 py-6 text-center text-[11px] text-slate-400">No branch offices added yet.</p>
-                                    ) : (
-                                      customLocations.map((loc, idx) => {
-                                        const isEditing = editingLocIndex === idx;
-                                        const isSelected = selectedLocs.includes(loc);
-                                        return (
-                                          <div
-                                            key={loc + idx}
-                                            className={`px-3 py-2.5 space-y-2 transition ${isSelected ? "bg-orange-50/30" : "hover:bg-slate-50/60"}`}
-                                          >
-                                            {isEditing ? (
-                                              <div className="flex items-center gap-1.5">
-                                                <input id={`edit-loc-${loc}`} name={`editLoc_${loc}`}
-                                                  type="text"
-                                                  value={editingLocValue}
-                                                  onChange={(e) => setEditingLocValue(e.target.value)}
-                                                  onKeyDown={(e) => {
-                                                    if (e.key === "Enter") {
-                                                      e.preventDefault();
-                                                      if (editingLocValue.trim()) {
-                                                        handleEditLocationFromConfig(loc, editingLocValue.trim());
-                                                        setEditingLocIndex(null);
-                                                      }
-                                                    } else if (e.key === "Escape") {
-                                                      setEditingLocIndex(null);
-                                                    }
-                                                  }}
-                                                  className="flex-1 min-w-0 px-2.5 py-1 border border-blue-400 bg-blue-50/20 text-slate-800 font-medium text-xs rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                  autoFocus
-                                                />
-                                                <button
-                                                  type="button"
-                                                  disabled={!editingLocValue.trim()}
-                                                  onClick={() => {
-                                                    if (editingLocValue.trim()) {
-                                                      handleEditLocationFromConfig(loc, editingLocValue.trim());
-                                                      setEditingLocIndex(null);
-                                                    }
-                                                  }}
-                                                  className="p-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded transition cursor-pointer shrink-0"
-                                                  title="Save name changes"
-                                                >
-                                                  <Check size={12} className="stroke-[3]" />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setEditingLocIndex(null)}
-                                                  className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded border border-slate-200 transition cursor-pointer shrink-0"
-                                                  title="Cancel edit"
-                                                >
-                                                  <X size={12} className="stroke-[2.5]" />
-                                                </button>
-                                              </div>
-                                            ) : (
-                                              <>
-                                                <div className="flex items-start gap-2 min-w-0">
-                                                  <input id={`loc-select-${loc}`} name={`locSelect_${loc}`}
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={(e) => {
-                                                      if (e.target.checked) {
-                                                        setSelectedLocs(prev => [...prev, loc]);
-                                                      } else {
-                                                        setSelectedLocs(prev => prev.filter(l => l !== loc));
-                                                      }
-                                                    }}
-                                                    className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
-                                                  />
-                                                  <p
-                                                    className="flex-1 min-w-0 text-xs font-semibold text-slate-800 leading-snug"
-                                                    title={loc}
-                                                  >
-                                                    {loc}
-                                                  </p>
-                                                  <div className="flex items-center gap-0.5 shrink-0">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => {
-                                                        setEditingLocIndex(idx);
-                                                        setEditingLocValue(loc);
-                                                      }}
-                                                      className="p-1 hover:bg-slate-150 text-slate-500 hover:text-slate-800 rounded border border-transparent hover:border-slate-250 transition cursor-pointer"
-                                                      title={`Rename "${loc}"`}
-                                                    >
-                                                      <Edit2 size={12} />
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleDeleteLocations([loc])}
-                                                      className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded border border-transparent hover:border-slate-250 transition cursor-pointer"
-                                                      title={`Delete "${loc}"`}
-                                                    >
-                                                      <Trash2 size={12} />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-6">
-                                                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
-                                                    <input id={`loc-compliance-${loc}`} name={`locCompliance_${loc}`}
-                                                      type="checkbox"
-                                                      checked={!!locationCompliance[loc]}
-                                                      onChange={(e) => updateLocationCompliance(loc, e.target.checked)}
-                                                      className="w-3.5 h-3.5 text-emerald-500 border-slate-300 rounded focus:ring-emerald-500 cursor-pointer"
-                                                    />
-                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Compliance</span>
-                                                  </label>
-                                                  <label className="inline-flex items-center gap-1.5 select-none">
-                                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PT (₹)</span>
-                                                    <input id={`loc-pt-${loc}`} name={`locPt_${loc}`}
-                                                      type="number"
-                                                      min={0}
-                                                      step={1}
-                                                      value={resolveLocationPtAmount(loc, locationPtAmounts)}
-                                                      onChange={(e) => updateLocationPtAmount(loc, e.target.value)}
-                                                      className="w-16 px-2 py-0.5 border border-slate-250 bg-white text-xs font-semibold text-slate-800 rounded focus:outline-none focus:border-orange-500 text-center"
-                                                      title={`Professional Tax for "${loc}" when gross > ₹10,000`}
-                                                    />
-                                                  </label>
-                                                </div>
-                                              </>
-                                            )}
-                                          </div>
-                                        );
-                                      })
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-          
-                              {/* Right side: Job Roles Registry */}
-                              <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-150 flex flex-col h-full">
-                                <div>
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Briefcase size={14} className="text-orange-500" /> Job Roles Registry
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    Create, maintain, and edit specialized job designations. Renaming a role updates all associated employee records in bulk automatically.
-                                  </p>
-                                </div>
-          
-                                {/* Add new role option row */}
-                                <div className="flex gap-2 items-center">
-                                  <input id="new-role-name-input" name="newRoleNameInput"
-                                    type="text"
-                                    placeholder="Enter a brand new job role..."
-                                    value={newRoleNameInput}
-                                    onChange={(e) => setNewRoleNameInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        const val = newRoleNameInput.trim();
-                                        if (val) {
-                                          handleAddRoleFromConfig(val);
-                                          setNewRoleNameInput("");
-                                        }
-                                      }
-                                    }}
-                                    className="flex-1 px-3 py-1.5 border border-slate-250 bg-white text-xs text-slate-800 rounded placeholder-slate-400 focus:outline-none focus:border-orange-500 transition"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const val = newRoleNameInput.trim();
-                                      if (val) {
-                                        handleAddRoleFromConfig(val);
-                                        setNewRoleNameInput("");
-                                      }
-                                    }}
-                                    className="px-3.5 py-1.5 bg-[#f57416] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
-                                  >
-                                    <Plus size={14} className="stroke-[2.5]" /> Add Role
-                                  </button>
-                                </div>
-          
-                                {/* Bulk delete action bar */}
-                                {selectedRoles.length > 0 && (
-                                  <div className="bg-orange-50 px-4 py-2 border border-orange-100 rounded-lg flex items-center justify-between animate-fade-in">
-                                    <span className="text-[11px] font-bold text-slate-700">
-                                      {selectedRoles.length} role{selectedRoles.length > 1 ? "s" : ""} selected
-                                    </span>
-                                    <div className="flex gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteRoles(selectedRoles)}
-                                        className="px-2.5 py-1 bg-red-500 hover:bg-red-600 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg flex items-center gap-1 cursor-pointer transition shadow-sm"
-                                      >
-                                        <Trash2 size={11} className="stroke-[2.5]" /> Delete Selected
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setSelectedRoles([])}
-                                        className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-[10px] uppercase tracking-wider rounded-lg cursor-pointer transition"
-                                      >
-                                        Clear
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-          
-                                {/* Display scrollable list of roles */}
-                                <div className="border border-slate-200 rounded-lg bg-white overflow-hidden flex flex-col">
-                                  <div className="bg-slate-100/50 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                                    <div className="flex items-center gap-2">
-                                      <input id="role-select-all" name="roleSelectAll"
-                                        type="checkbox"
-                                        checked={customRoles.length > 0 && selectedRoles.length === customRoles.length}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            setSelectedRoles([...customRoles]);
-                                          } else {
-                                            setSelectedRoles([]);
-                                          }
-                                        }}
-                                        className="w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
-                                      />
-                                      <span>Role Title</span>
-                                    </div>
-                                    <span>Actions</span>
-                                  </div>
-                                  <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto" id="roles-scrollable-list">
-                                    {customRoles.map((role, idx) => {
-                                      const isEditing = editingRoleIndex === idx;
-                                      const isSelected = selectedRoles.includes(role);
-                                      return (
-                                        <div key={role + idx} className={`px-3 py-2 flex items-center justify-between transition ${isSelected ? "bg-orange-50/20" : "hover:bg-slate-50/50"}`}>
-                                          {isEditing ? (
-                                            <div className="flex items-center gap-1.5 flex-1 mr-2">
-                                              <input id={`edit-role-${role}`} name={`editRole_${role}`}
-                                                type="text"
-                                                value={editingRoleValue}
-                                                onChange={(e) => setEditingRoleValue(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                  if (e.key === "Enter") {
-                                                    e.preventDefault();
-                                                    if (editingRoleValue.trim()) {
-                                                      handleEditRoleFromConfig(role, editingRoleValue.trim());
-                                                      setEditingRoleIndex(null);
-                                                    }
-                                                  } else if (e.key === "Escape") {
-                                                    setEditingRoleIndex(null);
-                                                  }
-                                                }}
-                                                className="flex-1 px-2.5 py-1 border border-blue-400 bg-blue-50/20 text-slate-800 font-medium text-xs rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                                autoFocus
-                                              />
-                                              <button
-                                                type="button"
-                                                disabled={!editingRoleValue.trim()}
-                                                onClick={() => {
-                                                  if (editingRoleValue.trim()) {
-                                                    handleEditRoleFromConfig(role, editingRoleValue.trim());
-                                                    setEditingRoleIndex(null);
-                                                  }
-                                                }}
-                                                className="p-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded transition cursor-pointer"
-                                                title="Save name changes"
-                                              >
-                                                <Check size={12} className="stroke-[3]" />
-                                              </button>
-                                              <button
-                                                type="button"
-                                                onClick={() => setEditingRoleIndex(null)}
-                                                className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded border border-slate-200 transition cursor-pointer"
-                                                title="Cancel edit"
-                                              >
-                                                <X size={12} className="stroke-[2.5]" />
-                                              </button>
-                                            </div>
-                                          ) : (
-                                            <>
-                                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                <input id={`role-select-${role}`} name={`roleSelect_${role}`}
-                                                  type="checkbox"
-                                                  checked={isSelected}
-                                                  onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                      setSelectedRoles(prev => [...prev, role]);
-                                                    } else {
-                                                      setSelectedRoles(prev => prev.filter(r => r !== role));
-                                                    }
-                                                  }}
-                                                  className="w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer flex-shrink-0"
-                                                />
-                                                <span className="text-xs font-semibold text-slate-700 truncate max-w-[280px] sm:max-w-md">{role}</span>
-                                              </div>
-                                              <div className="flex items-center gap-1">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setEditingRoleIndex(idx);
-                                                    setEditingRoleValue(role);
-                                                  }}
-                                                  className="p-1 hover:bg-slate-150 text-slate-500 hover:text-slate-800 rounded border border-transparent hover:border-slate-250 transition cursor-pointer"
-                                                  title={`Rename "${role}"`}
-                                                >
-                                                  <Edit2 size={12} />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteRoles([role])}
-                                                  className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded border border-transparent hover:border-slate-250 transition cursor-pointer"
-                                                  title={`Delete "${role}"`}
-                                                >
-                                                  <Trash2 size={12} />
-                                                </button>
-                                              </div>
-                                            </>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-          
-                            <div className="pt-4 border-t border-slate-100 flex justify-end">
-                              <button
-                                onClick={() => {
-                                  triggerSuccess("Successfully applied all configuration changes.");
-                                  setActivePimSubTab("Employee List");
-                                }}
-                                className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg shadow cursor-pointer transition"
-                              >
-                                Apply Rule Mappings
-                              </button>
-                            </div>
-                          </div>
-                        )}
-          
-                        {/* Employees SUB-TAB 2: REPORTS DASHBOARD WITH SUMMARY DATA */}
-                        {activePimSubTab === "Reports" && (
-                          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 animate-fade-in" id="view-reports-panel">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <div>
-                                <h3 className="text-base font-extrabold text-slate-800 tracking-tight">Active Employee Database Reports</h3>
-                                <p className="text-xs text-slate-400 mt-1">Dynamic data visualizers summarizing current onboardings</p>
-                              </div>
-                              <button
-                                onClick={() => handleExportSelected("csv", employees.map(e => e.id))}
-                                className="flex items-center gap-1 px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 rounded text-xs text-slate-700 font-bold transition cursor-pointer"
-                              >
-                                <FileSpreadsheet size={13} className="text-green-600" /> Export All CSV Report
-                              </button>
-                            </div>
-          
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4" id="reports-bento-cards">
-                              {/* Distribution card */}
-                              <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl space-y-3">
-                                <span className="text-xs font-black text-slate-700 block uppercase tracking-wider flex items-center gap-1.5">
-                                  <Map size={14} className="text-blue-500" /> Location Allocations
-                                </span>
-                                <div className="divide-y divide-slate-100 text-xs text-slate-600 max-h-48 overflow-y-auto">
-                                  {Array.from(new Set(employees.map(e => e.location || "Unassigned"))).map(loc => {
-                                    const count = employees.filter(e => (e.location || "Unassigned") === loc).length;
-                                    const pct = employees.length ? Math.round((count / employees.length) * 100) : 0;
-                                    return (
-                                      <div key={loc} className="py-2 flex items-center justify-between">
-                                        <span className="font-bold truncate max-w-[150px]">{loc}</span>
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-slate-400 font-mono">{count} ({pct}%)</span>
-                                          <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
-                                            <div className="h-full bg-blue-500" style={{ width: `${pct}%` }}></div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-          
-                              {/* Gender Breakdown card */}
-                              <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl space-y-3">
-                                <span className="text-xs font-black text-slate-700 block uppercase tracking-wider flex items-center gap-1.5">
-                                  <UserCircle size={14} className="text-emerald-500" /> Gender Demographics
-                                </span>
-                                <div className="space-y-4 text-xs">
-                                  {["Male", "Female", "Other"].map(genderType => {
-                                    const count = employees.filter(e => (e.gender || "Male").toLowerCase() === genderType.toLowerCase()).length;
-                                    const pct = employees.length ? Math.round((count / employees.length) * 100) : 0;
-                                    return (
-                                      <div key={genderType} className="space-y-1">
-                                        <div className="flex justify-between font-bold text-slate-600">
-                                          <span>{genderType}</span>
-                                          <span className="font-mono text-slate-400">{count} Employees ({pct}%)</span>
-                                        </div>
-                                        <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
-                                          <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }}></div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-          
-                              {/* Salary Bands */}
-                              <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl space-y-3">
-                                <span className="text-xs font-black text-slate-700 block uppercase tracking-wider flex items-center gap-1.5">
-                                  <TrendingUp size={14} className="text-orange-500" /> Monthly Payroll Mappings
-                                </span>
-                                <div className="space-y-2 text-xs">
-                                  <div className="flex justify-between py-1 border-b border-white">
-                                    <span className="text-slate-500 font-medium">Total Gross Pool:</span>
-                                    <span className="font-extrabold text-slate-800">Rs. {dashboardStats.totalGrossPayroll.toLocaleString("en-IN")}</span>
-                                  </div>
-                                  <div className="flex justify-between py-1 border-b border-white">
-                                    <span className="text-slate-500 font-medium">Average Salary:</span>
-                                    <span className="font-extrabold text-slate-800">
-                                      Rs. {employees.length ? Math.round(dashboardStats.totalGrossPayroll / employees.length).toLocaleString("en-IN") : "0"}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between py-1 border-b border-white">
-                                    <span className="text-slate-500 font-medium">ESIC Insured Rate:</span>
-                                    <span className="font-extrabold text-slate-800">
-                                      {employees.length ? Math.round((dashboardStats.esicCoveredCount / employees.length) * 100) : "0"}% Cover Rate
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-          
-                            {/* Dynamic Custom Reports Builder */}
-                            <div className="mt-8 pt-6 border-t border-slate-100 space-y-6" id="custom-reports-builder">
-                              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-3">
-                                <div>
-                                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Wrench size={16} className="text-[#f57416]" /> Custom Report Builder (On-Demand)
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    Configure targeted custom filters, choose your required spreadsheet columns individually, and download on-demand reports instantly.
-                                  </p>
-                                </div>
-          
-                                {/* Layout Template Management System */}
-                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-slate-50 border border-slate-200 p-2 rounded-xl text-left shrink-0 max-w-full">
-                                  {/* Load template dropdown */}
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider whitespace-nowrap">📋 Template:</span>
-                                    <select id="active-report-template-name" name="activeReportTemplateName"
-                                      value={activeReportTemplateName}
-                                      onChange={(e) => handleLoadReportTemplate(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none min-w-[120px] max-w-[150px] truncate"
-                                    >
-                                      <option value="">-- Choose Layout --</option>
-                                      {savedReportTemplates.map((t: any) => (
-                                        <option key={t.name} value={t.name}>{t.name}</option>
-                                      ))}
-                                    </select>
-                                    {activeReportTemplateName && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteReportTemplate(activeReportTemplateName)}
-                                        className="text-red-500 hover:text-red-700 font-extrabold text-[10px] hover:bg-red-50 px-1.5 py-0.5 rounded cursor-pointer transition uppercase"
-                                        title="Delete template"
-                                      >
-                                        ✕ Delete
-                                      </button>
-                                    )}
-                                  </div>
-          
-                                  <span className="hidden sm:inline text-slate-300">|</span>
-          
-                                  {/* Save new template inline form */}
-                                  <form onSubmit={handleSaveReportTemplate} className="flex items-center gap-1">
-                                    <input id="new-report-template-name" name="newReportTemplateName"
-                                      type="text"
-                                      placeholder="New template name..."
-                                      value={newReportTemplateName}
-                                      onChange={(e) => setNewReportTemplateName(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] font-medium text-slate-700 focus:outline-none focus:border-[#f57416] w-[130px]"
-                                    />
-                                    <button
-                                      type="submit"
-                                      disabled={!newReportTemplateName.trim()}
-                                      className="px-2.5 py-1 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white font-extrabold text-[10px] uppercase tracking-wider rounded transition cursor-pointer shrink-0"
-                                    >
-                                      Save Layout
-                                    </button>
-                                  </form>
-                                </div>
-                              </div>
-          
-                              {/* Filter Criteria Grid */}
-                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-150">
-                                
-                                {/* Location Filter (multi-select) */}
-                                <div className="space-y-1.5 relative" id="report-loc-multiselect-container">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Branch/Work Location</label>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsReportLocDropdownOpen(!isReportLocDropdownOpen);
-                                        setIsSkillDropdownOpen(false);
-                                        setIsRoleDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {reportLocFilters.length === 0
-                                          ? "All Locations"
-                                          : reportLocFilters.length === 1
-                                            ? reportLocFilters[0]
-                                            : `${reportLocFilters.length} Locations Selected`}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400 shrink-0 ml-1">▼</span>
-                                    </button>
-          
-                                    {isReportLocDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-56 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[10px] text-slate-400 font-bold">Branches</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setReportLocFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {customLocations.map((loc) => {
-                                          const isChecked = reportLocFilters.includes(loc);
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setReportLocFilters((prev) => prev.filter((l) => l !== loc));
-                                            } else {
-                                              setReportLocFilters((prev) => [...prev, loc]);
-                                            }
-                                          };
-                                          return (
-                                            <label
-                                              key={loc}
-                                              className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none"
-                                            >
-                                              <input id="checkbox-field-9582" name="checkbox_9582"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-medium leading-snug">{loc}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* Employee Search Bar */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Search Employee</label>
-                                  <input id="report-search-query" name="reportSearchQuery"
-                                    type="text"
-                                    placeholder="Search Code or Name..."
-                                    value={reportSearchQuery}
-                                    onChange={(e) => setReportSearchQuery(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                  />
-                                </div>
-          
-                                {/* Skill Category Filter */}
-                                <div className="space-y-1.5 relative" id="skill-multiselect-container">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Skill Category Filter</label>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsSkillDropdownOpen(!isSkillDropdownOpen);
-                                        setIsRoleDropdownOpen(false);
-                                        setIsReportLocDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {reportSkillFilters.length === 0 
-                                          ? "All Categories" 
-                                          : `${reportSkillFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isSkillDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[10px] text-slate-400 font-bold">Categories</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setReportSkillFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {["Highly Skilled", "Skilled", "Semi Skilled", "Unskilled"].map(cat => {
-                                          const isChecked = reportSkillFilters.includes(cat);
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setReportSkillFilters(prev => prev.filter(c => c !== cat));
-                                            } else {
-                                              setReportSkillFilters(prev => [...prev, cat]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={cat} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-9653" name="checkbox_9653"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-medium">{cat}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* Job Role Filter */}
-                                <div className="space-y-1.5 relative" id="role-multiselect-container">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Job Role Filter</label>
-                                  <div className="relative">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setIsRoleDropdownOpen(!isRoleDropdownOpen);
-                                        setIsSkillDropdownOpen(false);
-                                        setIsReportLocDropdownOpen(false);
-                                      }}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                    >
-                                      <span className="truncate">
-                                        {reportRoleFilters.length === 0 
-                                          ? "All Roles" 
-                                          : `${reportRoleFilters.length} Selected`}
-                                      </span>
-                                      <span className="text-[10px] text-slate-400">▼</span>
-                                    </button>
-                                    
-                                    {isRoleDropdownOpen && (
-                                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-56 overflow-y-auto">
-                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                          <span className="text-[10px] text-slate-400 font-bold">Roles</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => setReportRoleFilters([])}
-                                            className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                          >
-                                            Clear All
-                                          </button>
-                                        </div>
-                                        {customRoles.map(role => {
-                                          const isChecked = reportRoleFilters.includes(role);
-                                          const toggle = () => {
-                                            if (isChecked) {
-                                              setReportRoleFilters(prev => prev.filter(r => r !== role));
-                                            } else {
-                                              setReportRoleFilters(prev => [...prev, role]);
-                                            }
-                                          };
-                                          return (
-                                            <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                              <input id="checkbox-field-9712" name="checkbox_9712"
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={toggle}
-                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                              />
-                                              <span className="font-medium">{role}</span>
-                                            </label>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-          
-                                {/* PF Joining Date Range */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">PF Joining Date Range</label>
-                                  <div className="grid grid-cols-2 gap-1 items-center">
-                                    <input id="report-join-start-filter" name="reportJoinStartFilter"
-                                      type="date"
-                                      value={reportJoinStartFilter}
-                                      onChange={(e) => setReportJoinStartFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                    <input id="report-join-end-filter" name="reportJoinEndFilter"
-                                      type="date"
-                                      value={reportJoinEndFilter}
-                                      onChange={(e) => setReportJoinEndFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                  </div>
-                                </div>
-          
-                                {/* Exit Date Range */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Exit/Leaving Date Range</label>
-                                  <div className="grid grid-cols-2 gap-1 items-center">
-                                    <input id="report-exit-start-filter" name="reportExitStartFilter"
-                                      type="date"
-                                      value={reportExitStartFilter}
-                                      onChange={(e) => setReportExitStartFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                    <input id="report-exit-end-filter" name="reportExitEndFilter"
-                                      type="date"
-                                      value={reportExitEndFilter}
-                                      onChange={(e) => setReportExitEndFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                  </div>
-                                </div>
-          
-                                {/* Salary Range */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Monthly Gross Salary (Rs.)</label>
-                                  <div className="grid grid-cols-2 gap-1 items-center">
-                                    <input id="report-min-salary-filter" name="reportMinSalaryFilter"
-                                      type="number"
-                                      placeholder="Min"
-                                      value={reportMinSalaryFilter}
-                                      onChange={(e) => setReportMinSalaryFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                    <input id="report-max-salary-filter" name="reportMaxSalaryFilter"
-                                      type="number"
-                                      placeholder="Max"
-                                      value={reportMaxSalaryFilter}
-                                      onChange={(e) => setReportMaxSalaryFilter(e.target.value)}
-                                      className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
-                                    />
-                                  </div>
-                                </div>
-          
-                                {/* Gender Filter */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gender</label>
-                                  <select id="report-gender-filter" name="reportGenderFilter"
-                                    value={reportGenderFilter}
-                                    onChange={(e) => setReportGenderFilter(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none"
-                                  >
-                                    <option value="All">All Genders</option>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                    <option value="Other">Other</option>
-                                  </select>
-                                </div>
-          
-                                {/* Marital Status Filter */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Marital Status</label>
-                                  <select id="report-marital-filter" name="reportMaritalFilter"
-                                    value={reportMaritalFilter}
-                                    onChange={(e) => setReportMaritalFilter(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none"
-                                  >
-                                    <option value="All">All Statuses</option>
-                                    <option value="Single">Single</option>
-                                    <option value="Married">Married</option>
-                                    <option value="Divorced">Divorced</option>
-                                    <option value="Widowed">Widowed</option>
-                                  </select>
-                                </div>
-          
-                                {/* ESIC Filter */}
-                                <div className="space-y-1.5">
-                                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">ESIC Insured Status</label>
-                                  <select id="report-esic-filter" name="reportEsicFilter"
-                                    value={reportEsicFilter}
-                                    onChange={(e) => setReportEsicFilter(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none"
-                                  >
-                                    <option value="All">All Coverage</option>
-                                    <option value="Yes">Yes (Insured)</option>
-                                    <option value="No">No (Exempt/Excluded)</option>
-                                  </select>
-                                </div>
-          
-                                {/* Action Result Info */}
-                                <div className="flex flex-col justify-end">
-                                  <div className="bg-[#f57416]/10 border border-[#f57416]/20 rounded-lg p-2 text-center">
-                                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Matched Employees</span>
-                                    <span className="text-sm font-extrabold text-[#f57416]">{filteredReportEmployees.length} records</span>
-                                  </div>
-                                </div>
-          
-                              </div>
-          
-                              {/* Column Selection Section */}
-                              <div className="space-y-3">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                  <div>
-                                    <h5 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Choose Columns to Include ({selectedReportColumns.length} of {EXCEL_ROW_HEADERS.length} selected)</h5>
-                                    <p className="text-[10px] text-slate-400">Click individual column headers or use category blocks to build custom schemas.</p>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedReportColumns(EXCEL_ROW_HEADERS)}
-                                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-[10px] text-slate-600 font-bold rounded cursor-pointer transition"
-                                    >
-                                      Select All
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedReportColumns([])}
-                                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-[10px] text-slate-600 font-bold rounded cursor-pointer transition"
-                                    >
-                                      Clear All
-                                    </button>
-                                  </div>
-                                </div>
-          
-                                {/* Six Column Grouping Sections */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                  {[
-                                    {
-                                      name: "Workplace & Metadata",
-                                      color: "bg-blue-100/50 text-blue-800 border-blue-205",
-                                      headers: ["SR NO", "Employees Code **", "Location", "Skill Category", "Job Role", "Working Days Cycle", "Daily Wage"]
-                                    },
-                                    {
-                                      name: "Primary Demographics",
-                                      color: "bg-purple-100/50 text-purple-800 border-purple-205",
-                                      headers: ["EMPLOYEE NAME AS PER AADHAR ***", "GENDER **", "DATE OF BIRTH", "MARITAL STATUS **", "AADHAR LINK MOB.NO. **", "Employee Mobile"]
-                                    },
-                                    {
-                                      name: "Payroll & Statutory Systems",
-                                      color: "bg-emerald-100/50 text-emerald-800 border-emerald-205",
-                                      headers: ["Gross Salary***", "Basic Salary***", "ESIC", "UAN", "PF JOINING DATE"]
-                                    },
-                                    {
-                                      name: "Identity & Tax Credentials",
-                                      color: "bg-indigo-100/50 text-indigo-800 border-indigo-205",
-                                      headers: ["AADHAR NO **", "NAME AS PER AADHAR **", "PAN NO", "NAME AS PER PAN", "Present Address**", "Permanent Address**"]
-                                    },
-                                    {
-                                      name: "Bank Details & Directives",
-                                      color: "bg-amber-100/50 text-amber-800 border-amber-305",
-                                      headers: ["BANK ACCOUNT NO **", "IFSC CODE **", "EMPLOYEE NAME AS PER BANK **"]
-                                    },
-                                    {
-                                      name: "Family, Nominee & Prior Registry",
-                                      color: "bg-rose-100/50 text-rose-800 border-rose-205",
-                                      headers: [
-                                        "FATHER **", "HUSBAND NAME **", "PREVIOUS UAN NO", "PREVIOUS ESIC NO***",
-                                        "Nominee Name (ESIC)", "Nominee DOB", "Nominee Relation", "Nominee Mobile",
-                                        "Family Member Name (1)", "Family Member DOB (1)", "Family Member Relation (1)", "Family Member Mobile (1)",
-                                        "Family Member Name (2)", "Family Member DOB (2)", "Family Member Relation (2)", "Family Member Mobile (2)",
-                                        "Family Member Name (3)", "Family Member DOB (3)", "Family Member Relation (3)", "Family Member Mobile (3)"
-                                      ]
-                                    }
-                                  ].map(group => {
-                                    const groupCheckedCount = group.headers.filter(h => selectedReportColumns.includes(h)).length;
-                                    const isAllGroupChecked = groupCheckedCount === group.headers.length;
-                                    const isSomeGroupChecked = groupCheckedCount > 0 && !isAllGroupChecked;
-          
-                                    const toggleGroup = () => {
-                                      if (isAllGroupChecked) {
-                                        // Remove all
-                                        setSelectedReportColumns(prev => prev.filter(h => !group.headers.includes(h)));
-                                      } else {
-                                        // Add all
-                                        setSelectedReportColumns(prev => Array.from(new Set([...prev, ...group.headers])));
-                                      }
-                                    };
-          
-                                    return (
-                                      <div key={group.name} className="border border-slate-150 rounded-xl overflow-hidden bg-white flex flex-col">
-                                        {/* Header band */}
-                                        <div className={`px-3 py-2 border-b border-inherit flex items-center justify-between ${group.color}`}>
-                                          <div className="flex items-center gap-1.5 min-w-0">
-                                            <input id="checkbox-field-9925" name="checkbox_9925"
-                                              type="checkbox"
-                                              ref={el => {
-                                                if (el) el.indeterminate = isSomeGroupChecked;
-                                              }}
-                                              checked={isAllGroupChecked}
-                                              onChange={toggleGroup}
-                                              className="rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
-                                            />
-                                            <span className="text-[11px] font-black uppercase tracking-wider truncate">{group.name}</span>
-                                          </div>
-                                          <span className="text-[9px] font-bold px-1.5 py-0.5 bg-white/60 text-slate-700 rounded-full font-mono">
-                                            {groupCheckedCount}/{group.headers.length}
-                                          </span>
-                                        </div>
-          
-                                        {/* Members list */}
-                                        <div className="p-3 space-y-1.5 overflow-y-auto max-h-48 grow">
-                                          {group.headers.map(header => {
-                                            const isChecked = selectedReportColumns.includes(header);
-                                            const toggleHeader = () => {
-                                              if (isChecked) {
-                                                setSelectedReportColumns(prev => prev.filter(h => h !== header));
-                                              } else {
-                                                setSelectedReportColumns(prev => [...prev, header]);
-                                              }
-                                            };
-                                            return (
-                                              <label key={header} className="flex items-start gap-2 text-xs text-slate-600 hover:text-slate-900 cursor-pointer select-none">
-                                                <input id="checkbox-field-9954" name="checkbox_9954"
-                                                  type="checkbox"
-                                                  checked={isChecked}
-                                                  onChange={toggleHeader}
-                                                  className="mt-0.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416]"
-                                                />
-                                                <span className="font-medium inline-block pr-1 text-slate-700">{header}</span>
-                                              </label>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-          
-                              {/* Filtered Results Preview Table */}
-                              <div className="space-y-3 pt-6 border-t border-slate-200" id="reports-preview-section">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                  <div>
-                                    <h5 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                                      Live Preview ({filteredReportEmployees.length > 50 ? `First 50 of ${filteredReportEmployees.length}` : `${filteredReportEmployees.length}`} Records Matched)
-                                    </h5>
-                                    <p className="text-[10px] text-slate-400">
-                                      Live data preview containing only your selected {selectedReportColumns.length} columns and filtered dataset.
-                                    </p>
-                                  </div>
-                                </div>
-          
-                                {filteredReportEmployees.length === 0 ? (
-                                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-8 text-center text-xs text-slate-450 font-medium">
-                                    No matching employees found for the chosen filters.
-                                  </div>
-                                ) : selectedReportColumns.length === 0 ? (
-                                  <div className="bg-slate-50 border border-slate-150 rounded-xl p-8 text-center text-xs text-slate-450 font-medium">
-                                    Select at least one column to preview matching records.
-                                  </div>
-                                ) : (
-                                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-inner max-h-[350px] overflow-y-auto overflow-x-auto">
-                                    <table className="w-full text-left border-collapse text-xs">
-                                      <thead className="bg-slate-800 text-white font-bold select-none sticky top-0 z-10">
-                                        <tr>
-                                          <th className="sticky left-0 z-20 bg-slate-800 p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-700">
-                                            <input
-                                              type="checkbox"
-                                              checked={
-                                                filteredReportEmployees.length > 0 &&
-                                                filteredReportEmployees.every(emp => selectedReportEmployeeIds.includes(emp.id))
-                                              }
-                                              onChange={(e) => {
-                                                if (e.target.checked) {
-                                                  setSelectedReportEmployeeIds(filteredReportEmployees.map(emp => emp.id));
-                                                } else {
-                                                  setSelectedReportEmployeeIds([]);
-                                                }
-                                              }}
-                                              className="rounded border-slate-600 bg-slate-700 text-[#f57416] focus:ring-[#f57416] cursor-pointer w-4 h-4"
-                                              id="reports-select-all"
-                                            />
-                                          </th>
-                                          {selectedReportColumns.map((col, idx) => (
-                                            <th key={col + idx} className="p-3 border-r border-slate-700 uppercase tracking-wider text-[10px] whitespace-nowrap">
-                                              {col.replace(/[\*\s]+/g, " ").trim()}
-                                            </th>
-                                          ))}
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-100 font-medium text-slate-705">
-                                        {filteredReportEmployees.slice(0, 50).map((emp, empIdx) => {
-                                          const isSelected = selectedReportEmployeeIds.includes(emp.id);
-                                          return (
-                                            <tr key={emp.id || empIdx} className={`hover:bg-slate-50/50 transition group ${isSelected ? "bg-orange-50/20" : ""}`}>
-                                              <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-105 shadow-[2px_0_4px_rgba(0,0,0,0.03)]">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={isSelected}
-                                                  onChange={() => {
-                                                    if (isSelected) {
-                                                      setSelectedReportEmployeeIds(prev => prev.filter(id => id !== emp.id));
-                                                    } else {
-                                                      setSelectedReportEmployeeIds(prev => [...prev, emp.id]);
-                                                    }
-                                                  }}
-                                                  className="rounded border-slate-350 text-[#f57416] focus:ring-[#f57416] cursor-pointer w-4 h-4"
-                                                  id={`report-check-${emp.id}`}
-                                                />
-                                              </td>
-                                              {selectedReportColumns.map((col, colIdx) => {
-                                                const val = getEmployeeHeaderValue(emp, col, empIdx);
-                                                return (
-                                                  <td key={col + colIdx} className="p-3 border-r border-slate-100 max-w-[200px] truncate whitespace-nowrap font-mono text-[11px]" title={String(val)}>
-                                                    {val !== undefined && val !== null && val !== "" ? String(val) : "—"}
-                                                  </td>
-                                                );
-                                              })}
-                                            </tr>
-                                          );
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
-          
-                              {/* Report Format Action Downloads */}
-                              <div className="flex flex-col sm:flex-row gap-3 items-center justify-end bg-slate-100 p-4 rounded-xl border border-slate-200">
-                                <span className="text-xs font-bold text-slate-500 uppercase mr-auto flex items-center gap-1">
-                                  <CheckCircle2 size={13} className="text-emerald-500 fill-emerald-100" /> Options Loaded & Prepared
-                                </span>
-                                <div className="flex flex-wrap gap-2">
-                                  {/* CSV download button */}
-                                  <button
-                                    type="button"
-                                    disabled={filteredReportEmployees.length === 0 || selectedReportColumns.length === 0}
-                                    onClick={() => {
-                                      const dataToDownload = selectedReportEmployeeIds.length > 0
-                                        ? filteredReportEmployees.filter(emp => selectedReportEmployeeIds.includes(emp.id))
-                                        : filteredReportEmployees;
-                                      downloadReportsCSV(dataToDownload, selectedReportColumns);
-                                    }}
-                                    className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition"
-                                    id="report-download-csv-btn"
-                                  >
-                                    <FileText size={14} /> Download CSV {selectedReportEmployeeIds.length > 0 && `(${selectedReportEmployeeIds.length})`}
-                                  </button>
-          
-                                  {/* Excel download button */}
-                                  <button
-                                    type="button"
-                                    disabled={filteredReportEmployees.length === 0 || selectedReportColumns.length === 0}
-                                    onClick={() => {
-                                      const dataToDownload = selectedReportEmployeeIds.length > 0
-                                        ? filteredReportEmployees.filter(emp => selectedReportEmployeeIds.includes(emp.id))
-                                        : filteredReportEmployees;
-                                      downloadReportsExcel(dataToDownload, selectedReportColumns, reportLocationExportLabel);
-                                    }}
-                                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition"
-                                    id="report-download-excel-btn"
-                                  >
-                                    <FileSpreadsheet size={14} /> Download Excel {selectedReportEmployeeIds.length > 0 && `(${selectedReportEmployeeIds.length})`}
-                                  </button>
-          
-                                  {/* PDF download button */}
-                                  <button
-                                    type="button"
-                                    disabled={filteredReportEmployees.length === 0 || selectedReportColumns.length === 0}
-                                    onClick={() => {
-                                      const dataToDownload = selectedReportEmployeeIds.length > 0
-                                        ? filteredReportEmployees.filter(emp => selectedReportEmployeeIds.includes(emp.id))
-                                        : filteredReportEmployees;
-                                      downloadReportsPDF(dataToDownload, selectedReportColumns, reportLocationExportLabel);
-                                    }}
-                                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition"
-                                    id="report-download-pdf-btn"
-                                  >
-                                    <FileText size={14} /> Download PDF {selectedReportEmployeeIds.length > 0 && `(${selectedReportEmployeeIds.length})`}
-                                  </button>
-                                </div>
-                              </div>
-          
-                            </div>
-                          </div>
-                        )}
-          
-                        {/* Employees SUB-TAB 3: CORE EMPLOYEE DIRECTORY & CSV BULK LOADER */}
-                        {activePimSubTab === "Employee List" && (
-                          <>
-                            {/* Executive Quick Statistics Bento Blocks */}
-                            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="stats-dashboard-grid">
-                              {/* Metric 1 */}
-                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between" id="metric-block-1">
-                                <div>
-                                  <span className="text-slate-400 text-xs font-bold block bg-transparent">Registry Record Count</span>
-                                  <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                    {isLoading ? "..." : `${dashboardStats.totalCount} Employees`}
-                                  </span>
-                                </div>
-                                <div className="bg-orange-50 p-3 rounded-xl text-[#ff791a] shrink-0">
-                                  <Users size={20} />
-                                </div>
-                              </div>
-          
-                              {/* Metric 2 */}
-                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between" id="metric-block-2">
-                                <div>
-                                  <span className="text-slate-400 text-xs font-bold block bg-transparent">Total Gross Payroll</span>
-                                  <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                    {isLoading ? "..." : `Rs. ${dashboardStats.totalGrossPayroll.toLocaleString("en-IN")}`}
-                                  </span>
-                                </div>
-                                <div className="bg-green-50/70 p-3 rounded-xl text-green-600 shrink-0">
-                                  <IndianRupee size={20} />
-                                </div>
-                              </div>
-          
-                              {/* Metric 3 */}
-                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between" id="metric-block-3">
-                                <div>
-                                  <span className="text-slate-400 text-xs font-bold block bg-transparent">ESIC Insured Status</span>
-                                  <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                    {isLoading ? "..." : `${dashboardStats.esicCoveredCount} Covered`}
-                                  </span>
-                                </div>
-                                <div className="bg-purple-50 p-3 rounded-xl text-purple-600 shrink-0">
-                                  <Heart size={20} />
-                                </div>
-                              </div>
-          
-                              {/* Metric 4 */}
-                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between" id="metric-block-4">
-                                <div>
-                                  <span className="text-slate-400 text-xs font-bold block bg-transparent">Distinct Worksites</span>
-                                  <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                    {isLoading ? "..." : `${dashboardStats.uniqueLocsCount} Mapping`}
-                                  </span>
-                                </div>
-                                <div className="bg-blue-50 p-3 rounded-xl text-blue-600 shrink-0">
-                                  <Map size={20} />
-                                </div>
-                              </div>
-                            </section>
-          
-                            {/* Bulk CSV Upload Console */}
-                            {!!userPermissions.employees?.edit && (
-                              <section id="bulk-importer-section" className="animate-fade-in">
-                                <CsvImporter 
-                                  onImportSuccess={handleBulkImport} 
-                                  existingCodes={existingCodes} 
-                                  availableLocations={customLocations} 
-                                  availableRoles={customRoles}
-                                />
-                              </section>
-                            )}
-          
-                            {/* Master Employee Database Grid Container */}
-                            <section className="flex-1 flex flex-col min-h-[400px] bg-white border border-slate-200 rounded-xl p-5 shadow-xs" id="database-grid-section">
-                              <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                                <div>
-                                  <h2 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-                                    <FileSpreadsheet className="text-slate-500" size={18} />
-                                    ECR-Structured Employee Master Registry
-                                  </h2>
-                                  <p className="text-xs text-slate-400 mt-0.5">Edit, delete, or bulk-export rows into statutory Indian onboarding templates</p>
-                                </div>
-                                <span className="text-xs text-slate-400 bg-slate-50 inline-block px-2.5 py-1 rounded-full border border-slate-200/50">
-                                  💡 Checked boxes unlock bulk actions below the table grid
-                                </span>
-                              </div>
-          
-                              {isLoading ? (
-                                <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-400 font-medium">
-                                  <div className="relative w-10 h-10 mb-3 animate-spin">
-                                    <div className="absolute inset-0 rounded-full border-4 border-slate-200"></div>
-                                    <div className="absolute inset-0 rounded-full border-4 border-[#ff791a] border-t-transparent"></div>
-                                  </div>
-                                  Loading employee directory...
-                                </div>
-                              ) : (
-                                <EmployeeTable
-                                  employees={employees}
-                                  selectedIds={selectedIds}
-                                  onSelectionChange={setSelectedIds}
-                                  onEditClick={(emp) => {
-                                    setCurrentEmployee(emp);
-                                    setIsFormOpen(true);
-                                  }}
-                                  onDeleteClick={handleDeleteEmployee}
-                                  onBulkDelete={handleBulkDelete}
-                                  onExportSelected={handleExportSelected}
-                                  readOnly={!userPermissions.employees?.edit}
-                                />
-                              )}
-                            </section>
-                          </>
-                        )}
-                      </>
-                    )}
-        </>
-                </div>
-    
-                {/* Small informative details footer */}
-                <footer className="mt-auto px-6 py-4 bg-white border-t border-slate-200 text-center text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0 select-none" id="applet-footer">
-                  <p>© 2026 Flex HRM, an Intelligic product. All rights reserved. Licensed to {sessionUser}.</p>
-                  <p className="flex items-center gap-1 font-mono text-[10px]">
-                    🔒 Connected to MongoDB API
-                  </p>
-                </footer>
-              </main>
-        
-              {/* Floating Single Onboarding/Edit Modal */}
-              {isFormOpen && (
-                <EmployeeFormModal
-                  employee={currentEmployee}
-                  availableLocations={customLocations}
-                  basicSalaryPercent={basicSalaryPercentage}
-                  esicEligibilityLimit={esicEligibilityLimit}
-                  onLocationRegistryUpdate={fetchLocations}
-                  onCreateLocation={handleAddLocationFromConfig}
-                  onCreateRole={handleAddRoleFromConfig}
-                  onClose={() => {
-                    setIsFormOpen(false);
-                    setCurrentEmployee(null);
-                    // If they closed adding tab, reset active sub tab choice
-                    if (activePimSubTab === "Add Employee") {
-                      setActivePimSubTab("Employee List");
-                    }
-                  }}
-                  onSave={handleSaveEmployee}
-                />
-              )}
-        
-              {/* Voice Dialer Simulation Overlay Modal */}
-              {activeDialerContact && (
-                <DialerOverlay
-                  contact={activeDialerContact}
-                  status={activeDialerStatus}
-                  setStatus={setActiveDialerStatus}
-                  onClose={() => setActiveDialerContact(null)}
-                />
-              )}
-
-              {/* Flush Security Audit Trail Confirmation Modal */}
-              {showFlushAuditModal && (
-                <div
-                  className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-3 md:p-5"
-                  onClick={closeFlushAuditModal}
-                >
-                  <div
-                    className="bg-white rounded-xl shadow-2xl border border-rose-200 w-full max-w-md animate-fade-in"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-rose-100 bg-rose-50 rounded-t-xl">
-                      <div className="flex items-center gap-2">
-                        <Trash2 size={18} className="text-rose-600 shrink-0" />
-                        <h3 className="text-sm font-extrabold text-rose-800">Flush Security Trail</h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={closeFlushAuditModal}
-                        className="p-1.5 rounded hover:bg-rose-100 text-rose-500 cursor-pointer"
-                        aria-label="Close"
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                    <form onSubmit={handleFlushAuditLogs} className="p-5 space-y-4">
-                      {flushAuditError && (
-                        <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-800 text-xs font-semibold">
-                          {flushAuditError}
-                        </div>
-                      )}
-                      <div>
-                        <label htmlFor="flush-audit-password" className="text-xs font-bold text-slate-600 block mb-1">
-                          Enter password to flush trail
-                        </label>
-                        <input
-                          id="flush-audit-password"
-                          name="flushAuditPassword"
-                          type="password"
-                          autoComplete="off"
-                          value={flushAuditPassword}
-                          onChange={(e) => setFlushAuditPassword(e.target.value)}
-                          className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-rose-400 focus:outline-none text-xs text-slate-800 transition"
-                          disabled={isFlushingAuditLogs}
-                        />
-                      </div>
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={closeFlushAuditModal}
-                          disabled={isFlushingAuditLogs}
-                          className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition cursor-pointer disabled:opacity-50"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isFlushingAuditLogs}
-                          className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                        >
-                          <Trash2 size={13} />
-                          {isFlushingAuditLogs ? "Flushing..." : "Flush Security Trail"}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
-
-              {/* Saved Bulk Pay Excel Preview Modal */}
-              {bulkPayPreview && (
-                <div
-                  className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-3 md:p-5"
-                  onClick={() => setBulkPayPreview(null)}
-                >
-                  <div
-                    className="bg-[#f3f3f3] rounded-xl shadow-2xl border border-[#d4d4d4] w-full max-w-[96vw] h-[92vh] flex flex-col animate-fade-in"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[#d4d4d4] bg-white shrink-0">
-                      <div className="min-w-0 flex items-center gap-2">
-                        <FileSpreadsheet size={16} className="text-emerald-600 shrink-0" />
-                        <p className="text-[11px] text-slate-600 font-mono truncate" title={bulkPayPreview.filename}>
-                          {bulkPayPreview.filename}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadBulkPayArchive(bulkPayPreview.id, bulkPayPreview.filename)}
-                          className="px-3 py-1.5 bg-[#217346] hover:bg-[#1a5c38] text-white rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <Download size={11} /> Download
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setBulkPayPreview(null)}
-                          className="p-1.5 rounded hover:bg-slate-100 text-slate-500 cursor-pointer"
-                          aria-label="Close preview"
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex-1 min-h-0 p-3 flex flex-col gap-2">
-                      {bulkPayPreview.loading ? (
-                        <p className="text-sm text-slate-500 text-center py-12">Loading Excel preview...</p>
-                      ) : (
-                        <>
-                          {bulkPayPreview.sheetNames.length > 1 && (
-                            <div className="flex flex-wrap items-center gap-1 shrink-0">
-                              {bulkPayPreview.sheetNames.map((sheetName) => (
-                                <button
-                                  key={sheetName}
-                                  type="button"
-                                  onClick={() =>
-                                    setBulkPayPreview((prev) =>
-                                      prev ? { ...prev, activeSheet: sheetName } : prev
-                                    )
-                                  }
-                                  className={`px-3 py-1 rounded-md text-[10px] font-bold border transition cursor-pointer ${
-                                    bulkPayPreview.activeSheet === sheetName
-                                      ? "bg-[#217346] text-white border-[#217346]"
-                                      : "bg-white text-slate-600 border-[#d4d4d4] hover:bg-slate-50"
-                                  }`}
-                                >
-                                  {sheetName}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          <div className="flex-1 min-h-0">
-                            <ExcelPreviewGrid
-                              rows={bulkPayPreview.sheets[bulkPayPreview.activeSheet] || []}
-                              headerRowCount={getBulkPayPreviewHeaderRowCount(bulkPayPreview.activeSheet)}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-        
-              {/* Mobile Drawer backdrop overlay */}
-              {!isSidebarCollapsed && (
-                <div 
-                  onClick={() => setIsSidebarCollapsed(true)} 
-                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-45 md:hidden transition-all duration-300 animate-fade-in"
-                  id="sidebar-backdrop"
-                />
-              )}
-        
-              {/* Premium Floating Mobile Bottom Navigation Bar */}
-              <div className="fixed bottom-4 left-4 right-4 bg-white/90 backdrop-blur-md border border-slate-200/80 rounded-2xl p-2.5 shadow-xl flex items-center justify-around z-40 md:hidden animate-slide-up" id="mobile-bottom-nav">
-                {[
-                  { name: "Employees", label: "Staff", icon: Users },
-                  { name: "Attendance", label: "Records", icon: Clock },
-                  { name: "Salary", label: "Payroll", icon: Coins },
-                  { name: "Directory", label: "Contacts", icon: Contact },
-                ].filter((item) => {
-                  const key = getModuleKey(item.name);
-                  return !key || !!userPermissions[key]?.view;
-                }).map((item) => {
-                  const IconComponent = item.icon;
-                  const isSelected = activeSidebarTab === item.name;
-                  return (
-                    <button
-                      key={item.name}
-                      onClick={() => {
-                        navigateToTab(item.name);
-                        setIsSidebarCollapsed(true); // Close drawer if open
-                        triggerSuccess(`Switched to: ${item.name}`);
-                      }}
-                      className={`flex flex-col items-center gap-1 transition cursor-pointer select-none ${
-                        isSelected ? "text-[#ff791a]" : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      <IconComponent size={20} className={isSelected ? "stroke-[2.5]" : "stroke-[2]"} />
-                      <span className="text-[9px] font-extrabold tracking-wide uppercase">{item.label}</span>
-                    </button>
-                  );
-                })}
-                {/* Menu trigger button */}
-                <button
-                  onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                  className="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-700 cursor-pointer select-none"
-                >
-                  <Menu size={20} />
-                  <span className="text-[9px] font-extrabold tracking-wide uppercase">Menu</span>
-                </button>
-              </div>
-        
-              {/* Confetti Celebration Overlay */}
-              {showConfetti && <ConfettiRain />}
-            </div>
-  );
-
-  const renderLoginPage = () => (
-          <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden" id="login-layout">
-            <div className="absolute top-0 right-0 w-96 h-96 bg-orange-100 rounded-full filter blur-3xl opacity-50 -mr-20 -mt-20"></div>
-            <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-50 rounded-full filter blur-3xl opacity-50 -ml-20 -mb-20"></div>
-    
-            <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden relative z-10 animate-fade-in" id="login-card-container">
-              <div className="p-8 border-b border-slate-100 bg-[#fbfbfb] text-center">
-                {/* FlexHRM stylized logo */}
-                <div className="flex items-center justify-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#ff791a] to-[#ff981a] flex items-center justify-center text-white font-black text-2xl shadow-md transform rotate-12">
-                    F
-                  </div>
-                  <div className="text-left leading-none">
-                    <span className="text-slate-800 font-extrabold text-xl tracking-tight block">Flex <span className="text-[#ff791a]" id="logo-orange-text">HRM</span></span>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mt-0.5">an Intelligic product</span>
-                  </div>
-                </div>
-                
-                <h2 className="text-xl font-bold text-slate-800 tracking-tight">
-                  {loginView === "signin" && "Onboarding Portal Login"}
-                  {loginView === "forgot" && "Forgot Password"}
-                  {loginView === "reset" && "Reset Password"}
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  {loginView === "signin" && "Provide your credentials to access the bulk HRMS database"}
-                  {loginView === "forgot" && "Enter your username to receive a one-time reset code"}
-                  {loginView === "reset" && "Enter your reset code and choose a new password"}
-                </p>
-              </div>
-    
-              {loginView === "signin" && (
-              <form onSubmit={handleLoginSubmit} className="p-8 space-y-4" id="login-credentials-form">
-                {loginError && (
-                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-800 text-xs flex gap-2 items-center animate-shake" id="login-error-toast">
-                    <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px]">🚩</span>
-                    <span className="font-semibold">{loginError}</span>
-                  </div>
-                )}
-    
-                <div>
-                  <label htmlFor="login-username-field" className="text-xs font-bold text-slate-600 block mb-1">Username</label>
-                  <input
-                    type="text"
-                    name="username"
-                    autoComplete="username"
-                    value={usernameInput}
-                    onChange={(e) => setUsernameInput(e.target.value)}
-                    placeholder="e.g. admin"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition"
-                    id="login-username-field"
-                  />
-                </div>
-    
-                <div>
-                  <label htmlFor="login-password-field" className="text-xs font-bold text-slate-600 block mb-1">Password</label>
-                  <PasswordInput
-                    name="password"
-                    autoComplete="current-password"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition font-mono"
-                    id="login-password-field"
-                  />
-                </div>
-    
-                <div className="flex items-center justify-between pt-1">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input id="login-keep-logged-in" name="keepLoggedIn" type="checkbox" className="rounded text-[#ff791a] focus:ring-[#ff791a] w-3.5 h-3.5" defaultChecked />
-                    <span className="text-xs text-slate-500">Keep me logged in</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="text-xs text-[#ff791a] hover:underline font-semibold cursor-pointer"
-                    onClick={openForgotPassword}
-                  >
-                    Forgot password?
-                  </button>
-                </div>
-    
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition flex items-center justify-center gap-1.5 cursor-pointer"
-                  id="login-submit-button"
-                >
-                  Sign In
-                </button>
-              </form>
-              )}
-    
-              {loginView === "forgot" && (
-              <form onSubmit={handleForgotPasswordSubmit} className="p-8 space-y-4" id="forgot-password-form">
-                {forgotError && (
-                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-800 text-xs flex gap-2 items-center animate-shake">
-                    <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px]">🚩</span>
-                    <span className="font-semibold">{forgotError}</span>
-                  </div>
-                )}
-                {forgotMessage && (
-                  <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-blue-800 text-xs font-semibold">
-                    {forgotMessage}
-                  </div>
-                )}
-    
-                <div>
-                  <label htmlFor="forgot-username-field" className="text-xs font-bold text-slate-600 block mb-1">Username</label>
-                  <input
-                    type="text"
-                    name="username"
-                    autoComplete="username"
-                    value={forgotUsername}
-                    onChange={(e) => setForgotUsername(e.target.value)}
-                    placeholder="Enter your administrator username"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition"
-                    id="forgot-username-field"
-                  />
-                </div>
-    
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition cursor-pointer"
-                >
-                  Send Reset Code
-                </button>
-    
-                <button
-                  type="button"
-                  onClick={backToSignIn}
-                  className="w-full py-2 text-slate-500 hover:text-slate-700 font-semibold rounded-lg text-xs transition cursor-pointer"
-                >
-                  ← Back to Sign In
-                </button>
-              </form>
-              )}
-    
-              {loginView === "reset" && (
-              <form onSubmit={handleResetPasswordSubmit} className="p-8 space-y-4" id="reset-password-form">
-                {resetError && (
-                  <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg text-rose-800 text-xs flex gap-2 items-center animate-shake">
-                    <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px]">🚩</span>
-                    <span className="font-semibold">{resetError}</span>
-                  </div>
-                )}
-                {resetSuccess && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg text-emerald-800 text-xs font-semibold">
-                    {resetSuccess}
-                  </div>
-                )}
-                {issuedResetToken && (
-                  <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-amber-900 text-xs">
-                    <span className="font-bold block mb-1">Your reset code (valid 15 minutes):</span>
-                    <span className="font-mono text-lg tracking-widest font-black">{issuedResetToken}</span>
-                  </div>
-                )}
-    
-                <div>
-                  <label htmlFor="reset-username-field" className="text-xs font-bold text-slate-600 block mb-1">Username</label>
-                  <input
-                    type="text"
-                    name="username"
-                    value={forgotUsername || usernameInput}
-                    onChange={(e) => setForgotUsername(e.target.value)}
-                    readOnly={!!issuedResetToken}
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition disabled:bg-slate-50"
-                    id="reset-username-field"
-                  />
-                </div>
-    
-                <div>
-                  <label htmlFor="reset-token-field" className="text-xs font-bold text-slate-600 block mb-1">Reset Code</label>
-                  <input
-                    type="text"
-                    name="resetToken"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    value={resetTokenInput}
-                    onChange={(e) => setResetTokenInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="6-digit code"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition font-mono tracking-widest"
-                    id="reset-token-field"
-                  />
-                </div>
-    
-                <div>
-                  <label htmlFor="reset-new-password-field" className="text-xs font-bold text-slate-600 block mb-1">New Password</label>
-                  <PasswordInput
-                    name="newPassword"
-                    autoComplete="new-password"
-                    value={resetNewPassword}
-                    onChange={(e) => setResetNewPassword(e.target.value)}
-                    placeholder="At least 8 characters"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition font-mono"
-                    id="reset-new-password-field"
-                  />
-                </div>
-    
-                <div>
-                  <label htmlFor="reset-confirm-password-field" className="text-xs font-bold text-slate-600 block mb-1">Confirm New Password</label>
-                  <PasswordInput
-                    name="confirmNewPassword"
-                    autoComplete="new-password"
-                    value={resetConfirmPassword}
-                    onChange={(e) => setResetConfirmPassword(e.target.value)}
-                    placeholder="Re-enter new password"
-                    className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition font-mono"
-                    id="reset-confirm-password-field"
-                  />
-                </div>
-    
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition cursor-pointer"
-                >
-                  Update Password
-                </button>
-    
-                <button
-                  type="button"
-                  onClick={() => setLoginView("forgot")}
-                  className="w-full py-2 text-slate-500 hover:text-slate-700 font-semibold rounded-lg text-xs transition cursor-pointer"
-                >
-                  ← Request a new code
-                </button>
-              </form>
-              )}
-    
-              <div className="p-4 bg-slate-50/70 border-t border-slate-100 text-center text-[10px] text-slate-400">
-                🔒 Secured locally. CSV layout compatibility verification enabled.
-              </div>
-            </div>
-          </div>
-  );
 
   return {
     isLoggedIn,
@@ -10791,6 +5332,10 @@ export function useHRMSApp() {
     confirmNewPassword,
     changePasswordError,
     changePasswordSuccess,
+    profileEmail,
+    profileEmailError,
+    profileEmailSuccess,
+    isSavingProfileEmail,
     rawEmployees,
     selectedIds,
     isFormOpen,
@@ -10801,6 +5346,14 @@ export function useHRMSApp() {
     esicEligibilityLimit,
     basicSalaryPercentage,
     companyBranch,
+    savedPayrollConfig,
+    configHasUnsavedChanges,
+    configValidationError,
+    isSavingPayrollConfig,
+    configSummary,
+    handleSavePayrollConfig,
+    handleResetPayrollConfig,
+    setConfigValidationError,
     rawCustomLocations,
     locationCompliance,
     locationPtAmounts,
@@ -10879,7 +5432,10 @@ export function useHRMSApp() {
     bulkWizardSkillFilters,
     isBulkWizardRoleDropdownOpen,
     isBulkWizardSkillDropdownOpen,
-    confirmClearState,
+    confirmDialog,
+    confirmAction,
+    handleConfirmDialogConfirm,
+    handleConfirmDialogCancel,
     attendanceSearchQuery,
     bulkStartDay,
     bulkEndDay,
@@ -10923,6 +5479,7 @@ export function useHRMSApp() {
     reportGenderFilter,
     reportMaritalFilter,
     reportEsicFilter,
+    reportEmploymentFilter,
     reportSkillFilters,
     reportRoleFilters,
     isReportLocDropdownOpen,
@@ -10985,6 +5542,7 @@ export function useHRMSApp() {
     fetchAdmins,
     fetchAdminProfile,
     handlePasswordChangeSubmit,
+    handleProfileEmailSave,
     triggerSuccess,
     handleLoginSubmit,
     handleForgotPasswordSubmit,
@@ -10997,13 +5555,73 @@ export function useHRMSApp() {
     handleSaveRoleSubmit,
     handleDeleteRole,
     handleSaveEmployee,
+    handleMarkEmployeeExit,
+    handleBulkMarkExit,
     handleBulkImport,
     handleDeleteEmployee,
     handleBulkDelete,
+    bulkEditDrafts,
+    setBulkEditDrafts,
+    employeeChangeRequests,
+    pendingChangeCount,
+    isFetchingChangeRequests,
+    isSubmittingBulkEdit,
+    fetchEmployeeChangeRequests,
+    fetchPendingChangeCount,
+    handleBulkEditDraftChange,
+    handleBulkEditDraftChangeMany,
+    handleBulkEditCustomFieldChange,
+    handleBulkEditCustomFieldChangeMany,
+    handleDiscardBulkEditDrafts,
+    handleApplyBulkEmployeeChanges,
+    handleApproveEmployeeChanges,
+    handleRejectEmployeeChanges,
     buildAxisBulkPayItems,
     handleExportAxisBulkPay,
     handleExportSelected,
     handlePimSubTabClick,
+    navigateToTab,
+    toggleSidebarGroup,
+    expandedSidebarGroups,
+    isSchoolFormOpen,
+    setIsSchoolFormOpen,
+    currentSchool,
+    setCurrentSchool,
+    handleSaveSchoolWork,
+    activeSchoolSubTab,
+    setActiveSchoolSubTab,
+    showFlushAuditModal,
+    closeFlushAuditModal,
+    flushAuditPassword,
+    setFlushAuditPassword,
+    flushAuditError,
+    isFlushingAuditLogs,
+    bulkPayPreview,
+    setBulkPayPreview,
+    registryLocations,
+    registeredJobRoles,
+    handleSchoolSubTabClick,
+    reportLocationExportLabel,
+    setNewPassword,
+    openFlushAuditModal,
+    handleViewBulkPayArchive,
+    birthdayTodayList,
+    birthdayMonthList,
+    birthdayTodayLabel,
+    isFetchingBirthdays,
+    resolveEmployeePhone,
+    isSchoolLoading,
+    schoolDashboardStats,
+    handleBulkSchoolImport,
+    existingSchoolUdiseCodes,
+    rawSchoolWorks,
+    selectedSchoolIds,
+    setSelectedSchoolIds,
+    handleDeleteSchoolWork,
+    handleBulkDeleteSchools,
+    handleExportSchoolsSelected,
+    handleExportSchoolExpenseSalary,
+    handleDistributeBlockExpense,
     PERMISSION_MODULES,
     sidebarItems,
     filteredSidebarItems,
@@ -11024,6 +5642,9 @@ export function useHRMSApp() {
     ledgerUniqueSkills,
     ledgerUniqueRoles,
     filteredReportEmployees,
+    reportOverviewStats,
+    reportActiveFilterCount,
+    clearReportFilters,
     dashboardStats,
     existingCodes,
     salaryUniqueLocations,
@@ -11081,6 +5702,9 @@ export function useHRMSApp() {
     setConfirmNewPassword,
     setChangePasswordError,
     setChangePasswordSuccess,
+    setProfileEmail,
+    setProfileEmailError,
+    setProfileEmailSuccess,
     setRawEmployees,
     setSelectedIds,
     setIsFormOpen,
@@ -11169,7 +5793,6 @@ export function useHRMSApp() {
     setBulkWizardSkillFilters,
     setIsBulkWizardRoleDropdownOpen,
     setIsBulkWizardSkillDropdownOpen,
-    setConfirmClearState,
     setAttendanceSearchQuery,
     setBulkStartDay,
     setBulkEndDay,
@@ -11213,6 +5836,7 @@ export function useHRMSApp() {
     setReportGenderFilter,
     setReportMaritalFilter,
     setReportEsicFilter,
+    setReportEmploymentFilter,
     setReportSkillFilters,
     setReportRoleFilters,
     setIsReportLocDropdownOpen,
@@ -11220,8 +5844,6 @@ export function useHRMSApp() {
     setIsRoleDropdownOpen,
     setReportSearchQuery,
     setSelectedReportEmployeeIds,
-    renderAuthenticatedApp,
-    renderLoginPage,
     navigate,
     location,
   };

@@ -24,6 +24,7 @@ export interface Employee {
   husbandName: string; // HUSBAND NAME **
   pfJoiningDate: string; // PF JOINING DATE
   exitDate?: string; // EXIT/LEAVING DATE
+  exitReason?: string; // REASON FOR EXIT / SEPARATION
   complianceEnabled?: boolean; // ENABLE STATUTORY COMPLIANCE
   /** PF wage basis: full monthly gross, or gross capped at ₹15,000 when gross ≥ ceiling */
   pfCalculationMode?: "gross" | "ceiling_15000";
@@ -73,6 +74,45 @@ export interface Employee {
     penaltyReason: string;
     paymentStatus?: "Unpaid" | "Paid" | "Hold";
   }>;
+  photo?: string;
+  idCard?: string;
+  idCardGeneratedAt?: string;
+}
+
+export interface EmployeeDocument {
+  id: string;
+  employeeId: string;
+  label: string;
+  mimeType: string;
+  filename: string;
+  originalSizeBytes: number;
+  storedSizeBytes: number;
+  quality?: number;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export interface EmployeeChangeEntry {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  changes: Record<string, unknown>;
+  previousSnapshot: Record<string, unknown>;
+}
+
+export interface EmployeeChangeRequest {
+  id: string;
+  submittedBy: string;
+  status: "pending" | "approved" | "rejected";
+  notes: string;
+  reviewNotes: string;
+  reviewedBy: string;
+  reviewedAt?: string;
+  updates: EmployeeChangeEntry[];
+  employeeCount: number;
+  fieldChangeCount: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export const EXCEL_ROW_HEADERS = [
@@ -125,6 +165,53 @@ export const EXCEL_ROW_HEADERS = [
   "Family Member Mobile (3)"
 ];
 
+export interface SchoolMonthlyExpenseEntry {
+  material: number;
+  miscellaneous: number;
+  materialRemark?: string;
+  miscellaneousRemark?: string;
+}
+
+export interface SchoolWork {
+  id: string;
+  srNo: number;
+  udise: string;
+  schoolName: string;
+  headmasterName: string;
+  headmasterNumber: string;
+  sweeperName: string;
+  accountHolderName: string;
+  accountNumber: string;
+  ifscCode: string;
+  noOfToilets: number;
+  rates: number;
+  rateExplanation: string;
+  block: string;
+  district: string;
+  materialCost: number;
+  remarks: string;
+  monthlyExpenseLedger?: Record<string, SchoolMonthlyExpenseEntry>;
+}
+
+export const SCHOOL_EXCEL_ROW_HEADERS = [
+  "SR NO",
+  "School Name",
+  "UDISE",
+  "Headmaster Name",
+  "Headmaster Number",
+  "Sweeper Name",
+  "Account Holder Name",
+  "Account Number",
+  "IFSC Code",
+  "No of Toilets",
+  "Rates",
+  "Explanation for Rate",
+  "Block",
+  "District",
+  "Material Cost",
+  "Remarks",
+];
+
 export interface RolePermission {
   view: boolean;
   edit: boolean;
@@ -135,6 +222,7 @@ export interface CustomRole {
   description: string;
   permissions: {
     employees: RolePermission;
+    schoolWork: RolePermission;
     salary: RolePermission;
     ledger: RolePermission;
     attendance: RolePermission;

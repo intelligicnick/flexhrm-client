@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Cake, Gift, PartyPopper, Sparkles, Search, MapPin, CalendarDays } from "lucide-react";
 import { Employee } from "../types";
+import EmployeePhoto from "./EmployeePhoto";
 import {
   MONTH_NAME_LIST,
   getOrdinalDay,
@@ -53,15 +54,25 @@ function dispatchCelebration(
 function AvatarBadge({ emp, size = "md", festive = false }: { emp: Employee; size?: "sm" | "md" | "lg"; festive?: boolean }) {
   const sizeClass = size === "lg" ? "w-14 h-14 text-lg" : size === "md" ? "w-11 h-11 text-sm" : "w-9 h-9 text-xs";
   return (
-    <div
-      className={`${sizeClass} rounded-full font-extrabold flex items-center justify-center shrink-0 ${
-        festive
-          ? "bg-gradient-to-br from-orange-400 to-rose-500 text-white shadow-lg shadow-orange-200 ring-4 ring-orange-100"
-          : "bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600"
+    <EmployeePhoto
+      employeeId={emp.id}
+      photo={emp.photo}
+      alt={getEmployeeName(emp)}
+      className={`${sizeClass} rounded-full object-cover shrink-0 ${
+        festive ? "ring-4 ring-orange-100 shadow-lg shadow-orange-200" : "border border-slate-200"
       }`}
-    >
-      {getEmployeeInitial(emp)}
-    </div>
+      fallback={
+        <div
+          className={`${sizeClass} rounded-full font-extrabold flex items-center justify-center shrink-0 ${
+            festive
+              ? "bg-gradient-to-br from-orange-400 to-rose-500 text-white shadow-lg shadow-orange-200 ring-4 ring-orange-100"
+              : "bg-gradient-to-br from-slate-100 to-slate-200 text-slate-600"
+          }`}
+        >
+          {getEmployeeInitial(emp)}
+        </div>
+      }
+    />
   );
 }
 
