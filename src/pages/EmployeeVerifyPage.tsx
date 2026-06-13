@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { BadgeCheck, ShieldAlert, UserRound } from "lucide-react";
 import { apiUrl } from "../api";
+import { parseIdCardFromVerifyParam } from "../components/id-card/verify-url";
 
 export interface IdCardVerifyResult {
   verified: boolean;
@@ -24,8 +25,9 @@ function idCardPhotoUrl(idCard: string): string {
   return apiUrl(`/api/employees/id-card/${encodeURIComponent(idCard)}/photo`);
 }
 
-export default function EmployeeVerifyPage() {
-  const { idNo = "" } = useParams<{ idNo: string }>();
+export default function EmployeeVerifyPage({ idOverride }: { idOverride?: string } = {}) {
+  const { idNo: routeIdNo = "" } = useParams<{ idNo: string }>();
+  const idNo = idOverride ?? parseIdCardFromVerifyParam(routeIdNo);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [record, setRecord] = useState<IdCardVerifyResult | null>(null);

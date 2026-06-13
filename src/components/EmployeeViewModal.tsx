@@ -397,7 +397,7 @@ export default function EmployeeViewModal({
                   </div>
                 </div>
                 <span className="shrink-0 text-[11px] font-bold text-[#ff791a]">
-                  {readOnly ? "View" : "Manage"} →
+                  View →
                 </span>
               </button>
 
@@ -617,7 +617,7 @@ export default function EmployeeViewModal({
 
           {activeTab === "documents" && (
             <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">
-              <EmployeeDocumentsPanel employeeId={employee.id} readOnly={readOnly} />
+              <EmployeeDocumentsPanel employeeId={employee.id} readOnly />
             </div>
           )}
         </div>

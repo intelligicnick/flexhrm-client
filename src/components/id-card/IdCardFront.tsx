@@ -33,7 +33,6 @@ const IdCardFront = forwardRef<HTMLDivElement, IdCardFrontProps>(
             left: `calc(${pct(idNumberBox.left)} + ${idNumberBox.leftOffsetPx}px)`,
             top: `calc(${pct(idNumberBox.top)} + ${idNumberBox.topOffsetPx}px)`,
             width: pct(idNumberBox.width),
-            height: pct(idNumberBox.height),
           }}
         >
           <span className={styles.idNumberLabel}>ID No :</span>

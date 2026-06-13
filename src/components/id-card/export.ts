@@ -1,8 +1,13 @@
 import html2canvas from "html2canvas";
-import { CARD_SIZE } from "./constants";
+import { jsPDF } from "jspdf";
 
 const RENDER_SCALE = 2;
-const PRINT_ROOT_ID = "id-card-print-root";
+
+export interface CardSidePng {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
 
 async function waitForImages(element: HTMLElement): Promise<void> {
   const images = Array.from(element.querySelectorAll("img"));
@@ -43,18 +48,59 @@ function saveBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function exportCardPng(element: HTMLElement, filename: string): Promise<void> {
+function pageOrientation(width: number, height: number): "portrait" | "landscape" {
+  return width >= height ? "landscape" : "portrait";
+}
+
+/** Same raster capture used by Front PNG / Back PNG buttons. */
+export async function captureCardSidePng(element: HTMLElement): Promise<CardSidePng> {
   const canvas = await toCanvas(element);
-  await new Promise<void>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error("Unable to create image."));
-        return;
-      }
-      saveBlob(blob, filename);
-      resolve();
-    }, "image/png");
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    width: canvas.width,
+    height: canvas.height,
+  };
+}
+
+export async function captureBothSidePngs(
+  front: HTMLElement,
+  back: HTMLElement,
+): Promise<{ front: CardSidePng; back: CardSidePng }> {
+  const [frontPng, backPng] = await Promise.all([
+    captureCardSidePng(front),
+    captureCardSidePng(back),
+  ]);
+  return { front: frontPng, back: backPng };
+}
+
+/** Page 1 = front PNG, page 2 = back PNG — identical captures to the PNG buttons. */
+export async function buildCardPdfBlob(
+  front: HTMLElement,
+  back: HTMLElement,
+): Promise<Blob> {
+  const { front: frontPng, back: backPng } = await captureBothSidePngs(front, back);
+
+  const doc = new jsPDF({
+    orientation: pageOrientation(frontPng.width, frontPng.height),
+    unit: "px",
+    format: [frontPng.width, frontPng.height],
+    compress: true,
   });
+
+  doc.addImage(frontPng.dataUrl, "PNG", 0, 0, frontPng.width, frontPng.height);
+  doc.addPage(
+    [backPng.width, backPng.height],
+    pageOrientation(backPng.width, backPng.height),
+  );
+  doc.addImage(backPng.dataUrl, "PNG", 0, 0, backPng.width, backPng.height);
+
+  return doc.output("blob");
+}
+
+export async function exportCardPng(element: HTMLElement, filename: string): Promise<void> {
+  const png = await captureCardSidePng(element);
+  const blob = await fetch(png.dataUrl).then((res) => res.blob());
+  saveBlob(blob, filename);
 }
 
 export async function exportBothSidesPng(
@@ -66,39 +112,98 @@ export async function exportBothSidesPng(
   await exportCardPng(back, `${baseName}_back.png`);
 }
 
+export async function exportBothSidesPdf(
+  front: HTMLElement,
+  back: HTMLElement,
+  filename: string,
+): Promise<void> {
+  const blob = await buildCardPdfBlob(front, back);
+  saveBlob(blob, filename);
+}
+
+function buildPrintHtml(frontPng: CardSidePng, backPng: CardSidePng): string {
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ID Card Print</title>
+    <style>
+      @page {
+        margin: 0;
+        size: ${frontPng.width}px ${frontPng.height}px;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      .page {
+        width: ${frontPng.width}px;
+        height: ${frontPng.height}px;
+        overflow: hidden;
+        page-break-after: always;
+        break-after: page;
+      }
+      .page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <img src="${frontPng.dataUrl}" alt="ID Card Front" />
+    </div>
+    <div class="page">
+      <img src="${backPng.dataUrl}" alt="ID Card Back" />
+    </div>
+  </body>
+</html>`;
+}
+
+/** Print front PNG then back PNG — same captures as the PNG export buttons. */
 export async function printCards(front: HTMLElement, back: HTMLElement): Promise<void> {
-  const [frontCanvas, backCanvas] = await Promise.all([toCanvas(front), toCanvas(back)]);
+  const { front: frontPng, back: backPng } = await captureBothSidePngs(front, back);
 
-  const root = document.createElement("div");
-  root.id = PRINT_ROOT_ID;
-  root.className = "id-card-print-root";
-  root.setAttribute("aria-hidden", "true");
-
-  for (const [canvas, side] of [
-    [frontCanvas, "front"],
-    [backCanvas, "back"],
-  ] as const) {
-    const img = document.createElement("img");
-    img.src = canvas.toDataURL("image/png");
-    img.alt = `${side} ID card`;
-    img.setAttribute("data-card-side", side);
-    root.appendChild(img);
-  }
-
-  document.body.appendChild(root);
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
 
   const cleanup = () => {
-    root.remove();
-    window.removeEventListener("afterprint", cleanup);
+    iframe.remove();
   };
 
-  window.addEventListener("afterprint", cleanup);
+  const doc = iframe.contentDocument;
+  if (!doc) {
+    cleanup();
+    throw new Error("Unable to open print preview.");
+  }
 
-  await waitForImages(root);
+  doc.open();
+  doc.write(buildPrintHtml(frontPng, backPng));
+  doc.close();
 
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
+  const win = iframe.contentWindow;
+  if (!win) {
+    cleanup();
+    throw new Error("Unable to open print preview.");
+  }
 
-  window.print();
+  win.addEventListener("afterprint", cleanup, { once: true });
+  win.focus();
+  win.print();
+  window.setTimeout(cleanup, 60_000);
 }

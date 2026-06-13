@@ -108,7 +108,7 @@ import {
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
+import { getModuleKey, PERMISSION_MODULES, ROLE_PERMISSION_MODULE_ROWS, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -1133,6 +1133,7 @@ export default function ModuleContent() {
                                  </h3>
                                  <p className="text-xs text-slate-400 mt-1">
                                    Define fine-grained view and edit access permissions for different admin ranks and assistants.
+                                   Employee documents are view-only in the profile viewer; upload requires Employees edit access via the edit form.
                                  </p>
                                </div>
           
@@ -1191,19 +1192,14 @@ export default function ModuleContent() {
                                            </tr>
                                          </thead>
                                          <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                                           {[
-                                             { key: "employees", name: "Employees Database" },
-                                             { key: "schoolWork", name: "School Work Database" },
-                                             { key: "attendance", name: "Attendance Sheets" },
-                                             { key: "salary", name: "Salary Sheet" },
-                                             { key: "ledger", name: "Advance & Penalty Ledger" },
-                                             { key: "leave", name: "Leave Requests" },
-                                             { key: "birthdays", name: "Birthday Calendar" },
-                                             { key: "directory", name: "Directory Contacts" },
-                                             { key: "admin", name: "Admin Panel" }
-                                           ].map((mod) => (
+                                           {ROLE_PERMISSION_MODULE_ROWS.map((mod) => (
                                              <tr key={mod.key} className="hover:bg-slate-50/50">
-                                               <td className="p-2.5 font-semibold text-slate-800">{mod.name}</td>
+                                               <td className="p-2.5">
+                                                 <p className="font-semibold text-slate-800">{mod.name}</p>
+                                                 <p className="mt-0.5 text-[10px] font-normal leading-snug text-slate-400">
+                                                   {mod.includes}
+                                                 </p>
+                                               </td>
                                                <td className="p-2.5 text-center">
                                                  <input id={`role-perm-view-${mod.key}`} name={`rolePermView_${mod.key}`}
                                                    type="checkbox"
@@ -1281,17 +1277,7 @@ export default function ModuleContent() {
                                                   onClick={() => {
                                                     setRoleNameInput(role.name);
                                                     setRoleDescInput(role.description || "");
-                                                    setRolePermsInput(role.permissions || {
-                                                      employees: { view: false, edit: false },
-                                                      schoolWork: { view: false, edit: false },
-                                                      salary: { view: false, edit: false },
-                                                      ledger: { view: false, edit: false },
-                                                      attendance: { view: false, edit: false },
-                                                      leave: { view: false, edit: false },
-                                                      birthdays: { view: false, edit: false },
-                                                      directory: { view: false, edit: false },
-                                                      admin: { view: false, edit: false }
-                                                    });
+                                                    setRolePermsInput(role.permissions || createEmptyRolePermissions());
                                                     triggerSuccess(`Loaded security mappings for "${role.name}" into editor.`);
                                                   }}
                                                   className="text-slate-500 hover:text-slate-800 p-1 transition cursor-pointer text-xs"
@@ -1314,9 +1300,11 @@ export default function ModuleContent() {
                                            <div className="flex flex-wrap gap-1 mt-1">
                                              {Object.entries(role.permissions || {}).map(([mod, perm]: any) => {
                                                if (!perm.view) return null;
+                                               const label =
+                                                 ROLE_PERMISSION_MODULE_ROWS.find((row) => row.key === mod)?.name ?? mod;
                                                return (
                                                  <span key={mod} className={`text-[9px] px-1.5 py-0.5 rounded font-bold capitalize ${perm.edit ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                   {mod}: {perm.edit ? "Edit" : "View"}
+                                                   {label}: {perm.edit ? "Edit" : "View"}
                                                  </span>
                                                );
                                              })}

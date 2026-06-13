@@ -89,8 +89,8 @@ async function startServer() {
   } else {
     console.log("Starting Flex HRM frontend in production mode...");
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app.use(express.static(distPath, { index: "index.html" }));
+    app.get(/^(?!\/api).*/, (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

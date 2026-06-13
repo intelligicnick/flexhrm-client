@@ -17,6 +17,7 @@ import { EmployeeDocument } from "../types";
 import { useAuthenticatedBlobUrl } from "../hooks/useAuthenticatedBlobUrl";
 import {
   DOCUMENT_LABEL_PRESETS,
+  type DocumentLabelPreset,
   deleteEmployeeDocument,
   fetchEmployeeDocuments,
   getEmployeeDocumentUrl,
@@ -89,6 +90,17 @@ function makePendingId(): string {
 function resolveLabel(preset: string, custom: string): string {
   if (preset === "Other") return custom.trim();
   return preset;
+}
+
+const SELECTABLE_DOCUMENT_PRESETS = DOCUMENT_LABEL_PRESETS.filter(
+  (preset): preset is Exclude<DocumentLabelPreset, "Other"> => preset !== "Other",
+);
+
+function labelToPendingFields(label: string): Pick<PendingUpload, "labelPreset" | "customLabel"> {
+  if ((DOCUMENT_LABEL_PRESETS as readonly string[]).includes(label) && label !== "Other") {
+    return { labelPreset: label, customLabel: "" };
+  }
+  return { labelPreset: "Other", customLabel: label };
 }
 
 function PendingPreviewModal({
@@ -222,8 +234,8 @@ export default function EmployeeDocumentsPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [defaultLabelPreset, setDefaultLabelPreset] = useState<string>("PAN Card");
-  const [defaultCustomLabel, setDefaultCustomLabel] = useState("");
+  const [selectedDocTypes, setSelectedDocTypes] = useState<string[]>([]);
+  const [customTypeInput, setCustomTypeInput] = useState("");
   const [pendingItems, setPendingItems] = useState<PendingUpload[]>([]);
   const [defaultQualityPercent, setDefaultQualityPercent] = useState(60);
   const [isUploading, setIsUploading] = useState(false);
@@ -234,8 +246,8 @@ export default function EmployeeDocumentsPanel({
   const [previewPending, setPreviewPending] = useState<PendingUpload | null>(null);
   const [editingPendingId, setEditingPendingId] = useState<string | null>(null);
   const [adjustingDoc, setAdjustingDoc] = useState<AdjustingDocument | null>(null);
-  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeUploadLabelRef = useRef<string | null>(null);
 
   const editingPending = useMemo(
     () => pendingItems.find((item) => item.id === editingPendingId) ?? null,
@@ -246,6 +258,47 @@ export default function EmployeeDocumentsPanel({
     () => pendingItems.filter((item) => resolveLabel(item.labelPreset, item.customLabel)).length,
     [pendingItems],
   );
+
+  const savedByLabel = useMemo(() => {
+    const map = new Map<string, EmployeeDocument>();
+    for (const doc of documents) {
+      if (!map.has(doc.label)) map.set(doc.label, doc);
+    }
+    return map;
+  }, [documents]);
+
+  const pendingByLabel = useMemo(() => {
+    const map = new Map<string, PendingUpload>();
+    for (const item of pendingItems) {
+      const label = resolveLabel(item.labelPreset, item.customLabel);
+      if (label) map.set(label, item);
+    }
+    return map;
+  }, [pendingItems]);
+
+  const toggleDocType = (label: string) => {
+    setSelectedDocTypes((prev) => {
+      if (prev.includes(label)) {
+        setPendingItems((items) =>
+          items.filter((item) => resolveLabel(item.labelPreset, item.customLabel) !== label),
+        );
+        return prev.filter((entry) => entry !== label);
+      }
+      return [...prev, label];
+    });
+  };
+
+  const addCustomDocType = () => {
+    const label = customTypeInput.trim();
+    if (!label) return;
+    setCustomTypeInput("");
+    setSelectedDocTypes((prev) => (prev.includes(label) ? prev : [...prev, label]));
+  };
+
+  const triggerUploadForType = (label: string) => {
+    activeUploadLabelRef.current = label;
+    fileInputRef.current?.click();
+  };
 
   const loadDocuments = useCallback(async () => {
     setLoading(true);
@@ -320,14 +373,19 @@ export default function EmployeeDocumentsPanel({
     }
   };
 
-  const buildPendingFromFile = async (file: File, displayName: string): Promise<PendingUpload> => {
+  const buildPendingFromFile = async (
+    file: File,
+    displayName: string,
+    label: string,
+  ): Promise<PendingUpload> => {
     const id = makePendingId();
+    const { labelPreset, customLabel } = labelToPendingFields(label);
     const base = {
       id,
       file,
       fileName: displayName,
-      labelPreset: defaultLabelPreset,
-      customLabel: defaultCustomLabel,
+      labelPreset,
+      customLabel,
       isCompressing: false,
     };
 
@@ -382,43 +440,42 @@ export default function EmployeeDocumentsPanel({
   const processSelectedFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
-    setError(null);
-    const validFiles: Array<{ file: File; displayName: string }> = [];
-    for (const file of files) {
-      if (!isImageFile(file) && !isPdfFile(file)) {
-        setError(`Skipped "${file.name}" — only images and PDFs are allowed.`);
-        continue;
-      }
-      if (file.size > 15 * 1024 * 1024) {
-        setError(`Skipped "${file.name}" — maximum size is 15 MB.`);
-        continue;
-      }
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      validFiles.push({ file, displayName: relativePath || file.name });
+    const uploadLabel = activeUploadLabelRef.current;
+    activeUploadLabelRef.current = null;
+    if (!uploadLabel) {
+      setError("Select a document type before uploading.");
+      return;
     }
 
-    if (validFiles.length === 0) return;
+    setError(null);
+    const file = files[0];
+    if (!isImageFile(file) && !isPdfFile(file)) {
+      setError(`"${file.name}" is not supported — only images and PDFs are allowed.`);
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setError(`"${file.name}" exceeds the 15 MB limit.`);
+      return;
+    }
+
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+    const displayName = relativePath || file.name;
 
     try {
-      const created = await Promise.all(
-        validFiles.map((entry) => buildPendingFromFile(entry.file, entry.displayName)),
-      );
-      setPendingItems((prev) => [...created, ...prev]);
+      const created = await buildPendingFromFile(file, displayName, uploadLabel);
+      setPendingItems((prev) => [
+        created,
+        ...prev.filter((item) => resolveLabel(item.labelPreset, item.customLabel) !== uploadLabel),
+      ]);
+      setSelectedDocTypes((prev) => (prev.includes(uploadLabel) ? prev : [...prev, uploadLabel]));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to read selected files.");
+      setError(err instanceof Error ? err.message : "Failed to read selected file.");
     }
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    await processSelectedFiles(files);
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    const files = Array.from(e.dataTransfer.files);
     await processSelectedFiles(files);
   };
 
@@ -599,299 +656,299 @@ export default function EmployeeDocumentsPanel({
             Upload Documents
           </h3>
           <p className="mt-1 text-[11px] text-slate-500">
-            Drop or browse for multiple files at once. Preview each file, adjust quality, and crop before saving all.
+            Select the document types you need, then upload a file for each one.
           </p>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                Default label for new files
-              </label>
-              <select
-                value={defaultLabelPreset}
-                onChange={(e) => setDefaultLabelPreset(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-orange-200"
-              >
-                {DOCUMENT_LABEL_PRESETS.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {preset}
-                  </option>
-                ))}
-              </select>
+          <div className="mt-3">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Document types
+            </label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {SELECTABLE_DOCUMENT_PRESETS.map((preset) => {
+                const selected = selectedDocTypes.includes(preset);
+                const saved = savedByLabel.get(preset);
+                return (
+                  <label
+                    key={preset}
+                    className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                      selected
+                        ? "border-[#ff791a] bg-orange-100/70 text-orange-950"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-orange-200 hover:bg-orange-50/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleDocType(preset)}
+                      className="accent-[#ff791a]"
+                    />
+                    <span>{preset}</span>
+                    {saved && <CheckCircle2 size={12} className="text-emerald-600" />}
+                  </label>
+                );
+              })}
             </div>
 
-            {defaultLabelPreset === "Other" ? (
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Default custom label
-                </label>
-                <input
-                  type="text"
-                  value={defaultCustomLabel}
-                  onChange={(e) => setDefaultCustomLabel(e.target.value)}
-                  placeholder="e.g. Driving Licence"
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-orange-200"
-                />
-              </div>
-            ) : (
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Default quality
-                </label>
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={defaultQualityPercent}
-                    onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
-                    className="w-full accent-[#ff791a]"
-                  />
-                  <span className="w-10 shrink-0 text-xs font-bold text-[#ff791a]">
-                    {defaultQualityPercent}%
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {defaultLabelPreset === "Other" && (
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                  Default quality
-                </label>
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={defaultQualityPercent}
-                    onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
-                    className="w-full accent-[#ff791a]"
-                  />
-                  <span className="w-10 shrink-0 text-xs font-bold text-[#ff791a]">
-                    {defaultQualityPercent}%
-                  </span>
-                </div>
+            {selectedDocTypes.some(
+              (type) => !(SELECTABLE_DOCUMENT_PRESETS as readonly string[]).includes(type),
+            ) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedDocTypes
+                  .filter((type) => !(SELECTABLE_DOCUMENT_PRESETS as readonly string[]).includes(type))
+                  .map((type) => (
+                    <label
+                      key={type}
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#ff791a] bg-orange-100/70 px-3 py-2 text-xs font-semibold text-orange-950"
+                    >
+                      <input
+                        type="checkbox"
+                        checked
+                        onChange={() => toggleDocType(type)}
+                        className="accent-[#ff791a]"
+                      />
+                      <span>{type}</span>
+                      {savedByLabel.get(type) && (
+                        <CheckCircle2 size={12} className="text-emerald-600" />
+                      )}
+                    </label>
+                  ))}
               </div>
             )}
           </div>
 
-          <div
-            role="button"
-            tabIndex={0}
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                fileInputRef.current?.click();
-              }
-            }}
-            onDragEnter={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragActive(false);
-            }}
-            onDrop={(e) => void handleDrop(e)}
-            className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 transition ${
-              dragActive
-                ? "border-[#ff791a] bg-orange-50/80"
-                : "border-slate-200 bg-white hover:border-orange-200 hover:bg-orange-50/30"
-            }`}
-          >
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,application/pdf"
-              onChange={handleFileSelect}
-              className="hidden"
+              type="text"
+              value={customTypeInput}
+              onChange={(e) => setCustomTypeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addCustomDocType();
+                }
+              }}
+              placeholder="Other document name (e.g. Driving Licence)"
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-[#ff791a] focus:outline-none focus:ring-2 focus:ring-orange-200"
             />
-            <div className="mb-2 rounded-full bg-orange-50 p-3 text-[#ff791a]">
-              <Upload size={22} />
-            </div>
-            <p className="text-sm font-semibold text-slate-700">
-              Drop files here or <span className="text-[#ff791a]">browse</span>
-            </p>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Select many images or PDFs at once · max 15 MB each
-            </p>
+            <button
+              type="button"
+              onClick={addCustomDocType}
+              disabled={!customTypeInput.trim()}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:border-[#ff791a]/40 hover:text-[#ff791a] disabled:opacity-50"
+            >
+              Add type
+            </button>
           </div>
 
-          {pendingItems.length > 0 && (
+          <div className="mt-3">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Default quality for new uploads
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="range"
+                min={10}
+                max={100}
+                step={5}
+                value={defaultQualityPercent}
+                onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
+                className="w-full accent-[#ff791a]"
+              />
+              <span className="w-10 shrink-0 text-xs font-bold text-[#ff791a]">
+                {defaultQualityPercent}%
+              </span>
+            </div>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          {selectedDocTypes.length > 0 && (
             <div className="mt-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-bold text-slate-700">
-                  Ready to upload ({pendingItems.length} file{pendingItems.length === 1 ? "" : "s"})
-                </p>
-                <button
-                  type="button"
-                  onClick={clearAllPending}
-                  className="text-[11px] font-bold text-slate-500 hover:text-rose-600"
-                >
-                  Clear all
-                </button>
-              </div>
+              <p className="text-xs font-bold text-slate-700">
+                Upload for selected types ({selectedDocTypes.length})
+              </p>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-                  {pendingItems.map((item) => {
-                    const label = resolveLabel(item.labelPreset, item.customLabel);
-                    return (
-                      <div
-                        key={item.id}
-                        className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-xs"
-                      >
-                        <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-t-xl border-b border-slate-100 bg-slate-50">
-                          {item.isCompressing ? (
-                            <Loader2 size={22} className="animate-spin text-slate-400" />
-                          ) : item.mimeType === "application/pdf" ? (
-                            <iframe
-                              src={item.previewUrl}
-                              title={item.fileName}
-                              className="h-full w-full border-0 bg-white"
-                            />
-                          ) : (
-                            <img
-                              src={item.previewUrl}
-                              alt={item.fileName}
-                              className="h-full w-full object-contain p-1"
-                            />
-                          )}
+              {selectedDocTypes.map((docType) => {
+                const saved = savedByLabel.get(docType);
+                const pending = pendingByLabel.get(docType);
+                return (
+                  <div
+                    key={docType}
+                    className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-slate-800">{docType}</p>
+                        {saved && (
+                          <p className="mt-0.5 text-[11px] text-emerald-700">
+                            Saved · {formatFileSize(saved.storedSizeBytes)} ·{" "}
+                            {new Date(saved.createdAt).toLocaleDateString()}
+                          </p>
+                        )}
+                        {!saved && !pending && (
+                          <p className="mt-0.5 text-[11px] text-slate-400">No file uploaded yet</p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        {saved && (
                           <button
                             type="button"
-                            onClick={() => setPreviewPending(item)}
-                            className="absolute left-1.5 top-1.5 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm hover:bg-white hover:text-[#ff791a]"
-                            title="Full preview"
+                            onClick={() => setPreviewDoc(saved)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#ff791a]/40 hover:text-[#ff791a]"
                           >
-                            <Eye size={14} />
+                            <Eye size={12} />
+                            View saved
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => removePending(item.id)}
-                            className="absolute right-1.5 top-1.5 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm hover:bg-white hover:text-slate-700"
-                            title="Remove"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => triggerUploadForType(docType)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-[#ff791a] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-orange-600"
+                        >
+                          <Upload size={12} />
+                          {pending || saved ? "Replace" : "Upload"}
+                        </button>
+                      </div>
+                    </div>
 
-                        <div className="flex flex-1 flex-col gap-2 p-3">
-                          <div>
-                            <p className="truncate text-xs font-bold text-slate-800" title={item.fileName}>
-                              {item.fileName}
-                            </p>
-                            <p className="text-[10px] text-slate-500">
-                              <HardDrive size={10} className="mr-0.5 inline" />
-                              {formatFileSize(item.originalSizeBytes)} →{" "}
-                              <span className="font-semibold text-emerald-700">
-                                {formatFileSize(item.compressedSizeBytes)}
-                              </span>
-                            </p>
-                          </div>
-
-                          <select
-                            value={item.labelPreset}
-                            onChange={(e) => updatePendingItem(item.id, { labelPreset: e.target.value })}
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800"
-                          >
-                            {DOCUMENT_LABEL_PRESETS.map((preset) => (
-                              <option key={preset} value={preset}>
-                                {preset}
-                              </option>
-                            ))}
-                          </select>
-                          {item.labelPreset === "Other" && (
-                            <input
-                              type="text"
-                              value={item.customLabel}
-                              onChange={(e) => updatePendingItem(item.id, { customLabel: e.target.value })}
-                              placeholder="Custom label"
-                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                            />
-                          )}
-
-                          {(item.isImage || item.isPdf) && (
-                            <div>
-                              <div className="flex items-center justify-between gap-1">
-                                <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                                  <SlidersHorizontal size={10} />
-                                  Quality
-                                </label>
-                                <span className="text-[11px] font-bold text-[#ff791a]">
-                                  {item.qualityPercent}%
-                                </span>
-                              </div>
-                              <input
-                                type="range"
-                                min={10}
-                                max={100}
-                                step={5}
-                                value={item.qualityPercent}
-                                onChange={(e) => {
-                                  const percent = Number(e.target.value);
-                                  updatePendingItem(item.id, { qualityPercent: percent });
-                                  void recompressPending(item, percent);
-                                }}
-                                className="mt-1 w-full accent-[#ff791a]"
+                    {pending && (
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <div className="relative flex aspect-[4/3] w-full max-w-[180px] items-center justify-center overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
+                            {pending.isCompressing ? (
+                              <Loader2 size={22} className="animate-spin text-slate-400" />
+                            ) : pending.mimeType === "application/pdf" ? (
+                              <iframe
+                                src={pending.previewUrl}
+                                title={pending.fileName}
+                                className="h-full w-full border-0 bg-white"
                               />
-                              {item.originalSizeBytes > 0 && (
-                                <p className="mt-0.5 text-[10px] text-emerald-600">
-                                  {savingsPercent(item.originalSizeBytes, item.compressedSizeBytes)}% smaller
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {(item.isImage || item.isPdf) && item.imageSourceUrl && (
+                            ) : (
+                              <img
+                                src={pending.previewUrl}
+                                alt={pending.fileName}
+                                className="h-full w-full object-contain p-1"
+                              />
+                            )}
                             <button
                               type="button"
-                              onClick={() => setEditingPendingId(item.id)}
-                              className="mt-auto inline-flex w-full items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#ff791a]/40 hover:text-[#ff791a]"
+                              onClick={() => setPreviewPending(pending)}
+                              className="absolute left-1.5 top-1.5 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm hover:bg-white hover:text-[#ff791a]"
+                              title="Full preview"
                             >
-                              <Crop size={12} />
-                              Crop
+                              <Eye size={14} />
                             </button>
-                          )}
+                          </div>
 
-                          {!label && (
-                            <span className="text-[10px] font-medium text-amber-600 mt-auto">
-                              Set a label before saving
-                            </span>
-                          )}
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div>
+                              <p className="truncate text-xs font-bold text-slate-800" title={pending.fileName}>
+                                {pending.fileName}
+                              </p>
+                              <p className="text-[10px] text-slate-500">
+                                <HardDrive size={10} className="mr-0.5 inline" />
+                                {formatFileSize(pending.originalSizeBytes)} →{" "}
+                                <span className="font-semibold text-emerald-700">
+                                  {formatFileSize(pending.compressedSizeBytes)}
+                                </span>
+                              </p>
+                            </div>
+
+                            {(pending.isImage || pending.isPdf) && (
+                              <div>
+                                <div className="flex items-center justify-between gap-1">
+                                  <label className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                    <SlidersHorizontal size={10} />
+                                    Quality
+                                  </label>
+                                  <span className="text-[11px] font-bold text-[#ff791a]">
+                                    {pending.qualityPercent}%
+                                  </span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min={10}
+                                  max={100}
+                                  step={5}
+                                  value={pending.qualityPercent}
+                                  onChange={(e) => {
+                                    const percent = Number(e.target.value);
+                                    updatePendingItem(pending.id, { qualityPercent: percent });
+                                    void recompressPending(pending, percent);
+                                  }}
+                                  className="mt-1 w-full accent-[#ff791a]"
+                                />
+                                {pending.originalSizeBytes > 0 && (
+                                  <p className="mt-0.5 text-[10px] text-emerald-600">
+                                    {savingsPercent(pending.originalSizeBytes, pending.compressedSizeBytes)}% smaller
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-2">
+                              {(pending.isImage || pending.isPdf) && pending.imageSourceUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingPendingId(pending.id)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-600 hover:border-[#ff791a]/40 hover:text-[#ff791a]"
+                                >
+                                  <Crop size={12} />
+                                  Crop
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => removePending(pending.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2 py-1.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50"
+                              >
+                                <X size={12} />
+                                Remove file
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-              </div>
+                    )}
+                  </div>
+                );
+              })}
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => void handleUploadAll()}
-                  disabled={isUploading || readyPendingCount === 0}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600 disabled:opacity-50"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      {uploadProgress ?? "Saving..."}
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={14} />
-                      Save all ({readyPendingCount})
-                    </>
-                  )}
-                </button>
-              </div>
+              {readyPendingCount > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-orange-100 pt-3">
+                  <button
+                    type="button"
+                    onClick={clearAllPending}
+                    className="text-[11px] font-bold text-slate-500 hover:text-rose-600"
+                  >
+                    Clear pending files
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUploadAll()}
+                    disabled={isUploading || readyPendingCount === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600 disabled:opacity-50"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        {uploadProgress ?? "Saving..."}
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={14} />
+                        Save all ({readyPendingCount})
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

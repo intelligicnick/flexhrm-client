@@ -4,7 +4,8 @@
  */
 
 import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import { parseIdCardFromVerifyParam } from "./components/id-card/verify-url";
 import "./index.css";
 import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
@@ -24,12 +25,31 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function AppRoutes() {
+function VerifyByQuery() {
+  const [searchParams] = useSearchParams();
+  const idParam = searchParams.get("id") ?? searchParams.get("idCard");
+  if (!idParam?.trim()) {
+    return <EmployeeVerifyPage idOverride="" />;
+  }
+  const id = parseIdCardFromVerifyParam(idParam);
+  return <Navigate to={`/verify/${encodeURIComponent(id)}`} replace />;
+}
+
+function HomeRedirect() {
+  const [searchParams] = useSearchParams();
+  const idParam = searchParams.get("id") ?? searchParams.get("idCard");
+  if (idParam?.trim()) {
+    const id = parseIdCardFromVerifyParam(idParam);
+    return <Navigate to={`/verify/${encodeURIComponent(id)}`} replace />;
+  }
+  return <Navigate to={DEFAULT_PATH} replace />;
+}
+
+function PortalRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-      <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
-      <Route path="/" element={<Navigate to={DEFAULT_PATH} replace />} />
+      <Route path="/" element={<HomeRedirect />} />
       <Route
         path="*"
         element={
@@ -45,9 +65,19 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <HRMSProvider>
-        <AppRoutes />
-      </HRMSProvider>
+      <Routes>
+        <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
+        <Route path="/verify" element={<VerifyByQuery />} />
+        <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
+        <Route
+          path="/*"
+          element={
+            <HRMSProvider>
+              <PortalRoutes />
+            </HRMSProvider>
+          }
+        />
+      </Routes>
     </BrowserRouter>
   );
 }

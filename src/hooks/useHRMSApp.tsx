@@ -131,7 +131,7 @@ import {
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
+import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -317,17 +317,9 @@ export function useHRMSApp() {
   // Custom Roles Editor States
   const [roleNameInput, setRoleNameInput] = useState("");
   const [roleDescInput, setRoleDescInput] = useState("");
-  const [rolePermsInput, setRolePermsInput] = useState<Record<string, { view: boolean; edit: boolean }>>({
-    employees: { view: true, edit: true },
-    schoolWork: { view: true, edit: true },
-    salary: { view: false, edit: false },
-    ledger: { view: false, edit: false },
-    attendance: { view: true, edit: true },
-    leave: { view: true, edit: true },
-    birthdays: { view: true, edit: false },
-    directory: { view: true, edit: false },
-    admin: { view: false, edit: false }
-  });
+  const [rolePermsInput, setRolePermsInput] = useState<Record<string, { view: boolean; edit: boolean }>>(
+    () => ({ ...DEFAULT_NEW_ROLE_PERMISSIONS }),
+  );
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
@@ -3974,17 +3966,7 @@ export function useHRMSApp() {
       }
       setRoleNameInput("");
       setRoleDescInput("");
-      setRolePermsInput({
-        employees: { view: true, edit: true },
-        schoolWork: { view: true, edit: true },
-        salary: { view: false, edit: false },
-        ledger: { view: false, edit: false },
-        attendance: { view: true, edit: true },
-        leave: { view: true, edit: true },
-        birthdays: { view: true, edit: false },
-        directory: { view: true, edit: false },
-        admin: { view: false, edit: false }
-      });
+      setRolePermsInput({ ...DEFAULT_NEW_ROLE_PERMISSIONS });
       await fetchRoles();
       triggerSuccess(`Successfully saved custom role "${name}".`);
       setRoleSuccess(`Custom role "${name}" has been created/updated!`);

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Printer } from "lucide-react";
+import { Image } from "lucide-react";
 import { buildCardData, previewScale } from "./data";
 import { CARD_SIZE } from "./constants";
-import { exportCardPng, printCards } from "./export";
+import { exportCardPng } from "./export";
 import { fitPhotoForIdCard } from "./photo";
 import { generateEmployeeQrDataUrl } from "./qr";
 import IdCardFront from "./IdCardFront";
@@ -184,19 +184,6 @@ export default function IdCardPanel({
       ) : null}
 
       <div className={styles.panelActions}>
-        <button
-          type="button"
-          disabled={exportsDisabled}
-          onClick={() =>
-            frontRef.current &&
-            backRef.current &&
-            run("print", () => printCards(frontRef.current!, backRef.current!))
-          }
-          className={`${styles.panelBtn} ${styles.panelBtnSecondary}`}
-        >
-          <Printer size={14} />
-          {busy === "print" ? "Preparing…" : "Print"}
-        </button>
         <button
           type="button"
           disabled={exportsDisabled}

@@ -1,5 +1,5 @@
 import QRCode from "qrcode";
-import { getIdCardVerifyBase } from "../../env";
+import { getIdCardVerifyUrl } from "./verify-url";
 
 export interface QrEmployeePayload {
   idNo: string;
@@ -12,17 +12,7 @@ export interface QrEmployeePayload {
 }
 
 export function buildQrPayload(payload: QrEmployeePayload): string {
-  const verifyUrl = `${getIdCardVerifyBase()}/${encodeURIComponent(payload.idNo)}`;
-  return [
-    verifyUrl,
-    `ID:${payload.idNo}`,
-    `Name:${payload.name}`,
-    `Code:${payload.employeeCode}`,
-    `Role:${payload.designation}`,
-    `DOB:${payload.dob}`,
-    `Issue:${payload.issueDate}`,
-    `Expiry:${payload.expiryDate}`,
-  ].join("\n");
+  return getIdCardVerifyUrl(payload.idNo);
 }
 
 const QR_DISPLAY_PX = 38;
