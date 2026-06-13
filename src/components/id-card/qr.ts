@@ -1,8 +1,5 @@
 import QRCode from "qrcode";
-
-/** Public verification URL scanned from the ID card QR code. */
-export const ID_CARD_VERIFY_BASE =
-  "https://flexhrm.intelligic.org/employee";
+import { getIdCardVerifyBase } from "../../env";
 
 export interface QrEmployeePayload {
   idNo: string;
@@ -15,7 +12,7 @@ export interface QrEmployeePayload {
 }
 
 export function buildQrPayload(payload: QrEmployeePayload): string {
-  const verifyUrl = `${ID_CARD_VERIFY_BASE}/${encodeURIComponent(payload.idNo)}`;
+  const verifyUrl = `${getIdCardVerifyBase()}/${encodeURIComponent(payload.idNo)}`;
   return [
     verifyUrl,
     `ID:${payload.idNo}`,
@@ -28,11 +25,13 @@ export function buildQrPayload(payload: QrEmployeePayload): string {
   ].join("\n");
 }
 
+const QR_DISPLAY_PX = 38;
+
 export async function generateEmployeeQrDataUrl(
   payload: QrEmployeePayload,
 ): Promise<string> {
   return QRCode.toDataURL(buildQrPayload(payload), {
-    width: 120,
+    width: QR_DISPLAY_PX,
     margin: 0,
     errorCorrectionLevel: "L",
   });

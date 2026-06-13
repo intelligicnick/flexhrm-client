@@ -4,21 +4,25 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Save, X, RotateCcw, MapPin, Briefcase, ShieldAlert, MousePointerClick } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Search, Save, X, RotateCcw, MapPin, Briefcase, Award, ShieldAlert, MousePointerClick } from "lucide-react";
 import { Employee } from "../types";
 import {
   BULK_EDIT_FIELDS,
   BOOLEAN_OPTIONS,
+  SKILL_OPTIONS,
   buildReviewEntries,
   collectCustomFieldNames,
   countDraftChanges,
   getCustomFieldValue,
+  resolveEmployeeRecordId,
   getEmployeeFieldValue,
   isCustomFieldDirty,
   isFieldDirty,
   BulkEditFieldDef,
   BulkEditReviewEntry,
 } from "../lib/employee-bulk-edit-fields";
+import { normalizeSkillCategory } from "../utils";
 
 interface BulkEmployeeEditTableProps {
   employees: Employee[];
@@ -93,12 +97,16 @@ function selectionToEmployeeIds(
   selection: ColumnSelection,
   filteredEmployees: Employee[],
 ): string[] {
-  const anchorIdx = filteredEmployees.findIndex((e) => e.id === selection.anchorEmployeeId);
-  const focusIdx = filteredEmployees.findIndex((e) => e.id === selection.focusEmployeeId);
+  const anchorIdx = filteredEmployees.findIndex(
+    (e) => resolveEmployeeRecordId(e) === selection.anchorEmployeeId,
+  );
+  const focusIdx = filteredEmployees.findIndex(
+    (e) => resolveEmployeeRecordId(e) === selection.focusEmployeeId,
+  );
   if (anchorIdx === -1 || focusIdx === -1) return [];
   const start = Math.min(anchorIdx, focusIdx);
   const end = Math.max(anchorIdx, focusIdx);
-  return filteredEmployees.slice(start, end + 1).map((e) => e.id);
+  return filteredEmployees.slice(start, end + 1).map((e) => resolveEmployeeRecordId(e));
 }
 
 function ReviewChangeRow({ entry }: { entry: BulkEditReviewEntry }) {
@@ -191,7 +199,7 @@ function EditableCell({
 
   const cellDataAttrs = {
     "data-bulk-cell": field.key,
-    "data-employee-id": emp.id,
+    "data-employee-id": resolveEmployeeRecordId(emp),
   };
 
   if (field.type === "select" || field.type === "boolean" || field.dynamicOptions) {
@@ -245,7 +253,9 @@ export default function BulkEmployeeEditTable({
   const [searchTerm, setSearchTerm] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
+  const [skillFilter, setSkillFilter] = useState("");
   const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [columnSelection, setColumnSelection] = useState<ColumnSelection | null>(null);
   const columnSelectionRef = useRef<ColumnSelection | null>(null);
   const selectedEmployeeIdsRef = useRef<string[]>([]);
@@ -268,6 +278,20 @@ export default function BulkEmployeeEditTable({
     return Array.from(roleSet).sort();
   }, [employees, availableRoles]);
 
+  const skillCategories = useMemo(() => {
+    const extras = new Set<string>();
+    for (const emp of employees) {
+      const normalized = normalizeSkillCategory(emp.skillCategory);
+      if (
+        normalized &&
+        !SKILL_OPTIONS.includes(normalized as (typeof SKILL_OPTIONS)[number])
+      ) {
+        extras.add(normalized);
+      }
+    }
+    return [...SKILL_OPTIONS, ...Array.from(extras).sort((a, b) => a.localeCompare(b))];
+  }, [employees]);
+
   const filteredEmployees = useMemo(() => {
     let result = [...employees];
     if (searchTerm.trim()) {
@@ -285,8 +309,19 @@ export default function BulkEmployeeEditTable({
     if (roleFilter) {
       result = result.filter((e) => (e.role || "") === roleFilter);
     }
+    if (skillFilter) {
+      if (skillFilter === "__unassigned__") {
+        result = result.filter((e) => !normalizeSkillCategory(e.skillCategory));
+      } else {
+        result = result.filter(
+          (e) =>
+            normalizeSkillCategory(e.skillCategory).toLowerCase() ===
+            skillFilter.toLowerCase(),
+        );
+      }
+    }
     return result.sort((a, b) => a.srNo - b.srNo);
-  }, [employees, searchTerm, locationFilter, roleFilter]);
+  }, [employees, searchTerm, locationFilter, roleFilter, skillFilter]);
 
   const selectedEmployeeIds = useMemo(
     () =>
@@ -338,7 +373,9 @@ export default function BulkEmployeeEditTable({
       const selection = columnSelectionRef.current;
 
       if (shiftKey && selection) {
-        const clickIdx = filteredEmployees.findIndex((e) => e.id === employeeId);
+        const clickIdx = filteredEmployees.findIndex(
+          (e) => resolveEmployeeRecordId(e) === employeeId,
+        );
         if (clickIdx === -1) return;
 
         if (selection.columnId === columnId) {
@@ -352,10 +389,10 @@ export default function BulkEmployeeEditTable({
         }
 
         const anchorIdx = filteredEmployees.findIndex(
-          (e) => e.id === selection.anchorEmployeeId,
+          (e) => resolveEmployeeRecordId(e) === selection.anchorEmployeeId,
         );
         const focusIdx = filteredEmployees.findIndex(
-          (e) => e.id === selection.focusEmployeeId,
+          (e) => resolveEmployeeRecordId(e) === selection.focusEmployeeId,
         );
         if (anchorIdx === -1) return;
         const start = Math.min(anchorIdx, focusIdx === -1 ? anchorIdx : focusIdx, clickIdx);
@@ -420,7 +457,9 @@ export default function BulkEmployeeEditTable({
 
   const extendSelectionByArrow = useCallback(
     (employeeId: string, columnId: ColumnId, direction: "up" | "down") => {
-      const currentIdx = filteredEmployees.findIndex((e) => e.id === employeeId);
+      const currentIdx = filteredEmployees.findIndex(
+        (e) => resolveEmployeeRecordId(e) === employeeId,
+      );
       if (currentIdx === -1) return;
 
       const nextIdx = direction === "down" ? currentIdx + 1 : currentIdx - 1;
@@ -456,7 +495,9 @@ export default function BulkEmployeeEditTable({
     (e: React.KeyboardEvent, employeeId: string, columnId: ColumnId) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
 
-      const currentIdx = filteredEmployees.findIndex((emp) => emp.id === employeeId);
+      const currentIdx = filteredEmployees.findIndex(
+        (emp) => resolveEmployeeRecordId(emp) === employeeId,
+      );
       if (currentIdx === -1) return;
       const nextIdx = e.key === "ArrowDown" ? currentIdx + 1 : currentIdx - 1;
       if (nextIdx < 0 || nextIdx >= filteredEmployees.length) return;
@@ -494,7 +535,7 @@ export default function BulkEmployeeEditTable({
 
   const handleColumnHeaderClick = useCallback(
     (columnId: ColumnId) => {
-      const allIds = filteredEmployees.map((e) => e.id);
+      const allIds = filteredEmployees.map((e) => resolveEmployeeRecordId(e));
       if (allIds.length === 0) return;
       const next = {
         columnId,
@@ -560,7 +601,7 @@ export default function BulkEmployeeEditTable({
 
   useEffect(() => {
     clearColumnSelection();
-  }, [locationFilter, roleFilter, searchTerm, clearColumnSelection]);
+  }, [locationFilter, roleFilter, skillFilter, searchTerm, clearColumnSelection]);
 
   const { employeeCount, fieldCount } = countDraftChanges(employees, draftChanges);
   const reviewEntries = useMemo(
@@ -581,8 +622,19 @@ export default function BulkEmployeeEditTable({
   }, []);
 
   const handleApply = async () => {
-    await onApply();
-    setShowReviewDialog(false);
+    setApplyError(null);
+    try {
+      await onApply();
+      setShowReviewDialog(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to apply bulk changes.";
+      setApplyError(message);
+    }
+  };
+
+  const openReviewDialog = () => {
+    setApplyError(null);
+    setShowReviewDialog(true);
   };
 
   return (
@@ -610,7 +662,7 @@ export default function BulkEmployeeEditTable({
             Discard All
           </button>
           <button
-            onClick={() => setShowReviewDialog(true)}
+            onClick={openReviewDialog}
             disabled={employeeCount === 0 || isApplying}
             className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -657,6 +709,22 @@ export default function BulkEmployeeEditTable({
             {roles.map((role) => (
               <option key={role} value={role}>
                 {role}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
+          <Award size={16} className="text-slate-400 mr-1" />
+          <select
+            value={skillFilter}
+            onChange={(e) => setSkillFilter(e.target.value)}
+            className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
+          >
+            <option value="">All Skill Categories</option>
+            <option value="__unassigned__">Unassigned</option>
+            {skillCategories.map((skill) => (
+              <option key={skill} value={skill}>
+                {skill}
               </option>
             ))}
           </select>
@@ -779,12 +847,13 @@ export default function BulkEmployeeEditTable({
               </tr>
             ) : (
               filteredEmployees.map((emp) => {
-                const draft = draftChanges[emp.id];
+                const recordId = resolveEmployeeRecordId(emp);
+                const draft = draftChanges[recordId];
                 const rowHasChanges = !!draft && Object.keys(draft).length > 0;
 
                 return (
                   <tr
-                    key={emp.id}
+                    key={recordId}
                     className={rowHasChanges ? "bg-amber-50/30" : "hover:bg-slate-50/50"}
                   >
                     <td className="sticky left-0 z-10 bg-inherit p-2 text-center font-bold text-slate-500 border-r border-slate-200">
@@ -794,10 +863,10 @@ export default function BulkEmployeeEditTable({
                       <td
                         key={field.key}
                         onMouseDown={(e) =>
-                          handleTdMouseDown(e, emp.id, field.key, isDropdownField(field))
+                          handleTdMouseDown(e, recordId, field.key, isDropdownField(field))
                         }
                         className={`p-1 border-r border-slate-100 ${
-                          isCellSelected(emp.id, field.key) ? "bg-blue-50/40" : ""
+                          isCellSelected(recordId, field.key) ? "bg-blue-50/40" : ""
                         }`}
                         style={{ minWidth: field.minWidth }}
                       >
@@ -811,9 +880,9 @@ export default function BulkEmployeeEditTable({
                             availableRoles,
                             emp,
                           )}
-                          isSelected={isCellSelected(emp.id, field.key)}
-                          onKeyNavigate={(e) => handleCellKeyDown(e, emp.id, field.key)}
-                          onChange={(val) => handleFieldChange(emp.id, field.key, val)}
+                          isSelected={isCellSelected(recordId, field.key)}
+                          onKeyNavigate={(e) => handleCellKeyDown(e, recordId, field.key)}
+                          onChange={(val) => handleFieldChange(recordId, field.key, val)}
                         />
                       </td>
                     ))}
@@ -821,20 +890,20 @@ export default function BulkEmployeeEditTable({
                       const columnId: ColumnId = `custom:${name}`;
                       const dirty = isCustomFieldDirty(emp, draft, name);
                       const value = getCustomFieldValue(emp, draft, name);
-                      const selected = isCellSelected(emp.id, columnId);
+                      const selected = isCellSelected(recordId, columnId);
                       return (
                         <td
-                          key={`${emp.id}-${name}`}
-                          onMouseDown={(e) => handleTdMouseDown(e, emp.id, columnId, false)}
+                          key={`${recordId}-${name}`}
+                          onMouseDown={(e) => handleTdMouseDown(e, recordId, columnId, false)}
                           className={`p-1 border-r border-violet-100 ${selected ? "bg-blue-50/40" : ""}`}
                         >
                           <input
                             type="text"
                             value={value}
                             data-bulk-cell={columnId}
-                            data-employee-id={emp.id}
-                            onKeyDown={(e) => handleCellKeyDown(e, emp.id, columnId)}
-                            onChange={(e) => handleFieldChange(emp.id, columnId, e.target.value)}
+                            data-employee-id={recordId}
+                            onKeyDown={(e) => handleCellKeyDown(e, recordId, columnId)}
+                            onChange={(e) => handleFieldChange(recordId, columnId, e.target.value)}
                             className={`w-full min-w-0 px-1.5 py-1 text-[11px] border rounded bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 ${
                               dirty
                                 ? "border-amber-400 bg-amber-50/80"
@@ -859,46 +928,73 @@ export default function BulkEmployeeEditTable({
         <span className="text-amber-700 font-medium">Amber</span> = unsaved change
       </div>
 
-      {showReviewDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <div>
-                <h3 className="font-bold text-slate-900">Review Changes</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {employeeCount} employee(s) · {fieldCount} field change(s) — compare old and new values before applying
-                </p>
+      {showReviewDialog &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fade-in"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isApplying) {
+                setShowReviewDialog(false);
+              }
+            }}
+          >
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col cursor-default">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                <div>
+                  <h3 className="font-bold text-slate-900">Review Changes</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {employeeCount} employee(s) · {fieldCount} field change(s) — compare old and new values before applying
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowReviewDialog(false)}
+                  disabled={isApplying}
+                  className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer disabled:opacity-50"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button
-                onClick={() => setShowReviewDialog(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                {reviewEntries.length === 0 ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+                    <p>No field differences were detected. Adjust values in the grid, then open review again.</p>
+                  </div>
+                ) : (
+                  reviewEntries.map((entry) => (
+                    <ReviewChangeRow key={entry.employeeId} entry={entry} />
+                  ))
+                )}
+              </div>
+              {applyError && (
+                <div className="mx-6 mb-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                  <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+                  <p>{applyError}</p>
+                </div>
+              )}
+              <div className="flex gap-2 justify-end px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
+                <button
+                  type="button"
+                  onClick={() => setShowReviewDialog(false)}
+                  disabled={isApplying}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-50"
+                >
+                  Back to Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApply}
+                  disabled={isApplying || reviewEntries.length === 0}
+                  className="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50"
+                >
+                  {isApplying ? "Applying..." : "Apply Changes"}
+                </button>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-              {reviewEntries.map((entry) => (
-                <ReviewChangeRow key={entry.employeeId} entry={entry} />
-              ))}
-            </div>
-            <div className="flex gap-2 justify-end px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-xl">
-              <button
-                onClick={() => setShowReviewDialog(false)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
-              >
-                Back to Edit
-              </button>
-              <button
-                onClick={handleApply}
-                disabled={isApplying}
-                className="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer disabled:opacity-50"
-              >
-                {isApplying ? "Applying..." : "Apply Changes"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import "./index.css";
 import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
 import DashboardLayout from "./layouts/DashboardLayout";
+import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
 import { DEFAULT_PATH } from "./routes";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+      <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
       <Route path="/" element={<Navigate to={DEFAULT_PATH} replace />} />
       <Route
         path="*"

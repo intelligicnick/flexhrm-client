@@ -27,6 +27,9 @@ const extensionErrorGuardPlugin = {
   },
 };
 
+const DEFAULT_ID_CARD_VERIFY_BASE =
+  "https://greenyellow-woodpecker-750354.hostingersite.com/employee";
+
 function resolveProductionApiBase(env: Record<string, string>): string {
   const fromEnv =
     env.FLEXHRM_API_BASE || env.PUBLIC_API_URL || env.VITE_API_BASE || "";
@@ -34,16 +37,24 @@ function resolveProductionApiBase(env: Record<string, string>): string {
   return apiBase;
 }
 
+function resolveIdCardVerifyBase(env: Record<string, string>): string {
+  const fromEnv =
+    env.VITE_ID_CARD_VERIFY_BASE_URL || env.ID_CARD_VERIFY_BASE_URL || "";
+  return (fromEnv || DEFAULT_ID_CARD_VERIFY_BASE).trim().replace(/\/$/, "");
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const backendUrl = env.BACKEND_URL || 'http://localhost:3001';
   const productionApiBase = resolveProductionApiBase(env);
+  const idCardVerifyBase = resolveIdCardVerifyBase(env);
 
   return {
     plugins: [extensionErrorGuardPlugin, react(), tailwindcss()],
     define: {
       "process.env.BACKEND_URL": JSON.stringify(backendUrl),
       __FLEXHRM_API_BASE__: JSON.stringify(productionApiBase),
+      __FLEXHRM_ID_CARD_VERIFY_BASE__: JSON.stringify(idCardVerifyBase),
     },
     resolve: {
       alias: {

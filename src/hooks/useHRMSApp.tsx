@@ -72,6 +72,7 @@ import {
   buildSubmissionPayload,
   getEmployeeFieldValue,
   getOriginalCustomFieldValue,
+  resolveEmployeeRecordId,
 } from "../lib/employee-bulk-edit-fields";
 import {
   applySalaryFieldChange,
@@ -153,7 +154,7 @@ function applyBulkEditDraftUpdate(
   drafts: Record<string, Partial<Employee>>;
   anchors: Record<string, SalaryAnchor | null>;
 } {
-  const emp = employees.find((e) => e.id === employeeId);
+  const emp = employees.find((e) => resolveEmployeeRecordId(e) === employeeId);
   if (!emp) return { drafts: prev, anchors };
 
   const fieldDef = BULK_EDIT_FIELDS.find((f) => f.key === field);
@@ -231,7 +232,7 @@ function applyBulkEditCustomFieldUpdate(
   fieldName: string,
   value: string,
 ): Record<string, Partial<Employee>> {
-  const emp = employees.find((e) => e.id === employeeId);
+  const emp = employees.find((e) => resolveEmployeeRecordId(e) === employeeId);
   if (!emp) return prev;
 
   const currentDraft = prev[employeeId] || {};

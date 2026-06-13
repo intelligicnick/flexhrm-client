@@ -19,6 +19,13 @@ function isPublicAuthUrl(urlStr: string): boolean {
   return urlStr.includes("/api/auth/login") || urlStr.includes("/api/auth/quick-login");
 }
 
+function isPublicIdCardUrl(urlStr: string): boolean {
+  return (
+    urlStr.includes("/api/employees/id-card/") &&
+    (urlStr.includes("/verify") || urlStr.includes("/photo"))
+  );
+}
+
 function isApiUrl(urlStr: string): boolean {
   return urlStr.startsWith("/api/") || urlStr.includes("/api/");
 }
@@ -46,6 +53,7 @@ export function setupFetchInterceptor(): void {
     const urlStr = resolveFetchUrl(input);
     const isApiCall = isApiUrl(urlStr);
     const isPublicAuth = isPublicAuthUrl(urlStr);
+    const isPublicApi = isPublicAuth || isPublicIdCardUrl(urlStr);
 
     let resolvedInput = input;
     if (isApiCall && typeof input === "string" && input.startsWith("/api/")) {
@@ -53,7 +61,7 @@ export function setupFetchInterceptor(): void {
     }
 
     let resolvedInit = init;
-    if (isApiCall && token && !isPublicAuth) {
+    if (isApiCall && token && !isPublicApi) {
       resolvedInit = appendAuthHeader(init, token);
     }
 
@@ -61,7 +69,7 @@ export function setupFetchInterceptor(): void {
 
     if (
       isApiCall &&
-      !isPublicAuth &&
+      !isPublicApi &&
       response.status === 401 &&
       localStorage.getItem("hrms_logged_in") === "true"
     ) {

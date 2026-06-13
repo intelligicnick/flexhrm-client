@@ -30,7 +30,7 @@ const IdCardFront = forwardRef<HTMLDivElement, IdCardFrontProps>(
         <div
           className={styles.idNumberStrip}
           style={{
-            left: pct(idNumberBox.left),
+            left: `calc(${pct(idNumberBox.left)} + ${idNumberBox.leftOffsetPx}px)`,
             top: `calc(${pct(idNumberBox.top)} + ${idNumberBox.topOffsetPx}px)`,
             width: pct(idNumberBox.width),
             height: pct(idNumberBox.height),
@@ -92,11 +92,12 @@ const IdCardFront = forwardRef<HTMLDivElement, IdCardFrontProps>(
         {data.qrCode ? (
           <img
             src={data.qrCode}
-            alt="Employee verification QR"
+            alt=""
+            aria-hidden
             className={styles.qrCode}
             style={{
-              right: pct(qr.right),
-              bottom: pct(qr.bottom),
+              right: qr.rightPx,
+              bottom: qr.bottomPx,
               width: qr.sizePx,
               height: qr.sizePx,
             }}

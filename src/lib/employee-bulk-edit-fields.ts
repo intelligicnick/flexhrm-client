@@ -109,6 +109,10 @@ export const BULK_EDIT_FIELDS: BulkEditFieldDef[] = [
   { key: "exitReason", label: "Exit Reason", type: "text", minWidth: "150px", group: "Exit" },
 ];
 
+export function resolveEmployeeRecordId(emp: Employee): string {
+  return String(emp.id || emp.employeeCode || "").trim();
+}
+
 export function collectCustomFieldNames(employees: Employee[]): string[] {
   const names = new Set<string>();
   for (const emp of employees) {
@@ -202,7 +206,8 @@ export function countDraftChanges(
   const customNames = collectCustomFieldNames(employees);
 
   for (const emp of employees) {
-    const draft = drafts[emp.id];
+    const recordId = resolveEmployeeRecordId(emp);
+    const draft = drafts[recordId];
     if (!draft) continue;
 
     let rowChanged = false;
@@ -264,7 +269,8 @@ export function buildReviewEntries(
   const customNames = collectCustomFieldNames(employees);
 
   for (const emp of employees) {
-    const draft = drafts[emp.id];
+    const recordId = resolveEmployeeRecordId(emp);
+    const draft = drafts[recordId];
     if (!draft) continue;
 
     const merged = buildMergedEmployee(emp, draft);
@@ -298,8 +304,8 @@ export function buildReviewEntries(
 
     if (fieldChanges.length > 0) {
       entries.push({
-        employeeId: emp.id,
-        employeeCode: emp.employeeCode || emp.id,
+        employeeId: resolveEmployeeRecordId(emp),
+        employeeCode: emp.employeeCode || resolveEmployeeRecordId(emp),
         employeeName: emp.nameAsPerAadhar || emp.employeeCode || emp.id,
         fieldChanges,
       });
@@ -317,7 +323,8 @@ export function buildSubmissionPayload(
   const customNames = collectCustomFieldNames(employees);
 
   for (const emp of employees) {
-    const draft = drafts[emp.id];
+    const recordId = resolveEmployeeRecordId(emp);
+    const draft = drafts[recordId];
     if (!draft) continue;
 
     const merged = buildMergedEmployee(emp, draft);
@@ -350,7 +357,7 @@ export function buildSubmissionPayload(
     }
 
     if (Object.keys(changes).length > 0) {
-      updates.push({ employeeId: emp.id, changes });
+      updates.push({ employeeId: recordId, changes });
     }
   }
 
