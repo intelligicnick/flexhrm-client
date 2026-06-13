@@ -3379,17 +3379,20 @@ export function useHRMSApp() {
 
   const fetchSchoolWorks = async () => {
     setIsSchoolLoading(true);
-    setErrorMessage(null);
     try {
       const res = await fetch("/api/school-works");
+      if (res.status === 404) {
+        setRawSchoolWorks([]);
+        return;
+      }
       if (!res.ok) {
         throw new Error(`Failed to load school work list (${res.status})`);
       }
       const data = await res.json();
       setRawSchoolWorks(data);
     } catch (err: any) {
-      console.error(err);
-      setErrorMessage("Could not load school work records: " + err.message);
+      console.warn("Could not load school work records:", err.message);
+      setRawSchoolWorks([]);
     } finally {
       setIsSchoolLoading(false);
     }
@@ -3538,12 +3541,22 @@ export function useHRMSApp() {
   useEffect(() => {
     if (isLoggedIn) {
       fetchEmployees();
-      fetchSchoolWorks();
       fetchRoles();
       fetchExportTemplates();
       fetchPendingChangeCount();
     }
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (
+      isLoggedIn &&
+      (activeSidebarTab === "School Work" ||
+        activeSidebarTab === "School Salary" ||
+        activeSidebarTab === "Expenses")
+    ) {
+      fetchSchoolWorks();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Employee Management") {

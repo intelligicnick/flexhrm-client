@@ -20,8 +20,9 @@ export const SCHOOL_HEADER_ALIASES: Record<string, string[]> = {
   remarks: ["remarks", "remark", "notes"],
 };
 
-function normalizeSchoolHeader(header: string): string {
-  return header.toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeSchoolHeader(header: string | undefined | null): string {
+  if (header === undefined || header === null) return "";
+  return String(header).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function findSchoolHeaderIndex(headerRow: string[], targetHeader: string): number {

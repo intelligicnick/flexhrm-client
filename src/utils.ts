@@ -79,20 +79,31 @@ const HEADER_ALIASES: Record<string, string[]> = {
   "familymembermobile3": ["familymembermobile3", "familymember3mobile", "dependent3mobile", "dependent3phone"],
 };
 
+function normalizeHeaderCell(cell: unknown): string {
+  if (cell === undefined || cell === null) return "";
+  return String(cell).trim();
+}
+
+function normalizeHeaderKey(header: string): string {
+  return header.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/employees/g, "employee");
+}
+
 // Helper to find the index of a header in a tiered, normalized manner
 export function findHeaderIndex(headerRow: string[], targetHeader: string): number {
-  const normTarget = targetHeader.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/employees/g, "employee");
+  const normTarget = normalizeHeaderKey(targetHeader);
   if (!normTarget) return -1;
-  
+  const targetTrimmed = targetHeader.toLowerCase().trim();
+
   // Tier 1: Exact lowercase trim match
-  let idx = headerRow.findIndex(
-    (h) => h.trim() !== "" && h.toLowerCase().trim() === targetHeader.toLowerCase().trim()
-  );
+  let idx = headerRow.findIndex((h) => {
+    const cell = normalizeHeaderCell(h);
+    return cell !== "" && cell.toLowerCase() === targetTrimmed;
+  });
   if (idx !== -1) return idx;
 
   // Tier 2: Exact normalized alphanumeric match
   idx = headerRow.findIndex((h) => {
-    const normH = h.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/employees/g, "employee");
+    const normH = normalizeHeaderKey(normalizeHeaderCell(h));
     return normH !== "" && normH === normTarget;
   });
   if (idx !== -1) return idx;
@@ -100,7 +111,7 @@ export function findHeaderIndex(headerRow: string[], targetHeader: string): numb
   // Tier 3: Loose match via explicit aliases dictionary
   const targetAliases = HEADER_ALIASES[normTarget] || [normTarget];
   idx = headerRow.findIndex((h) => {
-    const normH = h.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/employees/g, "employee");
+    const normH = normalizeHeaderKey(normalizeHeaderCell(h));
     if (!normH) return false;
     return targetAliases.includes(normH) || targetAliases.some(alias => alias !== "" && (normH.includes(alias) || alias.includes(normH)));
   });
@@ -109,7 +120,7 @@ export function findHeaderIndex(headerRow: string[], targetHeader: string): numb
   // Tier 4: Loose checks with sub-replacement
   const looseTarget = normTarget.replace(/number/g, "no").replace(/no/g, "");
   idx = headerRow.findIndex((h) => {
-    const normH = h.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/employees/g, "employee");
+    const normH = normalizeHeaderKey(normalizeHeaderCell(h));
     const looseH = normH.replace(/number/g, "no").replace(/no/g, "");
     if (!looseH || !looseTarget) return false;
     return looseH === looseTarget || looseH.includes(looseTarget) || looseTarget.includes(looseH);
@@ -213,7 +224,8 @@ export function parseCSV(text: string): Partial<Employee>[] {
     const getVal = (header: string) => {
       const idx = idxMap[header];
       if (idx !== undefined && idx >= 0 && idx < values.length) {
-        return values[idx];
+        const val = values[idx];
+        return val !== undefined && val !== null ? String(val).trim() : "";
       }
       return "";
     };
