@@ -747,20 +747,10 @@ export interface AxisBulkPayOptions {
   activationDate?: Date;
 }
 
-const AXIS_DEBIT_ACCOUNT_KEY = "hrms_axis_debit_account";
+import { getDefaultBulkPayDebitAccountNo } from "./lib/bulk-pay-bank-accounts";
 
 export function getAxisDebitAccountNo(): string | null {
-  const saved = localStorage.getItem(AXIS_DEBIT_ACCOUNT_KEY);
-  if (saved?.trim()) return saved.trim();
-
-  const entered = window.prompt(
-    "Enter your Axis Bank Debit Account Number for bulk pay export:"
-  );
-  if (!entered?.trim()) return null;
-
-  const value = entered.trim();
-  localStorage.setItem(AXIS_DEBIT_ACCOUNT_KEY, value);
-  return value;
+  return getDefaultBulkPayDebitAccountNo();
 }
 
 function formatAxisActivationDate(date: Date): string {
@@ -795,6 +785,13 @@ export interface BulkPaySalarySheetInput {
   location: string;
   columns: string[];
   employeeRows: (string | number)[][];
+}
+
+export interface BulkPayPartnerSheetInput {
+  month: string;
+  district: string;
+  block: string;
+  partnerRows: (string | number)[][];
 }
 
 function writeXlsWorkbook(
@@ -861,6 +858,25 @@ export function buildSalaryCalculationsSheetRows(
   ];
 }
 
+export function buildPartnerPaymentsSheetRows(
+  partnerSheet: BulkPayPartnerSheetInput,
+  headers: readonly string[],
+): (string | number)[][] {
+  const recordCount = partnerSheet.partnerRows.length;
+  const districtLabel = partnerSheet.district || "All Districts";
+  const blockLabel = partnerSheet.block || "All Blocks";
+  return [
+    [`Monthly Partner Payments — ${partnerSheet.month}`],
+    [`District: ${districtLabel} | Block: ${blockLabel}`],
+    [
+      `Generated on: ${new Date().toLocaleString()} | Filtered records: ${recordCount}`,
+    ],
+    [],
+    [...headers],
+    ...partnerSheet.partnerRows,
+  ];
+}
+
 export function buildAxisBulkPayXlsBuffer(
   items: AxisBulkPayRowInput[],
   options: AxisBulkPayOptions,
@@ -881,6 +897,22 @@ export function buildBulkPayArchiveXlsBuffer(
   const buffer = writeXlsWorkbook([
     { name: "BulkPay", rows: bulkPayRows },
     { name: "Salary Calculations", rows: salaryRows },
+  ]);
+  return { buffer, exported, totalAmount };
+}
+
+/** Axis bank upload sheet plus full partner payment rows for school work archive preview. */
+export function buildSchoolBulkPayArchiveXlsBuffer(
+  items: AxisBulkPayRowInput[],
+  options: AxisBulkPayOptions,
+  partnerSheet: BulkPayPartnerSheetInput,
+  partnerHeaders: readonly string[],
+): { buffer: Uint8Array; exported: number; totalAmount: number } {
+  const { rows: bulkPayRows, exported, totalAmount } = buildAxisBulkPayRows(items, options);
+  const partnerRows = buildPartnerPaymentsSheetRows(partnerSheet, partnerHeaders);
+  const buffer = writeXlsWorkbook([
+    { name: "BulkPay", rows: bulkPayRows },
+    { name: "Partner Payments", rows: partnerRows },
   ]);
   return { buffer, exported, totalAmount };
 }
@@ -906,6 +938,16 @@ export function buildAxisBulkPayFilename(
   const slug = monthKey.trim().replace(/\s+/g, "_");
   const dateStr = exportDate.toISOString().split("T")[0];
   return `axis_bulkpay_${slug}_${dateStr}.xls`;
+}
+
+/** axis_bulkpay_school_{Month}_{YYYY-MM-DD}.xls */
+export function buildSchoolAxisBulkPayFilename(
+  monthKey: string,
+  exportDate: Date = new Date(),
+): string {
+  const slug = monthKey.trim().replace(/\s+/g, "_");
+  const dateStr = exportDate.toISOString().split("T")[0];
+  return `axis_bulkpay_school_${slug}_${dateStr}.xls`;
 }
 
 export function parseMonthYear(monthKey: string): { month: string; year: string } {
@@ -993,6 +1035,7 @@ export function parseBulkPayXlsWorkbook(buffer: ArrayBuffer): BulkPayXlsWorkbook
   });
   const defaultSheet =
     sheetNames.find((name) => name === "Salary Calculations") ||
+    sheetNames.find((name) => name === "Partner Payments") ||
     sheetNames.find((name) => name === "BulkPay") ||
     sheetNames[0] ||
     "";
@@ -1007,7 +1050,7 @@ export function parseBulkPayXlsPreview(buffer: ArrayBuffer): string[][] {
 }
 
 export function getBulkPayPreviewHeaderRowCount(sheetName: string): number {
-  if (sheetName === "Salary Calculations") return 5;
+  if (sheetName === "Salary Calculations" || sheetName === "Partner Payments") return 5;
   return 1;
 }
 
@@ -1049,6 +1092,44 @@ export async function saveAxisBulkPayArchive(
   return data.record as SavedBulkPayRecord;
 }
 
+export async function saveSchoolAxisBulkPayArchive(
+  payload: {
+    filename: string;
+    month: string;
+    year: string;
+    recordCount: number;
+    totalAmount: number;
+    employeeIds: string[];
+    fileBase64: string;
+  },
+): Promise<SavedBulkPayRecord> {
+  const res = await fetch("/api/school-bulk-pay-exports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    if (res.status === 502 || res.status === 503) {
+      throw new Error(
+        "Backend API is not running. Start the NestJS server in the backend folder (npm run start) and try again."
+      );
+    }
+    if (res.status === 404) {
+      throw new Error(
+        "School bulk pay archive API not found. Rebuild and restart the backend (npm run build && npm run start in backend/)."
+      );
+    }
+    const validationMsg = Array.isArray(err.message) ? err.message.join(", ") : err.message;
+    throw new Error(validationMsg || err.error || "Failed to archive school bulk pay file on server.");
+  }
+  const data = await res.json();
+  if (!data?.record?.id) {
+    throw new Error("Archive API succeeded but did not return a saved school bulk pay record.");
+  }
+  return data.record as SavedBulkPayRecord;
+}
+
 export function downloadAxisBulkPayXls(
   items: AxisBulkPayRowInput[],
   options: AxisBulkPayOptions,
@@ -1064,6 +1145,38 @@ export function downloadAxisBulkPayXls(
   const archiveBuffer = salarySheet
     ? buildBulkPayArchiveXlsBuffer(items, options, salarySheet).buffer
     : downloadBuffer;
+
+  const blob = new Blob([downloadBuffer], { type: "application/vnd.ms-excel" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return { exported, totalAmount, fileBase64: uint8ToBase64(archiveBuffer) };
+}
+
+export function downloadSchoolAxisBulkPayXls(
+  items: AxisBulkPayRowInput[],
+  options: AxisBulkPayOptions,
+  filename: string,
+  partnerSheet: BulkPayPartnerSheetInput,
+  partnerHeaders: readonly string[],
+): { exported: number; totalAmount: number; fileBase64: string } {
+  const { rows, exported, totalAmount } = buildAxisBulkPayRows(items, options);
+  if (exported === 0) {
+    return { exported: 0, totalAmount: 0, fileBase64: "" };
+  }
+
+  const downloadBuffer = writeXlsWorkbook([{ name: "BulkPay", rows }]);
+  const archiveBuffer = buildSchoolBulkPayArchiveXlsBuffer(
+    items,
+    options,
+    partnerSheet,
+    partnerHeaders,
+  ).buffer;
 
   const blob = new Blob([downloadBuffer], { type: "application/vnd.ms-excel" });
   const url = URL.createObjectURL(blob);

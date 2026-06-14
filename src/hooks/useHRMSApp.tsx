@@ -64,7 +64,7 @@ import {
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   BULK_EDIT_FIELDS,
   buildCustomFieldsAfterEdit,
@@ -95,27 +95,23 @@ import {
   DEFAULT_LOCATION_PT_AMOUNT,
   quoteCSVValue,
   downloadAxisBulkPayXls,
+  downloadSchoolAxisBulkPayXls,
   saveAxisBulkPayArchive,
+  saveSchoolAxisBulkPayArchive,
   getAxisDebitAccountNo,
   buildAxisBulkPayFilename,
+  buildSchoolAxisBulkPayFilename,
   parseMonthYear,
   parseBulkPayXlsWorkbook,
   getBulkPayPreviewHeaderRowCount,
+  type BulkPayPartnerSheetInput,
+  type AxisBulkPayRowInput,
 } from "../utils";
 import { formatAuditLogDetails } from "../utils/formatAuditLogDetails";
 import CsvImporter from "../components/CsvImporter";
 import EmployeeTable from "../components/EmployeeTable";
 import EmployeeFormModal from "../components/EmployeeFormModal";
-import SchoolWorkImporter from "../components/SchoolWorkImporter";
-import SchoolWorkTable from "../components/SchoolWorkTable";
-import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
-import BlockMonthlyExpensePanel from "../components/BlockMonthlyExpensePanel";
-import SchoolExpensesSalaryTab, {
-  buildSchoolExpenseSalaryCsv,
-  SCHOOL_EXPENSE_SALARY_HEADERS,
-  getSchoolExpenseSalaryRow,
-} from "../components/SchoolExpensesSalaryTab";
-import { getSchoolHeaderValue } from "../lib/school-work-helpers";
+import { expenseRecordTypeToForm, getPartnerPerToiletPay, getSchoolHeaderValue, computePartnerMonthlyPay } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
 import {
   loadPayrollConfig,
@@ -132,7 +128,9 @@ import {
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef } from "../lib/permissions";
-import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
+import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab } from "../routes";
+import { useNotificationPoller } from "./useNotificationPoller";
+import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
 import DirectoryContactCard from "../components/DirectoryContactCard";
@@ -399,7 +397,6 @@ export function useHRMSApp() {
   const activeSidebarTab = pathToTab(location.pathname);
   const setActiveSidebarTab = (tab: string) => navigate(tabToPath(tab));
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
-  const [activeSchoolSubTab, setActiveSchoolSubTab] = useState("School Salary");
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
     "School Work": false,
   });
@@ -432,6 +429,26 @@ export function useHRMSApp() {
   const [isSchoolFormOpen, setIsSchoolFormOpen] = useState(false);
   const [currentSchool, setCurrentSchool] = useState<SchoolWork | null>(null);
   const [isSchoolLoading, setIsSchoolLoading] = useState(false);
+  const [rawSchoolBillings, setRawSchoolBillings] = useState<SchoolMonthlyBilling[]>([]);
+  const [rawSchoolVisits, setRawSchoolVisits] = useState<SchoolVisit[]>([]);
+  const [rawSupervisorRequests, setRawSupervisorRequests] = useState<SupervisorRequest[]>([]);
+  const [rawCommitmentDiary, setRawCommitmentDiary] = useState<CommitmentDiary[]>([]);
+  const [pendingSupervisorRequestCount, setPendingSupervisorRequestCount] = useState(0);
+  const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
+  const [adminNotificationUnreadCount, setAdminNotificationUnreadCount] = useState(0);
+  const [isFetchingAdminNotifications, setIsFetchingAdminNotifications] = useState(false);
+  const [fieldTeamView, setFieldTeamView] = useState<FieldTeamView>("visits");
+  const [rawSchoolPartners, setRawSchoolPartners] = useState<SchoolPartner[]>([]);
+  const [rawSchoolSupervisors, setRawSchoolSupervisors] = useState<SchoolSupervisor[]>([]);
+  const [schoolDistricts, setSchoolDistricts] = useState<SchoolDistrict[]>([]);
+  const [schoolBlocks, setSchoolBlocks] = useState<SchoolBlock[]>([]);
+  const [isSchoolGeographyLoading, setIsSchoolGeographyLoading] = useState(false);
+  const [schoolBulkEditDrafts, setSchoolBulkEditDrafts] = useState<Record<string, Partial<SchoolWork>>>({});
+  const [isSubmittingSchoolBulkEdit, setIsSubmittingSchoolBulkEdit] = useState(false);
+  const [partnerBulkEditDrafts, setPartnerBulkEditDrafts] = useState<Record<string, Partial<SchoolPartner>>>({});
+  const [isSubmittingPartnerBulkEdit, setIsSubmittingPartnerBulkEdit] = useState(false);
+  const [isSupervisorFormOpen, setIsSupervisorFormOpen] = useState(false);
+  const [currentSupervisor, setCurrentSupervisor] = useState<SchoolSupervisor | null>(null);
 
   // Employee Registry Core States
   const [rawEmployees, setRawEmployees] = useState<Employee[]>([]);
@@ -618,6 +635,22 @@ export function useHRMSApp() {
   } | null>(null);
   const bulkPayJustSavedRef = useRef(false);
 
+  const [schoolBulkPayArchives, setSchoolBulkPayArchives] = useState<any[]>([]);
+  const [isFetchingSchoolBulkPayArchives, setIsFetchingSchoolBulkPayArchives] = useState(false);
+  const [isExportingSchoolBulkPay, setIsExportingSchoolBulkPay] = useState(false);
+  const [lastSavedSchoolBulkPay, setLastSavedSchoolBulkPay] = useState<any | null>(null);
+  const [highlightedSchoolBulkPayId, setHighlightedSchoolBulkPayId] = useState<string | null>(null);
+  const [schoolBulkPayArchiveYearFilter, setSchoolBulkPayArchiveYearFilter] = useState("");
+  const [schoolBulkPayPreview, setSchoolBulkPayPreview] = useState<{
+    id: string;
+    filename: string;
+    sheetNames: string[];
+    activeSheet: string;
+    sheets: Record<string, string[][]>;
+    loading: boolean;
+  } | null>(null);
+  const schoolBulkPayJustSavedRef = useRef(false);
+
   const updateBulkPayDownloadCount = (id: string, downloadCount: number) => {
     setBulkPayArchives((prev) =>
       prev.map((item: any) =>
@@ -743,6 +776,132 @@ export function useHRMSApp() {
     }
     return list;
   }, [bulkPayArchives, bulkPayArchiveYearFilter, lastSavedBulkPay]);
+
+  const updateSchoolBulkPayDownloadCount = (id: string, downloadCount: number) => {
+    setSchoolBulkPayArchives((prev) =>
+      prev.map((item: any) =>
+        item.id === id ? { ...item, downloadCount } : item
+      )
+    );
+    setLastSavedSchoolBulkPay((prev: any) =>
+      prev?.id === id ? { ...prev, downloadCount } : prev
+    );
+  };
+
+  const fetchSchoolBulkPayArchives = async (yearFilter?: string) => {
+    setIsFetchingSchoolBulkPayArchives(true);
+    try {
+      const params = new URLSearchParams();
+      const year = yearFilter ?? schoolBulkPayArchiveYearFilter;
+      if (year) params.set("year", year);
+      const query = params.toString();
+      const res = await fetch(`/api/school-bulk-pay-exports${query ? `?${query}` : ""}`);
+      if (!res.ok) throw new Error("Failed to load saved school bulk pay files.");
+      const data = await res.json();
+      setSchoolBulkPayArchives(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("School bulk pay archive fetch error:", err);
+    } finally {
+      setIsFetchingSchoolBulkPayArchives(false);
+    }
+  };
+
+  const handleDownloadSchoolBulkPayArchive = async (id: string, filename: string) => {
+    try {
+      const res = await fetch(`/api/school-bulk-pay-exports/${id}/download`);
+      if (!res.ok) throw await parseApiError(res, "Could not download archived school bulk pay file.");
+      const downloadCountHeader = res.headers.get("X-Download-Count");
+      if (downloadCountHeader) {
+        updateSchoolBulkPayDownloadCount(id, Number(downloadCountHeader));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Could not download archived school bulk pay file.");
+    }
+  };
+
+  const handleViewSchoolBulkPayArchive = async (id: string, filename: string) => {
+    setSchoolBulkPayPreview({
+      id,
+      filename,
+      sheetNames: [],
+      activeSheet: "",
+      sheets: {},
+      loading: true,
+    });
+    try {
+      const res = await fetch(`/api/school-bulk-pay-exports/${id}/preview`);
+      if (!res.ok) throw await parseApiError(res, "Could not load file for preview.");
+      const buffer = await res.arrayBuffer();
+      const workbook = parseBulkPayXlsWorkbook(buffer);
+      setSchoolBulkPayPreview({
+        id,
+        filename,
+        sheetNames: workbook.sheetNames,
+        activeSheet: workbook.defaultSheet,
+        sheets: workbook.sheets,
+        loading: false,
+      });
+    } catch (err: any) {
+      setSchoolBulkPayPreview(null);
+      setErrorMessage(err.message || "Could not preview archived school bulk pay file.");
+    }
+  };
+
+  const handleDeleteSchoolBulkPayArchive = async (id: string) => {
+    const confirmed = await confirmAction({
+      title: "Delete archived file",
+      message: "Delete this archived school bulk pay file from the server? This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/school-bulk-pay-exports/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed.");
+      if (lastSavedSchoolBulkPay?.id === id) setLastSavedSchoolBulkPay(null);
+      if (highlightedSchoolBulkPayId === id) setHighlightedSchoolBulkPayId(null);
+      await fetchSchoolBulkPayArchives();
+      triggerSuccess("Archived school bulk pay file removed.");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Could not delete archived school bulk pay file.");
+    }
+  };
+
+  const schoolBulkPayArchiveYears = useMemo(() => {
+    const years = new Set<string>();
+    schoolBulkPayArchives.forEach((item: any) => {
+      if (item.year) {
+        years.add(String(item.year));
+      } else if (item.month) {
+        const parsed = parseMonthYear(item.month);
+        if (parsed.year) years.add(parsed.year);
+      }
+    });
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [schoolBulkPayArchives]);
+
+  const filteredSchoolBulkPayArchives = useMemo(() => {
+    let list = schoolBulkPayArchives;
+    if (schoolBulkPayArchiveYearFilter) {
+      list = list.filter((item: any) => {
+        const year = item.year || parseMonthYear(item.month).year;
+        return year === schoolBulkPayArchiveYearFilter;
+      });
+    }
+    if (lastSavedSchoolBulkPay?.id && !list.some((item: any) => item.id === lastSavedSchoolBulkPay.id)) {
+      list = [lastSavedSchoolBulkPay, ...list];
+    }
+    return list;
+  }, [schoolBulkPayArchives, schoolBulkPayArchiveYearFilter, lastSavedSchoolBulkPay]);
 
   const filteredAuditLogs = useMemo(() => {
     return auditLogsList
@@ -1029,6 +1188,16 @@ export function useHRMSApp() {
       fetchBulkPayArchives();
     }
   }, [isLoggedIn, activeSidebarTab, userPermissions.salary?.view]);
+
+  useEffect(() => {
+    if (isLoggedIn && activeSidebarTab === "Saved School Bulk Pay" && userPermissions.schoolWork?.view) {
+      if (schoolBulkPayJustSavedRef.current) {
+        schoolBulkPayJustSavedRef.current = false;
+        return;
+      }
+      fetchSchoolBulkPayArchives();
+    }
+  }, [isLoggedIn, activeSidebarTab, userPermissions.schoolWork?.view]);
 
   // Handler to add a new custom location from the configuration tab
   const handleAddLocationFromConfig = async (locName: string, complianceVal: boolean = true, ptAmount?: number) => {
@@ -3385,9 +3554,370 @@ export function useHRMSApp() {
       setRawSchoolWorks(data);
     } catch (err: any) {
       console.warn("Could not load school work records:", err.message);
+      setErrorMessage("Failed to load school records: " + err.message);
       setRawSchoolWorks([]);
     } finally {
       setIsSchoolLoading(false);
+    }
+  };
+
+  const fetchSchoolVisits = async () => {
+    try {
+      const res = await fetch("/api/school-visits");
+      if (res.ok) setRawSchoolVisits(await res.json());
+    } catch {
+      setRawSchoolVisits([]);
+    }
+  };
+
+  const fetchSupervisorRequests = async () => {
+    try {
+      const res = await fetch("/api/supervisor-requests");
+      if (res.ok) setRawSupervisorRequests(await res.json());
+      else setRawSupervisorRequests([]);
+    } catch {
+      setRawSupervisorRequests([]);
+    }
+  };
+
+  const fetchCommitmentDiary = async () => {
+    try {
+      const res = await fetch("/api/commitment-diary");
+      if (res.ok) setRawCommitmentDiary(await res.json());
+      else setRawCommitmentDiary([]);
+    } catch {
+      setRawCommitmentDiary([]);
+    }
+  };
+
+  const fetchPendingSupervisorRequestCount = async () => {
+    try {
+      const res = await fetch("/api/supervisor-requests/pending-count");
+      if (res.ok) {
+        const data = await res.json();
+        setPendingSupervisorRequestCount(data.count || 0);
+      }
+    } catch {
+      setPendingSupervisorRequestCount(0);
+    }
+  };
+
+  const fetchAdminNotifications = useCallback(async (): Promise<AppNotification[]> => {
+    setIsFetchingAdminNotifications(true);
+    try {
+      const [listRes, countRes] = await Promise.all([
+        fetch("/api/notifications"),
+        fetch("/api/notifications/unread-count"),
+      ]);
+      let items: AppNotification[] = [];
+      if (listRes.ok) {
+        items = await listRes.json();
+        setAdminNotifications(items);
+      }
+      if (countRes.ok) {
+        const data = await countRes.json();
+        setAdminNotificationUnreadCount(data.count || 0);
+      }
+      return items;
+    } catch {
+      setAdminNotifications([]);
+      setAdminNotificationUnreadCount(0);
+      return [];
+    } finally {
+      setIsFetchingAdminNotifications(false);
+    }
+  }, []);
+
+  const fetchAdminNotificationUnreadCount = useCallback(async (): Promise<number> => {
+    try {
+      const res = await fetch("/api/notifications/unread-count");
+      if (res.ok) {
+        const data = await res.json();
+        const count = data.count || 0;
+        setAdminNotificationUnreadCount(count);
+        return count;
+      }
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  }, []);
+
+  const fetchAdminNotificationsList = useCallback(async (): Promise<AppNotification[]> => {
+    try {
+      const res = await fetch("/api/notifications");
+      if (res.ok) {
+        const items: AppNotification[] = await res.json();
+        setAdminNotifications(items);
+        return items;
+      }
+    } catch {
+      /* ignore */
+    }
+    return [];
+  }, []);
+
+  useNotificationPoller({
+    enabled: isLoggedIn && !!userPermissions.schoolWork?.view,
+    unreadCount: adminNotificationUnreadCount,
+    fetchUnreadCount: fetchAdminNotificationUnreadCount,
+    fetchNotifications: fetchAdminNotificationsList,
+  });
+
+  const handleMarkAdminNotificationRead = async (id: string) => {
+    try {
+      await fetch(`/api/notifications/${id}/read`, { method: "PATCH" });
+      await fetchAdminNotifications();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleMarkAllAdminNotificationsRead = async () => {
+    try {
+      await fetch("/api/notifications/read-all", { method: "PATCH" });
+      await fetchAdminNotifications();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleAdminNotificationNavigate = (notification: AppNotification) => {
+    const target = getAdminNotificationTarget(notification);
+    if (!target) return;
+    setActiveSidebarTab(target.tab);
+    if (target.fieldTeamView) {
+      setFieldTeamView(target.fieldTeamView);
+    }
+  };
+
+  const fetchSchoolPartners = async () => {
+    try {
+      const res = await fetch("/api/school-partners");
+      if (res.ok) setRawSchoolPartners(await res.json());
+      else setRawSchoolPartners([]);
+    } catch {
+      setRawSchoolPartners([]);
+    }
+  };
+
+  const fetchSchoolBillings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/school-monthly-billings");
+      if (res.ok) {
+        setRawSchoolBillings(await res.json());
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const handleGenerateSchoolBilling = async (payload: {
+    block: string;
+    district?: string;
+    monthKey: string;
+    financialYear: string;
+    cleaningDays: number;
+    category: "elementary" | "secondary" | "all";
+    billingId?: string;
+  }): Promise<SchoolMonthlyBilling | null> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-monthly-billings/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to generate invoice (${res.status})`);
+      }
+      const saved = (await res.json()) as SchoolMonthlyBilling;
+      setRawSchoolBillings((prev) => {
+        const rest = prev.filter(
+          (billing) =>
+            !(
+              billing.block === saved.block &&
+              billing.monthKey === saved.monthKey &&
+              billing.category === saved.category
+            ),
+        );
+        return [saved, ...rest];
+      });
+      void fetchSchoolBillings();
+      triggerSuccess(`Saved monthly invoice for ${payload.block} (${payload.monthKey}).`);
+      return saved;
+    } catch (err: any) {
+      setErrorMessage("Invoice generation failed: " + err.message);
+      return null;
+    }
+  };
+
+  const handleSaveSchoolWorkdays = async (payload: {
+    block: string;
+    district?: string;
+    monthKey: string;
+    defaultDays: number;
+    updates: Array<{ id: string; cleaningDays: number; billingToilets?: number }>;
+  }): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/bulk-update-workdays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to save workdays (${res.status})`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data.schools) && data.schools.length > 0) {
+        setRawSchoolWorks((prev) => {
+          const byId = new Map(data.schools.map((s: { id: string }) => [s.id, s]));
+          return prev.map((school) => (byId.has(school.id) ? (byId.get(school.id) as typeof school) : school));
+        });
+      } else {
+        await fetchSchoolWorks();
+      }
+      triggerSuccess(
+        `Saved billing values for ${payload.block} (${payload.monthKey}) — ${data.updatedCount || 0} school(s).`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save days worked: " + err.message);
+      return false;
+    }
+  };
+
+  const handleSavePartnerPayUpdates = async (
+    updates: Array<{ id: string; changes: { partnerMonthlyPay: number; rates: number } }>,
+  ): Promise<boolean> => {
+    if (updates.length === 0) return true;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to save partner pay (${res.status})`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data.records) && data.records.length > 0) {
+        setRawSchoolWorks((prev) => {
+          const byId = new Map(data.records.map((s: { id: string }) => [s.id, s]));
+          return prev.map((school) => (byId.has(school.id) ? (byId.get(school.id) as typeof school) : school));
+        });
+      } else {
+        await fetchSchoolWorks();
+      }
+      await fetchSchoolPartners();
+      triggerSuccess(`Updated partner pay for ${data.updated || updates.length} school(s).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save partner pay: " + err.message);
+      return false;
+    }
+  };
+
+  const handleSavePartnerPayDetails = async (
+    updates: Array<{ id: string; changes: Partial<SchoolWork> }>,
+  ): Promise<boolean> => {
+    if (updates.length === 0) return true;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to save partner details (${res.status})`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data.records) && data.records.length > 0) {
+        setRawSchoolWorks((prev) => {
+          const byId = new Map(data.records.map((s: { id: string }) => [s.id, s]));
+          return prev.map((school) => (byId.has(school.id) ? (byId.get(school.id) as typeof school) : school));
+        });
+      } else {
+        await fetchSchoolWorks();
+      }
+      await fetchSchoolPartners();
+      triggerSuccess(`Updated partner details for ${data.updated || updates.length} school(s).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save partner details: " + err.message);
+      return false;
+    }
+  };
+
+  const handleSavePartnerPaymentStatus = async (
+    updates: Array<{ id: string; paymentStatus: "Unpaid" | "Paid" | "Hold" }>,
+  ): Promise<boolean> => {
+    if (updates.length === 0 || !selectedMonth) return true;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-partners/bulk-update-pay-ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monthKey: selectedMonth, updates }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to save payment status (${res.status})`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data.records) && data.records.length > 0) {
+        setRawSchoolPartners((prev) => {
+          const byId = new Map(data.records.map((p: SchoolPartner) => [p.id, p]));
+          return prev.map((partner) =>
+            byId.has(partner.id) ? (byId.get(partner.id) as SchoolPartner) : partner,
+          );
+        });
+      } else {
+        await fetchSchoolPartners();
+      }
+      triggerSuccess(`Updated payment status for ${data.updated || updates.length} partner(s).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save payment status: " + err.message);
+      return false;
+    }
+  };
+
+  const fetchSchoolSupervisors = async () => {
+    try {
+      const res = await fetch("/api/school-supervisors");
+      if (res.ok) setRawSchoolSupervisors(await res.json());
+      else setRawSchoolSupervisors([]);
+    } catch {
+      setRawSchoolSupervisors([]);
+    }
+  };
+
+  const fetchSchoolGeography = async () => {
+    setIsSchoolGeographyLoading(true);
+    try {
+      const [districtRes, blockRes] = await Promise.all([
+        fetch("/api/school-geography/districts"),
+        fetch("/api/school-geography/blocks"),
+      ]);
+      if (districtRes.ok) setSchoolDistricts(await districtRes.json());
+      else setSchoolDistricts([]);
+      if (blockRes.ok) setSchoolBlocks(await blockRes.json());
+      else setSchoolBlocks([]);
+    } catch {
+      setSchoolDistricts([]);
+      setSchoolBlocks([]);
+    } finally {
+      setIsSchoolGeographyLoading(false);
     }
   };
 
@@ -3537,18 +4067,52 @@ export function useHRMSApp() {
       fetchRoles();
       fetchExportTemplates();
       fetchPendingChangeCount();
+      fetchAdminNotifications();
     }
   }, [isLoggedIn]);
 
   useEffect(() => {
-    if (
-      isLoggedIn &&
-      (activeSidebarTab === "School Work" ||
-        activeSidebarTab === "School Salary" ||
-        activeSidebarTab === "Expenses")
-    ) {
+    if (isLoggedIn && isSchoolWorkTab(activeSidebarTab)) {
       fetchSchoolWorks();
+      if (activeSidebarTab === "Field Team" || activeSidebarTab === "Schools") {
+        fetchSchoolVisits();
+        fetchSupervisorRequests();
+        fetchCommitmentDiary();
+        fetchPendingSupervisorRequestCount();
+        fetchAdminNotifications();
+      }
+      if (activeSidebarTab === "Monthly Billing") {
+        fetchSchoolPartners();
+        fetchSchoolBillings();
+      }
+      if (
+        activeSidebarTab === "Field Team" ||
+        activeSidebarTab === "Schools"
+      ) {
+        fetchSchoolSupervisors();
+      }
+      if (
+        activeSidebarTab === "Schools" ||
+        activeSidebarTab === "Expenses" ||
+        activeSidebarTab === "Field Team"
+      ) {
+        fetchSchoolGeography();
+      }
     }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
+    if (isLoggedIn && activeSidebarTab === "Field Team" && fieldTeamView === "commitments") {
+      fetchCommitmentDiary();
+    }
+  }, [isLoggedIn, activeSidebarTab, fieldTeamView]);
+
+  useEffect(() => {
+    if (!isLoggedIn || activeSidebarTab !== "Field Team") return;
+    const timer = window.setInterval(() => {
+      void fetchSchoolSupervisors();
+    }, 30_000);
+    return () => window.clearInterval(timer);
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
@@ -3558,11 +4122,21 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
-    if (activeSidebarTab === "Expenses" || activeSidebarTab === "School Salary") {
+    if (isLoggedIn && activeSidebarTab === "Employees" && activePimSubTab === "Configuration") {
+      fetchSchoolGeography();
+    }
+  }, [isLoggedIn, activeSidebarTab, activePimSubTab]);
+
+  useEffect(() => {
+    if (location.pathname === "/school-configuration") {
+      setActivePimSubTab("Configuration");
+      navigate("/employees", { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    if (isSchoolWorkTab(activeSidebarTab)) {
       setExpandedSidebarGroups((prev) => ({ ...prev, "School Work": true }));
-      if (activeSidebarTab === "School Salary") {
-        setActiveSchoolSubTab("School Salary");
-      }
     }
   }, [activeSidebarTab]);
 
@@ -4406,6 +4980,7 @@ export function useHRMSApp() {
         throw new Error(errorJson.error || "Server rejected save request.");
       }
       await fetchSchoolWorks();
+      await fetchSchoolPartners();
       triggerSuccess(
         isEdit
           ? `Successfully saved changes for school "${data.schoolName}"`
@@ -4433,6 +5008,7 @@ export function useHRMSApp() {
       }
       const report = await res.json();
       await fetchSchoolWorks();
+      await fetchSchoolPartners();
       let summary = `Bulk import complete! Added ${report.added} school(s).`;
       if (report.skipped > 0) summary += ` ${report.skipped} duplicate UDISE(s) skipped.`;
       triggerSuccess(summary);
@@ -4459,6 +5035,7 @@ export function useHRMSApp() {
       if (!res.ok) throw new Error("Delete request refused by backend.");
       setSelectedSchoolIds((prev) => prev.filter((item) => item !== id));
       await fetchSchoolWorks();
+      await fetchSchoolPartners();
       triggerSuccess("School record removed successfully.");
     } catch (err: any) {
       setErrorMessage("Deletion Failed: " + err.message);
@@ -4483,6 +5060,7 @@ export function useHRMSApp() {
       if (!res.ok) throw new Error("Bulk delete rejected.");
       setSelectedSchoolIds([]);
       await fetchSchoolWorks();
+      await fetchSchoolPartners();
       triggerSuccess(`Successfully removed ${ids.length} school record(s).`);
     } catch (err: any) {
       setErrorMessage("Bulk Deletion Failed: " + err.message);
@@ -4526,66 +5104,666 @@ export function useHRMSApp() {
     }
   };
 
-  const handleExportSchoolExpenseSalary = async (type: "csv" | "excel", rows: SchoolWork[]) => {
-    if (rows.length === 0) return;
-    if (type === "csv") {
-      const blob = new Blob([buildSchoolExpenseSalaryCsv(rows, selectedMonth)], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `school_expenses_salary_${selectedMonth.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-      triggerSuccess(`Exported ${rows.length} school expense salary record(s) as CSV.`);
+  const applySchoolBulkEditDraftUpdate = (
+    prev: Record<string, Partial<SchoolWork>>,
+    schools: SchoolWork[],
+    schoolId: string,
+    field: keyof SchoolWork,
+    value: string,
+  ): Record<string, Partial<SchoolWork>> => {
+    const school = schools.find((s) => s.id === schoolId);
+    if (!school) return prev;
+    const original = String(school[field] ?? "");
+    const nextDraft = { ...(prev[schoolId] || {}) };
+    if (value === original) {
+      delete nextDraft[field];
+    } else if (field === "noOfToilets" || field === "govtUnitRate" || field === "partnerMonthlyPay") {
+      nextDraft[field] = Number(value) || 0;
     } else {
-      const workbook = new ExcelJS.Workbook();
-      const ws = workbook.addWorksheet("School Expenses Salary");
-      ws.addRow(SCHOOL_EXPENSE_SALARY_HEADERS);
-      rows.forEach((school, index) => {
-        ws.addRow(getSchoolExpenseSalaryRow(school, index, selectedMonth));
-      });
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `school_expenses_salary_${selectedMonth.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      link.click();
-      URL.revokeObjectURL(url);
-      triggerSuccess(`Exported ${rows.length} school expense salary record(s) as Excel.`);
+      nextDraft[field] = value as never;
     }
+    const next = { ...prev };
+    if (Object.keys(nextDraft).length === 0) delete next[schoolId];
+    else next[schoolId] = nextDraft;
+    return next;
   };
 
-  const handleDistributeBlockExpense = async (payload: {
-    block: string;
-    monthKey: string;
-    materialAmount: number;
-    miscellaneousAmount: number;
-    materialRemark: string;
-    miscellaneousRemark: string;
-  }): Promise<boolean> => {
+  const handleSchoolBulkEditDraftChange = (
+    schoolId: string,
+    field: keyof SchoolWork,
+    value: string,
+  ) => {
+    setSchoolBulkEditDrafts((prev) =>
+      applySchoolBulkEditDraftUpdate(prev, rawSchoolWorks, schoolId, field, value),
+    );
+  };
+
+  const handleSchoolBulkEditDraftChangeMany = (
+    updates: Array<{ schoolId: string; field: keyof SchoolWork; value: string }>,
+  ) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      handleSchoolBulkEditDraftChange(updates[0].schoolId, updates[0].field, updates[0].value);
+      return;
+    }
+    setSchoolBulkEditDrafts((prev) => {
+      let next = prev;
+      for (const update of updates) {
+        next = applySchoolBulkEditDraftUpdate(
+          next,
+          rawSchoolWorks,
+          update.schoolId,
+          update.field,
+          update.value,
+        );
+      }
+      return next;
+    });
+  };
+
+  const handleDiscardSchoolBulkEditDrafts = () => {
+    setSchoolBulkEditDrafts({});
+  };
+
+  const handleApplySchoolBulkEdit = async () => {
+    const updates = Object.entries(schoolBulkEditDrafts)
+      .filter(([, changes]) => Object.keys(changes).length > 0)
+      .map(([id, changes]) => ({ id, changes }));
+    if (updates.length === 0) return;
+
+    setIsSubmittingSchoolBulkEdit(true);
     try {
       setErrorMessage(null);
-      const res = await fetch("/api/school-works/distribute-block-expense", {
+      const res = await fetch("/api/school-works/bulk-update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ updates }),
       });
       if (!res.ok) {
         const errorJson = await res.json();
-        throw new Error(errorJson.message || errorJson.error || "Failed to distribute block expense.");
+        throw new Error(errorJson.message || errorJson.error || "Bulk update failed.");
       }
       const result = await res.json();
+      setSchoolBulkEditDrafts({});
       await fetchSchoolWorks();
-      triggerSuccess(
-        `Applied ${payload.monthKey} expenses to ${result.updatedCount} school(s) in block "${payload.block}". Material ₹${result.perSchoolMaterial}/school, Miscellaneous ₹${result.perSchoolMiscellaneous}/school.`,
-      );
+      await fetchSchoolPartners();
+      triggerSuccess(`Successfully updated ${result.updated} school record(s).`);
+    } catch (err: any) {
+      setErrorMessage("School bulk edit failed: " + err.message);
+    } finally {
+      setIsSubmittingSchoolBulkEdit(false);
+    }
+  };
+
+  const PARTNER_TO_SCHOOL_FIELD: Partial<Record<keyof SchoolPartner, keyof SchoolWork>> = {
+    schoolName: "schoolName",
+    partnerName: "sweeperName",
+    accountHolderName: "accountHolderName",
+    accountNumber: "accountNumber",
+    ifscCode: "ifscCode",
+    monthlyPay: "partnerMonthlyPay",
+    block: "block",
+    district: "district",
+  };
+
+  const applyPartnerBulkEditDraftUpdate = (
+    prev: Record<string, Partial<SchoolPartner>>,
+    partners: SchoolPartner[],
+    partnerId: string,
+    field: keyof SchoolPartner,
+    value: string,
+  ): Record<string, Partial<SchoolPartner>> => {
+    const partner = partners.find((p) => p.id === partnerId);
+    if (!partner) return prev;
+    const original =
+      field === "perToiletPay"
+        ? String(getPartnerPerToiletPay(partner))
+        : String(partner[field] ?? "");
+    const nextDraft = { ...(prev[partnerId] || {}) };
+    if (value === original) {
+      delete nextDraft[field];
+    } else if (field === "monthlyPay" || field === "perToiletPay") {
+      nextDraft[field] = Number(value) || 0;
+      const toilets = Number(partner.noOfToilets) || 0;
+      if (field === "monthlyPay" && toilets > 0) {
+        const monthly = Number(value) || 0;
+        nextDraft.perToiletPay = monthly > 0 ? Math.round(monthly / toilets) : 0;
+      } else if (field === "perToiletPay") {
+        const perToilet = Number(value) || 0;
+        nextDraft.monthlyPay = perToilet * toilets;
+      }
+    } else if (field === "noOfToilets") {
+      nextDraft[field] = Number(value) || 0;
+      const toilets = Number(value) || 0;
+      const perToilet = Number(nextDraft.perToiletPay ?? getPartnerPerToiletPay(partner)) || 0;
+      if (toilets > 0 && perToilet > 0) {
+        nextDraft.monthlyPay = perToilet * toilets;
+      }
+    } else {
+      nextDraft[field] = value as never;
+    }
+    const next = { ...prev };
+    if (Object.keys(nextDraft).length === 0) delete next[partnerId];
+    else next[partnerId] = nextDraft;
+    return next;
+  };
+
+  const handlePartnerBulkEditDraftChange = (
+    partnerId: string,
+    field: keyof SchoolPartner,
+    value: string,
+  ) => {
+    setPartnerBulkEditDrafts((prev) =>
+      applyPartnerBulkEditDraftUpdate(prev, rawSchoolPartners, partnerId, field, value),
+    );
+  };
+
+  const handlePartnerBulkEditDraftChangeMany = (
+    updates: Array<{ partnerId: string; field: keyof SchoolPartner; value: string }>,
+  ) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      handlePartnerBulkEditDraftChange(updates[0].partnerId, updates[0].field, updates[0].value);
+      return;
+    }
+    setPartnerBulkEditDrafts((prev) => {
+      let next = prev;
+      for (const update of updates) {
+        next = applyPartnerBulkEditDraftUpdate(
+          next,
+          rawSchoolPartners,
+          update.partnerId,
+          update.field,
+          update.value,
+        );
+      }
+      return next;
+    });
+  };
+
+  const handleDiscardPartnerBulkEditDrafts = () => {
+    setPartnerBulkEditDrafts({});
+  };
+
+  const handleApplyPartnerBulkEdit = async () => {
+    const updates = Object.entries(partnerBulkEditDrafts)
+      .filter(([, changes]) => Object.keys(changes).length > 0)
+      .map(([partnerId, changes]) => {
+        const partner = rawSchoolPartners.find((p) => p.id === partnerId);
+        if (!partner?.schoolWorkId) return null;
+        const schoolChanges: Partial<SchoolWork> = {};
+        for (const [key, val] of Object.entries(changes)) {
+          if (key === "perToiletPay") {
+            const toilets = Number(partner.noOfToilets) || 0;
+            const perToilet = Number(val) || 0;
+            if (toilets > 0) {
+              schoolChanges.partnerMonthlyPay = perToilet * toilets;
+              schoolChanges.rates = perToilet * toilets;
+            }
+            continue;
+          }
+          if (key === "monthlyPay") {
+            const monthly = Number(val) || 0;
+            schoolChanges.partnerMonthlyPay = monthly;
+            schoolChanges.rates = monthly;
+            continue;
+          }
+          if (key === "noOfToilets") {
+            schoolChanges.noOfToilets = Number(val) || 0;
+            continue;
+          }
+          const schoolField = PARTNER_TO_SCHOOL_FIELD[key as keyof SchoolPartner];
+          if (schoolField) {
+            (schoolChanges as Record<string, unknown>)[schoolField] = val;
+          }
+        }
+        if (Object.keys(schoolChanges).length === 0) return null;
+        return { id: partner.schoolWorkId, changes: schoolChanges };
+      })
+      .filter((item): item is { id: string; changes: Partial<SchoolWork> } => item !== null);
+
+    if (updates.length === 0) return;
+
+    setIsSubmittingPartnerBulkEdit(true);
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Bulk update failed.");
+      }
+      const result = await res.json();
+      setPartnerBulkEditDrafts({});
+      await fetchSchoolWorks();
+      await fetchSchoolPartners();
+      triggerSuccess(`Successfully updated ${result.updated} partner record(s).`);
+    } catch (err: any) {
+      setErrorMessage("Partner bulk edit failed: " + err.message);
+    } finally {
+      setIsSubmittingPartnerBulkEdit(false);
+    }
+  };
+
+  const handleAddSchoolDistrict = async (name: string): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-geography/districts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to add district.");
+      }
+      await fetchSchoolGeography();
+      triggerSuccess(`District "${name}" added.`);
       return true;
     } catch (err: any) {
-      setErrorMessage("Block expense distribution failed: " + err.message);
+      setErrorMessage("Add district failed: " + err.message);
       return false;
     }
   };
+
+  const handleUpdateSchoolDistrict = async (id: string, name: string): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch(`/api/school-geography/districts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to update district.");
+      }
+      await fetchSchoolGeography();
+      await fetchSchoolWorks();
+      triggerSuccess(`District updated to "${name}".`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Update district failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleDeleteSchoolDistricts = async (ids: string[]): Promise<boolean> => {
+    const confirmed = await confirmAction({
+      title: "Delete districts",
+      message: `Remove ${ids.length} district(s) and their configured blocks? Existing school records keep their text values.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return false;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-geography/districts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Delete districts failed.");
+      await fetchSchoolGeography();
+      triggerSuccess(`Removed ${ids.length} district(s).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Delete districts failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleAddSchoolBlock = async (name: string, districtId: string): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-geography/blocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, districtId }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to add block.");
+      }
+      await fetchSchoolGeography();
+      triggerSuccess(`Block "${name}" added.`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Add block failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleUpdateSchoolBlock = async (
+    id: string,
+    patch: { name?: string; districtId?: string },
+  ): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch(`/api/school-geography/blocks/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to update block.");
+      }
+      await fetchSchoolGeography();
+      await fetchSchoolWorks();
+      triggerSuccess("Block updated.");
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Update block failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleDeleteSchoolBlocks = async (ids: string[]): Promise<boolean> => {
+    const confirmed = await confirmAction({
+      title: "Delete blocks",
+      message: `Remove ${ids.length} block(s) from configuration?`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return false;
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-geography/blocks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Delete blocks failed.");
+      await fetchSchoolGeography();
+      triggerSuccess(`Removed ${ids.length} block(s).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Delete blocks failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleAddExpenseRecord = async (payload: {
+    district: string;
+    block: string;
+    monthKey: string;
+    expenseType: "material" | "trek" | "miscellaneous";
+    amount: number;
+    remark: string;
+    date: string;
+  }): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const body: Record<string, unknown> = {
+        block: payload.block,
+        district: payload.district,
+        monthKey: payload.monthKey,
+        materialAmount: 0,
+        trekAmount: 0,
+        miscellaneousAmount: 0,
+      };
+      if (payload.expenseType === "material") {
+        body.materialAmount = payload.amount;
+        body.materialRemark = payload.remark;
+        body.materialDate = payload.date;
+      } else if (payload.expenseType === "trek") {
+        body.trekAmount = payload.amount;
+        body.trekRemark = payload.remark;
+        body.trekDate = payload.date;
+      } else {
+        body.miscellaneousAmount = payload.amount;
+        body.miscellaneousRemark = payload.remark;
+        body.miscellaneousDate = payload.date;
+      }
+
+      const res = await fetch("/api/school-works/distribute-block-expense", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to add expense record.");
+      }
+      const result = await res.json();
+      await fetchSchoolWorks();
+      const typeLabel =
+        payload.expenseType === "material"
+          ? "Material"
+          : payload.expenseType === "trek"
+            ? "Trek"
+            : "Miscellaneous";
+      const perSchool =
+        payload.expenseType === "material"
+          ? result.perSchoolMaterial
+          : payload.expenseType === "trek"
+            ? result.perSchoolTrek
+            : result.perSchoolMiscellaneous;
+      triggerSuccess(
+        `Saved ${typeLabel} expense for ${payload.monthKey}: ₹${payload.amount.toLocaleString("en-IN")} split across ${result.updatedCount} school(s) in block "${payload.block}" (≈ ₹${perSchool}/school).`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Save expense failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleDeleteExpenseRecord = async (row: {
+    block: string;
+    district: string;
+    monthKey: string;
+    type: "Material" | "Trek" | "Miscellaneous";
+    amount: number;
+  }): Promise<boolean> => {
+    const typeLabel = row.type;
+    const confirmed = await confirmAction({
+      title: "Delete expense",
+      message: `Remove ${typeLabel} expense of ₹${row.amount.toLocaleString("en-IN")} for block "${row.block}" in ${row.monthKey}?`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return false;
+
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/school-works/delete-block-expense", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          block: row.block,
+          district: row.district || undefined,
+          monthKey: row.monthKey,
+          expenseType: expenseRecordTypeToForm(row.type),
+        }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Failed to delete expense record.");
+      }
+      await fetchSchoolWorks();
+      triggerSuccess(`Deleted ${typeLabel} expense for block "${row.block}" (${row.monthKey}).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Delete expense failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleUpdateVisitStatus = async (
+    id: string,
+    status: "approved" | "rejected",
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/school-visits/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed to update visit status.");
+      await fetchSchoolVisits();
+      await fetchAdminNotifications();
+      triggerSuccess(`Visit marked as ${status}.`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
+  const handleRespondSupervisorRequest = async (
+    id: string,
+    adminResponse: string,
+    status: "responded" | "closed",
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/supervisor-requests/${id}/respond`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminResponse, status }),
+      });
+      if (!res.ok) throw new Error("Failed to respond to supervisor request.");
+      await fetchSupervisorRequests();
+      await fetchPendingSupervisorRequestCount();
+      await fetchAdminNotifications();
+      triggerSuccess("Response sent to supervisor.");
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
+  const handleCloseSupervisorRequest = async (
+    id: string,
+    note?: string,
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/supervisor-requests/${id}/close`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: note || "" }),
+      });
+      if (!res.ok) throw new Error("Failed to close supervisor request.");
+      await fetchSupervisorRequests();
+      await fetchPendingSupervisorRequestCount();
+      await fetchAdminNotifications();
+      triggerSuccess("Request closed.");
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
+  const handleResolveSupervisorEscalation = async (
+    id: string,
+    resolution: string,
+    status: "responded" | "closed",
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/supervisor-requests/${id}/resolve-escalation`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution, status }),
+      });
+      if (!res.ok) throw new Error("Failed to resolve escalated request.");
+      await fetchSupervisorRequests();
+      await fetchPendingSupervisorRequestCount();
+      await fetchAdminNotifications();
+      triggerSuccess("Escalation resolved and supervisor notified.");
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
+  const handleUpdateCommitmentDiary = async (
+    id: string,
+    patch: {
+      status?: CommitmentDiary["status"];
+      adminNotes?: string;
+      notes?: string;
+    },
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/commitment-diary/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error("Failed to update commitment diary entry.");
+      await fetchCommitmentDiary();
+      await fetchAdminNotifications();
+      triggerSuccess("Commitment diary updated.");
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
+  const handleSaveSchoolSupervisor = async (
+    data: Partial<SchoolSupervisor> & { password?: string },
+  ): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const isEdit = !!data.id && rawSchoolSupervisors.some((supervisor) => supervisor.id === data.id);
+      const url = isEdit ? `/api/school-supervisors/${data.id}` : "/api/school-supervisors";
+      const method = isEdit ? "PUT" : "POST";
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.name,
+          phone: data.phone,
+          assignedBlocks: data.assignedBlocks,
+          loginEnabled: data.loginEnabled,
+          loginPhone: data.loginPhone,
+          password: data.password,
+          status: data.status,
+        }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Server rejected supervisor save.");
+      }
+      await fetchSchoolSupervisors();
+      triggerSuccess(isEdit ? `Updated supervisor "${data.name}"` : `Added supervisor "${data.name}"`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Supervisor save failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleDeleteSchoolSupervisor = async (id: string) => {
+    const confirmed = await confirmAction({
+      title: "Delete school supervisor",
+      message: "Remove this school supervisor record? Schools in their assigned blocks will no longer have supervisor coverage.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch("/api/school-supervisors", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id] }),
+      });
+      if (!res.ok) throw new Error("Delete request refused by backend.");
+      await fetchSchoolSupervisors();
+      triggerSuccess("School supervisor removed.");
+    } catch (err: any) {
+      setErrorMessage("Supervisor deletion failed: " + err.message);
+    }
+  };
+
 
   const existingSchoolUdiseCodes = useMemo(
     () => rawSchoolWorks.map((s) => s.udise).filter(Boolean),
@@ -4593,12 +5771,15 @@ export function useHRMSApp() {
   );
 
   const schoolDashboardStats = useMemo(() => {
-    const totalRates = rawSchoolWorks.reduce((sum, s) => sum + (Number(s.rates) || 0), 0);
+    const totalPartnerPay = rawSchoolWorks.reduce(
+      (sum, s) => sum + computePartnerMonthlyPay(s),
+      0,
+    );
     const totalToilets = rawSchoolWorks.reduce((sum, s) => sum + (Number(s.noOfToilets) || 0), 0);
     const districts = new Set(rawSchoolWorks.map((s) => s.district).filter(Boolean));
     return {
       totalCount: rawSchoolWorks.length,
-      totalRates,
+      totalPartnerPay,
       totalToilets,
       uniqueDistricts: districts.size,
     };
@@ -4662,7 +5843,9 @@ export function useHRMSApp() {
 
     const debitAccountNo = getAxisDebitAccountNo();
     if (!debitAccountNo) {
-      alert("Debit account number is required for Axis Bulk Pay export.");
+      alert(
+        "No default debit account configured. Go to Configuration → Bank Accounts, add an account, and set it as default for bulk pay."
+      );
       return;
     }
 
@@ -4786,6 +5969,130 @@ export function useHRMSApp() {
       );
     } finally {
       setIsExportingBulkPay(false);
+    }
+  };
+
+  const handleExportSchoolAxisBulkPay = async (payload: {
+    items: AxisBulkPayRowInput[];
+    partnerSheet: BulkPayPartnerSheetInput;
+    partnerIds: string[];
+    partnerHeaders: readonly string[];
+  }) => {
+    if (!userPermissions.schoolWork?.edit) {
+      setErrorMessage(
+        "You do not have permission to save school bulk pay files. Contact an administrator for School Work edit access."
+      );
+      return;
+    }
+
+    const debitAccountNo = getAxisDebitAccountNo();
+    if (!debitAccountNo) {
+      alert(
+        "No default debit account configured. Go to Configuration → Bank Accounts, add an account, and set it as default for bulk pay."
+      );
+      return;
+    }
+
+    const { items, partnerSheet, partnerIds, partnerHeaders } = payload;
+    if (partnerIds.length === 0) {
+      alert("No partner rows to export.");
+      return;
+    }
+
+    const missingBank = items.filter(
+      (item) => !item.accountNo?.trim() || !item.beneficiaryName?.trim()
+    );
+    if (missingBank.length > 0) {
+      const proceed = await confirmAction({
+        title: "Missing bank details",
+        message: `${missingBank.length} partner(s) are missing bank account or account holder name and will be skipped. Continue?`,
+        confirmLabel: "Continue",
+        variant: "warning",
+      });
+      if (!proceed) return;
+    }
+
+    const payMonth = activeMonthName;
+    const payYear = activeCalendarYear;
+    if (!/^\d{4}$/.test(payYear)) {
+      setErrorMessage(
+        `Invalid payroll year "${payYear}". Select a valid month before exporting bulk pay.`
+      );
+      return;
+    }
+
+    const filename = buildSchoolAxisBulkPayFilename(selectedMonth);
+    const { exported, totalAmount, fileBase64 } = downloadSchoolAxisBulkPayXls(
+      items,
+      { debitAccountNo },
+      filename,
+      partnerSheet,
+      partnerHeaders
+    );
+
+    if (exported === 0) {
+      alert("No valid bank payment rows to export. Ensure partners have bank details and total pay > 0.");
+      return;
+    }
+
+    if (!fileBase64?.trim()) {
+      setErrorMessage("Bulk pay file was generated but could not be encoded for server storage. Try again.");
+      return;
+    }
+
+    setIsExportingSchoolBulkPay(true);
+    try {
+      const saved = await saveSchoolAxisBulkPayArchive({
+        filename,
+        month: payMonth,
+        year: payYear,
+        recordCount: exported,
+        totalAmount,
+        employeeIds: partnerIds,
+        fileBase64,
+      });
+      if (!saved?.id) {
+        throw new Error("Server did not return a saved archive record.");
+      }
+
+      setLastSavedSchoolBulkPay(saved);
+      setHighlightedSchoolBulkPayId(saved.id);
+      setSchoolBulkPayArchives((prev) => {
+        const rest = prev.filter((item: any) => item.id !== saved.id);
+        return [saved, ...rest];
+      });
+      setSchoolBulkPayArchiveYearFilter("");
+      schoolBulkPayJustSavedRef.current = true;
+      await fetchSchoolBulkPayArchives("");
+      setActiveSidebarTab("Saved School Bulk Pay");
+      triggerSuccess(
+        `School bulk pay saved (${exported} payment${exported > 1 ? "s" : ""}, ₹${totalAmount.toLocaleString("en-IN")}). Saved file includes bank upload sheet and full partner payment rows — use Re-download or View Excel below. Remove the header row from the BulkPay sheet before bank upload.`
+      );
+
+      fetch("/api/audit-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "EXPORT_SCHOOL_AXIS_BULKPAY",
+          target: `School Axis Bulk Pay: Exported partner disbursement file for ${selectedMonth} containing ${exported} payment records.`,
+          details: {
+            format: "XLS",
+            month: selectedMonth,
+            recordCount: exported,
+            partnerIds,
+            totalAmount,
+            archiveId: saved.id,
+          },
+        }),
+      })
+        .then(() => fetchAuditLogs())
+        .catch((err) => console.error("Audit log error:", err));
+    } catch (err: any) {
+      setErrorMessage(
+        `School bulk pay file downloaded but could not be saved on server: ${err.message}`
+      );
+    } finally {
+      setIsExportingSchoolBulkPay(false);
     }
   };
 
@@ -5205,8 +6512,11 @@ export function useHRMSApp() {
       icon: School,
       badge: "New",
       children: [
-        { name: "School Salary", tab: "School Salary" },
+        { name: "Schools", tab: "Schools" },
+        { name: "Monthly Billing", tab: "Monthly Billing" },
+        { name: "Saved School Bulk Pay", tab: "Saved School Bulk Pay" },
         { name: "Expenses", tab: "Expenses" },
+        { name: "Field Team", tab: "Field Team" },
       ],
     },
   ];
@@ -5249,16 +6559,14 @@ export function useHRMSApp() {
     }
   };
 
-  const handleSchoolSubTabClick = (tabName: string) => {
-    if (tabName === "Add School") {
-      setCurrentSchool(null);
-      setIsSchoolFormOpen(true);
-    } else if (tabName === "School Salary") {
-      setActiveSchoolSubTab(tabName);
-      setActiveSidebarTab("School Salary");
-    } else {
-      setActiveSchoolSubTab(tabName);
-    }
+  const openAddSchoolForm = () => {
+    setCurrentSchool(null);
+    setIsSchoolFormOpen(true);
+  };
+
+  const openAddSupervisorForm = () => {
+    setCurrentSupervisor(null);
+    setIsSupervisorFormOpen(true);
   };
 
   const toggleSidebarGroup = (groupName: string) => {
@@ -5270,7 +6578,6 @@ export function useHRMSApp() {
 
   const navigateToTab = (tabName: string) => {
     setActiveSidebarTab(tabName);
-    triggerSuccess(`Switched module view to: ${tabName}`);
     if (window.innerWidth < 768) {
       setIsSidebarCollapsed(true);
     }
@@ -5574,6 +6881,7 @@ export function useHRMSApp() {
     handleRejectEmployeeChanges,
     buildAxisBulkPayItems,
     handleExportAxisBulkPay,
+    handleExportSchoolAxisBulkPay,
     handleExportSelected,
     handlePimSubTabClick,
     navigateToTab,
@@ -5584,8 +6892,7 @@ export function useHRMSApp() {
     currentSchool,
     setCurrentSchool,
     handleSaveSchoolWork,
-    activeSchoolSubTab,
-    setActiveSchoolSubTab,
+    openAddSchoolForm,
     showFlushAuditModal,
     closeFlushAuditModal,
     flushAuditPassword,
@@ -5594,9 +6901,28 @@ export function useHRMSApp() {
     isFlushingAuditLogs,
     bulkPayPreview,
     setBulkPayPreview,
+    schoolBulkPayArchives,
+    isFetchingSchoolBulkPayArchives,
+    isExportingSchoolBulkPay,
+    lastSavedSchoolBulkPay,
+    highlightedSchoolBulkPayId,
+    schoolBulkPayArchiveYearFilter,
+    schoolBulkPayPreview,
+    setSchoolBulkPayPreview,
+    fetchSchoolBulkPayArchives,
+    handleDownloadSchoolBulkPayArchive,
+    handleDeleteSchoolBulkPayArchive,
+    handleViewSchoolBulkPayArchive,
+    schoolBulkPayArchiveYears,
+    filteredSchoolBulkPayArchives,
+    setSchoolBulkPayArchives,
+    setIsFetchingSchoolBulkPayArchives,
+    setIsExportingSchoolBulkPay,
+    setLastSavedSchoolBulkPay,
+    setHighlightedSchoolBulkPayId,
+    setSchoolBulkPayArchiveYearFilter,
     registryLocations,
     registeredJobRoles,
-    handleSchoolSubTabClick,
     reportLocationExportLabel,
     setNewPassword,
     openFlushAuditModal,
@@ -5616,8 +6942,63 @@ export function useHRMSApp() {
     handleDeleteSchoolWork,
     handleBulkDeleteSchools,
     handleExportSchoolsSelected,
-    handleExportSchoolExpenseSalary,
-    handleDistributeBlockExpense,
+    schoolDistricts,
+    schoolBlocks,
+    isSchoolGeographyLoading,
+    schoolBulkEditDrafts,
+    isSubmittingSchoolBulkEdit,
+    handleSchoolBulkEditDraftChange,
+    handleSchoolBulkEditDraftChangeMany,
+    handleDiscardSchoolBulkEditDrafts,
+    handleApplySchoolBulkEdit,
+    partnerBulkEditDrafts,
+    isSubmittingPartnerBulkEdit,
+    handlePartnerBulkEditDraftChange,
+    handlePartnerBulkEditDraftChangeMany,
+    handleDiscardPartnerBulkEditDrafts,
+    handleApplyPartnerBulkEdit,
+    handleAddSchoolDistrict,
+    handleUpdateSchoolDistrict,
+    handleDeleteSchoolDistricts,
+    handleAddSchoolBlock,
+    handleUpdateSchoolBlock,
+    handleDeleteSchoolBlocks,
+    handleAddExpenseRecord,
+    handleDeleteExpenseRecord,
+    handleUpdateVisitStatus,
+    handleRespondSupervisorRequest,
+    handleCloseSupervisorRequest,
+    handleResolveSupervisorEscalation,
+    handleUpdateCommitmentDiary,
+    handleGenerateSchoolBilling,
+    handleSaveSchoolWorkdays,
+    handleSavePartnerPayUpdates,
+    handleSavePartnerPayDetails,
+    handleSavePartnerPaymentStatus,
+    fetchSchoolBillings,
+    rawSchoolBillings,
+    rawSchoolVisits,
+    rawSupervisorRequests,
+    rawCommitmentDiary,
+    pendingSupervisorRequestCount,
+    adminNotifications,
+    adminNotificationUnreadCount,
+    isFetchingAdminNotifications,
+    fetchAdminNotifications,
+    handleMarkAdminNotificationRead,
+    handleMarkAllAdminNotificationsRead,
+    handleAdminNotificationNavigate,
+    fieldTeamView,
+    setFieldTeamView,
+    rawSchoolPartners,
+    rawSchoolSupervisors,
+    isSupervisorFormOpen,
+    setIsSupervisorFormOpen,
+    currentSupervisor,
+    setCurrentSupervisor,
+    handleSaveSchoolSupervisor,
+    handleDeleteSchoolSupervisor,
+    openAddSupervisorForm,
     PERMISSION_MODULES,
     sidebarItems,
     filteredSidebarItems,

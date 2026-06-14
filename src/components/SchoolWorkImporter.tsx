@@ -42,9 +42,26 @@ export default function SchoolWorkImporter({
     headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF791A" } };
     if (isSample) {
       ws.addRow([
-        1, "Govt. Primary School Example", "12345678901", "Ramesh Kumar", "9876543210",
-        "Suresh Das", "Ramesh Kumar", "302910243689", "PUNB0121400", 4, 5000,
-        "Standard rate per toilet", "Block A", "Patna", 12000, "Sample entry",
+        1,
+        "Govt. Primary School Example",
+        "12345678901",
+        "Primary School",
+        "Ramesh Kumar",
+        "9876543210",
+        "Suresh Das",
+        "Suresh Das",
+        "302910243689",
+        "PUNB0121400",
+        "Bank Transfer",
+        4,
+        50,
+        3750,
+        3750,
+        "Standard rate per toilet",
+        "Block A",
+        "Patna",
+        12000,
+        "Sample entry",
       ]);
     }
     ws.columns.forEach((col) => { col.width = 18; });

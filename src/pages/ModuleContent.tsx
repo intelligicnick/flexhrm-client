@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useNavigate, useLocation } from "react-router-dom";
 import { 
   Users, 
+  KeyRound,
   UserPlus, 
   TrendingUp, 
   IndianRupee, 
@@ -56,6 +57,7 @@ import {
   Square,
   Archive,
   Download,
+  DownloadCloud,
   Eye,
   School,
 } from "lucide-react";
@@ -91,15 +93,13 @@ import EmployeeTable from "../components/EmployeeTable";
 import EmployeeFormModal from "../components/EmployeeFormModal";
 import SchoolWorkImporter from "../components/SchoolWorkImporter";
 import SchoolWorkTable from "../components/SchoolWorkTable";
-import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
-import BlockMonthlyExpensePanel from "../components/BlockMonthlyExpensePanel";
-import SchoolExpensesSalaryTab, {
-  buildSchoolExpenseSalaryCsv,
-  SCHOOL_EXPENSE_SALARY_HEADERS,
-  getSchoolExpenseSalaryRow,
-} from "../components/SchoolExpensesSalaryTab";
+import MonthlyInvoiceTab from "../components/MonthlyInvoiceTab";
+import SchoolExpensesPanel from "../components/SchoolExpensesPanel";
+import FieldTeamPanel from "../components/FieldTeamPanel";
+import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
+import { isSchoolWorkTab } from "../routes";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
@@ -120,6 +120,8 @@ import BirthdaysTab from "../components/BirthdaysTab";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
 export default function ModuleContent() {
+  const [isSchoolBulkEditMode, setIsSchoolBulkEditMode] = useState(false);
+  const [isSchoolImporterOpen, setIsSchoolImporterOpen] = useState(false);
   const {
     isLoggedIn,
     sessionUser,
@@ -386,6 +388,7 @@ export default function ModuleContent() {
     handleBulkDelete,
     buildAxisBulkPayItems,
     handleExportAxisBulkPay,
+    handleExportSchoolAxisBulkPay,
     handleExportSelected,
     handlePimSubTabClick,
     navigateToTab,
@@ -396,8 +399,7 @@ export default function ModuleContent() {
     currentSchool,
     setCurrentSchool,
     handleSaveSchoolWork,
-    activeSchoolSubTab,
-    setActiveSchoolSubTab,
+    openAddSchoolForm,
     showFlushAuditModal,
     closeFlushAuditModal,
     flushAuditPassword,
@@ -408,7 +410,6 @@ export default function ModuleContent() {
     setBulkPayPreview,
     registryLocations,
     registeredJobRoles,
-    handleSchoolSubTabClick,
     reportLocationExportLabel,
     setNewPassword,
     openFlushAuditModal,
@@ -428,8 +429,43 @@ export default function ModuleContent() {
     handleDeleteSchoolWork,
     handleBulkDeleteSchools,
     handleExportSchoolsSelected,
-    handleExportSchoolExpenseSalary,
-    handleDistributeBlockExpense,
+    handleAddExpenseRecord,
+    handleDeleteExpenseRecord,
+    schoolDistricts,
+    schoolBlocks,
+    schoolBulkEditDrafts,
+    isSubmittingSchoolBulkEdit,
+    handleSchoolBulkEditDraftChange,
+    handleSchoolBulkEditDraftChangeMany,
+    handleDiscardSchoolBulkEditDrafts,
+    handleApplySchoolBulkEdit,
+    handleUpdateVisitStatus,
+    handleRespondSupervisorRequest,
+    handleCloseSupervisorRequest,
+    handleResolveSupervisorEscalation,
+    handleUpdateCommitmentDiary,
+    handleGenerateSchoolBilling,
+    handleSaveSchoolWorkdays,
+    handleSavePartnerPayUpdates,
+    handleSavePartnerPayDetails,
+    handleSavePartnerPaymentStatus,
+    fetchSchoolBillings,
+    rawSchoolBillings,
+    rawSchoolVisits,
+    rawSupervisorRequests,
+    rawCommitmentDiary,
+    pendingSupervisorRequestCount,
+    fieldTeamView,
+    setFieldTeamView,
+    rawSchoolPartners,
+    rawSchoolSupervisors,
+    isSupervisorFormOpen,
+    setIsSupervisorFormOpen,
+    currentSupervisor,
+    setCurrentSupervisor,
+    handleSaveSchoolSupervisor,
+    handleDeleteSchoolSupervisor,
+    openAddSupervisorForm,
     PERMISSION_MODULES,
     sidebarItems,
     filteredSidebarItems,
@@ -441,6 +477,20 @@ export default function ModuleContent() {
     customLocations,
     bulkPayArchiveYears,
     filteredBulkPayArchives,
+    schoolBulkPayArchives,
+    isFetchingSchoolBulkPayArchives,
+    isExportingSchoolBulkPay,
+    lastSavedSchoolBulkPay,
+    highlightedSchoolBulkPayId,
+    schoolBulkPayArchiveYearFilter,
+    schoolBulkPayPreview,
+    setSchoolBulkPayPreview,
+    fetchSchoolBulkPayArchives,
+    handleDownloadSchoolBulkPayArchive,
+    handleDeleteSchoolBulkPayArchive,
+    handleViewSchoolBulkPayArchive,
+    schoolBulkPayArchiveYears,
+    filteredSchoolBulkPayArchives,
     filteredAuditLogs,
     activeMonthName,
     activeCalendarYear,
@@ -540,6 +590,12 @@ export default function ModuleContent() {
     setLastSavedBulkPay,
     setHighlightedBulkPayId,
     setBulkPayArchiveYearFilter,
+    setSchoolBulkPayArchives,
+    setIsFetchingSchoolBulkPayArchives,
+    setIsExportingSchoolBulkPay,
+    setLastSavedSchoolBulkPay,
+    setHighlightedSchoolBulkPayId,
+    setSchoolBulkPayArchiveYearFilter,
     setEditingLocIndex,
     setEditingLocValue,
     setNewLocNameInput,
@@ -650,6 +706,7 @@ export default function ModuleContent() {
     setSelectedReportEmployeeIds,
     navigate,
     location,
+    confirmAction,
   } = useHRMS();
   return (
                     <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin" id="viewport-scroll-shell">
@@ -695,244 +752,277 @@ export default function ModuleContent() {
                             </button>
                           </div>
                         ) : activeSidebarTab === "My Info" ? (
-                          /* --- DETAILED ADMINISTRATOR PROFILE & PASSWORD SECURITY MODULE --- */
-                          <div className="max-w-4xl mx-auto space-y-6 animate-fade-in" id="my-info-view-container">
-                            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
-                              <div className="border-b border-slate-100 pb-4">
-                                <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                  <UserCircle size={20} className="text-[#ff791a]" /> My Account & Profile Details
-                                </h3>
-                                <p className="text-xs text-slate-400 mt-1">
-                                  Manage your personal login credentials, administrator access levels, and security configurations.
-                                </p>
+                          <div className="max-w-5xl mx-auto space-y-6 animate-fade-in" id="my-info-view-container">
+                            {/* Profile hero */}
+                            <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white shadow-lg">
+                              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(255,121,26,0.35)_0%,_transparent_55%)]" />
+                              <div className="relative p-6 md:p-8">
+                                {isFetchingProfile ? (
+                                  <div className="flex items-center gap-4 py-4">
+                                    <div className="w-14 h-14 rounded-2xl bg-white/10 animate-pulse" />
+                                    <div className="space-y-2 flex-1">
+                                      <div className="h-5 w-40 bg-white/10 rounded animate-pulse" />
+                                      <div className="h-3 w-56 bg-white/10 rounded animate-pulse" />
+                                    </div>
+                                  </div>
+                                ) : profileLoadingError ? (
+                                  <div className="p-4 bg-rose-500/20 border border-rose-400/30 rounded-xl text-sm text-rose-100">
+                                    Could not load profile: {profileLoadingError}
+                                  </div>
+                                ) : adminProfileInfo ? (
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff791a] to-[#e4640c] flex items-center justify-center text-2xl font-black shadow-lg ring-4 ring-white/10 shrink-0">
+                                      {adminProfileInfo.username.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <h2 className="text-xl font-extrabold tracking-tight truncate">{adminProfileInfo.username}</h2>
+                                      <p className="text-sm text-slate-300 mt-0.5">Manage your credentials and account security</p>
+                                      <div className="flex flex-wrap items-center gap-2 mt-3">
+                                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full bg-white/10 text-white border border-white/10">
+                                          <Shield size={11} />
+                                          {adminProfileInfo.role === "admin" ? "Super Admin" : adminProfileInfo.role || "Administrator"}
+                                        </span>
+                                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/20">
+                                          <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                                          Active Session
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-slate-400">Profile data unavailable.</p>
+                                )}
                               </div>
-          
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* Left: Profile Info Cards */}
-                                <div className="space-y-4">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <User size={14} className="text-slate-400" /> Account Information
-                                  </h4>
-          
-                                  {isFetchingProfile ? (
-                                    <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 border border-slate-150 rounded-xl">
-                                      <div className="animate-spin w-5 h-5 border-2 border-[#ff791a] border-t-transparent rounded-full mx-auto mb-2"></div>
-                                      Fetching authentic credentials...
-                                    </div>
-                                  ) : profileLoadingError ? (
-                                    <div className="p-4 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-medium">
-                                      Could not synchronize details: {profileLoadingError}
-                                    </div>
-                                  ) : adminProfileInfo ? (
-                                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-orange-100 text-[#ff791a] font-extrabold text-sm flex items-center justify-center shadow-xs">
-                                          {adminProfileInfo.username.charAt(0).toUpperCase()}
-                                        </div>
-                                        <div>
-                                          <p className="font-extrabold text-sm text-slate-800">{adminProfileInfo.username}</p>
-                                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">System Owner</p>
-                                        </div>
-                                      </div>
-          
-                                      <div className="border-t border-slate-200/60 my-2"></div>
-          
-                                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs leading-relaxed">
-                                        <div>
-                                          <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Access Scope</span>
-                                          <span className="font-semibold text-slate-850 flex items-center gap-1 mt-0.5">
-                                            <Shield size={11} className="text-[#ff791a] shrink-0" /> Full System Admin
-                                          </span>
-                                        </div>
-          
-                                        <div>
-                                          <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Active Status</span>
-                                          <span className="font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
-                                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block"></span> Verified Session
-                                          </span>
-                                        </div>
-          
-                                        <div>
-                                          <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Invited By</span>
-                                          <span className="font-semibold text-slate-800 mt-0.5 mt-1 block">{adminProfileInfo.invitedBy || "System Bootstrap"}</span>
-                                        </div>
-          
-                                        <div>
-                                          <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Account Created</span>
-                                          <span className="font-semibold text-slate-850 mt-0.5 mt-1 block">
-                                            {adminProfileInfo.createdAt ? new Date(adminProfileInfo.createdAt).toLocaleDateString() : "System Default"}
-                                          </span>
-                                        </div>
+                            </div>
 
-                                        <div className="col-span-2">
-                                          <span className="text-slate-400 font-bold block text-[10px] uppercase tracking-wider">Recovery Email</span>
-                                          <span className="font-semibold text-slate-800 mt-0.5 mt-1 block flex items-center gap-1">
-                                            <Mail size={11} className="text-slate-400 shrink-0" />
-                                            {adminProfileInfo.email || "Not set — add below for password recovery"}
-                                          </span>
-                                        </div>
-                                      </div>
+                            {adminProfileInfo && !isFetchingProfile && !profileLoadingError && (
+                              <>
+                                {/* Quick stats */}
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Invited By</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-800 truncate">{adminProfileInfo.invitedBy || "System"}</p>
+                                  </div>
+                                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Member Since</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-800">
+                                      {adminProfileInfo.createdAt ? new Date(adminProfileInfo.createdAt).toLocaleDateString() : "—"}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs col-span-2">
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Recovery Email</p>
+                                    <p className="mt-1 text-sm font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                                      <Mail size={14} className="text-[#ff791a] shrink-0" />
+                                      {adminProfileInfo.email || "Not configured"}
+                                    </p>
+                                  </div>
+                                </div>
 
-                                      <form onSubmit={handleProfileEmailSave} className="p-3 bg-white border border-slate-200 rounded-lg space-y-2.5 mt-1">
-                                        <label htmlFor="profile-email-field" className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex items-center gap-1">
-                                          <Mail size={12} className="text-[#ff791a]" /> Password Recovery Email
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  {/* Recovery email */}
+                                  <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+                                    <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80">
+                                      <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                                        <Mail size={16} className="text-[#ff791a]" />
+                                        Password Recovery
+                                      </h3>
+                                      <p className="text-xs text-slate-400 mt-0.5">Used for one-time reset codes on the login page</p>
+                                    </div>
+                                    <form onSubmit={handleProfileEmailSave} className="p-5 space-y-3">
+                                      {profileEmailError && (
+                                        <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold">
+                                          {profileEmailError}
+                                        </div>
+                                      )}
+                                      {profileEmailSuccess && (
+                                        <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
+                                          {profileEmailSuccess}
+                                        </div>
+                                      )}
+                                      <div>
+                                        <label htmlFor="profile-email-field" className="text-[11px] font-bold text-slate-500 block mb-1.5">
+                                          Recovery email address
                                         </label>
-                                        {profileEmailError && (
-                                          <div className="p-2 bg-rose-50 border border-rose-100 text-rose-800 rounded text-[11px] font-semibold">
-                                            {profileEmailError}
-                                          </div>
-                                        )}
-                                        {profileEmailSuccess && (
-                                          <div className="p-2 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded text-[11px] font-semibold">
-                                            {profileEmailSuccess}
-                                          </div>
-                                        )}
                                         <input
                                           id="profile-email-field"
                                           type="email"
                                           value={profileEmail}
                                           onChange={(e) => setProfileEmail(e.target.value)}
                                           placeholder="you@company.com"
-                                          className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
+                                          className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
                                         />
-                                        <button
-                                          type="submit"
-                                          disabled={isSavingProfileEmail}
-                                          className="w-full py-1.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold rounded-lg text-[11px] transition cursor-pointer"
-                                        >
-                                          {isSavingProfileEmail ? "Saving..." : "Save Recovery Email"}
-                                        </button>
-                                        <p className="text-[10px] text-slate-400 leading-relaxed">
-                                          Use this email on the login page if you forget your password. A one-time reset code will be sent to this address.
-                                        </p>
-                                      </form>
-          
-                                      <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-lg text-[11px] text-blue-750 leading-relaxed mt-2">
-                                        💡 <strong>Security Note:</strong> Passwords are stored using secure one-way hashing. Sessions expire after 24 hours and all API routes require a valid authenticated session token.
                                       </div>
+                                      <button
+                                        type="submit"
+                                        disabled={isSavingProfileEmail}
+                                        className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                                      >
+                                        {isSavingProfileEmail ? "Saving..." : "Save Recovery Email"}
+                                      </button>
+                                    </form>
+                                  </div>
+
+                                  {/* Change password */}
+                                  <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+                                    <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80">
+                                      <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                                        <KeyRound size={16} className="text-[#ff791a]" />
+                                        Change Password
+                                      </h3>
+                                      <p className="text-xs text-slate-400 mt-0.5">Update your login credentials securely</p>
                                     </div>
-                                  ) : (
-                                    <div className="p-4 bg-slate-50 border border-slate-150 rounded-xl text-center text-xs text-slate-400">
-                                      Admin data not yet processed.
-                                    </div>
-                                  )}
+                                    <form onSubmit={handlePasswordChangeSubmit} className="p-5 space-y-3">
+                                      {changePasswordError && (
+                                        <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
+                                          {changePasswordError}
+                                        </div>
+                                      )}
+                                      {changePasswordSuccess && (
+                                        <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
+                                          {changePasswordSuccess}
+                                        </div>
+                                      )}
+                                      <div>
+                                        <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Current password</label>
+                                        <PasswordInput
+                                          id="old-password"
+                                          name="oldPassword"
+                                          value={oldPassword}
+                                          onChange={(e) => setOldPassword(e.target.value)}
+                                          placeholder="Enter current password"
+                                          className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[11px] font-bold text-slate-500 block mb-1.5">New password</label>
+                                        <PasswordInput
+                                          id="new-password"
+                                          name="newPassword"
+                                          value={newPassword}
+                                          onChange={(e) => setNewPassword(e.target.value)}
+                                          placeholder="Enter new password"
+                                          className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Confirm new password</label>
+                                        <PasswordInput
+                                          id="confirm-new-password"
+                                          name="confirmNewPassword"
+                                          value={confirmNewPassword}
+                                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                          placeholder="Re-enter new password"
+                                          className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                        />
+                                      </div>
+                                      <button
+                                        type="submit"
+                                        className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm shadow-orange-500/10 transition active:scale-[0.98] cursor-pointer"
+                                      >
+                                        Update Password
+                                      </button>
+                                    </form>
+                                  </div>
                                 </div>
-          
-                                {/* Right: Change Password Form */}
-                                <form onSubmit={handlePasswordChangeSubmit} className="space-y-4 p-5 bg-slate-50 border border-slate-200 rounded-xl relative">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Lock size={14} className="text-slate-400" /> Update Security Credentials
-                                  </h4>
-          
-                                  {changePasswordError && (
-                                    <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                      ⚠️ {changePasswordError}
-                                    </div>
-                                  )}
-          
-                                  {changePasswordSuccess && (
-                                    <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                      {changePasswordSuccess}
-                                    </div>
-                                  )}
-          
-                                  <div>
-                                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Current Password</label>
-                                    <PasswordInput id="old-password" name="oldPassword"
-                                      value={oldPassword}
-                                      onChange={(e) => setOldPassword(e.target.value)}
-                                      placeholder="••••••••"
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                    />
-                                  </div>
-          
-                                  <div>
-                                    <label className="text-[11px] font-bold text-slate-550 block mb-1">New Password</label>
-                                    <PasswordInput id="new-password" name="newPassword"
-                                      value={newPassword}
-                                      onChange={(e) => setNewPassword(e.target.value)}
-                                      placeholder="••••••••"
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                    />
-                                  </div>
-          
-                                  <div>
-                                    <label className="text-[11px] font-bold text-slate-550 block mb-1">Confirm New Password</label>
-                                    <PasswordInput id="confirm-new-password" name="confirmNewPassword"
-                                      value={confirmNewPassword}
-                                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                                      placeholder="••••••••"
-                                      className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                    />
-                                  </div>
-          
-                                  <button
-                                    type="submit"
-                                    className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm shadow-orange-500/10 transition active:scale-98 cursor-pointer mt-2"
-                                  >
-                                    Authenticate & Save Password
-                                  </button>
-                                </form>
-                              </div>
-                            </div>
+
+                                <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 flex items-start gap-3">
+                                  <Lock size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                                  <p className="text-xs text-blue-900 leading-relaxed">
+                                    Passwords are stored using secure one-way hashing. Sessions expire after 24 hours and all API routes require a valid authenticated session token.
+                                  </p>
+                                </div>
+                              </>
+                            )}
                           </div>
                         ) : activeSidebarTab === "Admin" ? (
-                           /* --- INTERACTIVE ADMINISTRATOR INVITE & MANAGE MODULE --- */
-                           <div className="max-w-4xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
-                             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-                               <div className="border-b border-slate-100 pb-3">
-                                 <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                   <Shield size={18} className="text-[#ff791a]" /> System Administrator Accounts
-                                 </h3>
-                                 <p className="text-xs text-slate-400 mt-1">
-                                   Security overview of authorized logins. Administrators can explicitly register and invite other administrators, but public self-signup is strictly disabled.
-                                 </p>
-                               </div>
-          
-                               {inviteError && (
-                                 <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                   🚩 {inviteError}
-                                 </div>
-                               )}
-          
-                               {inviteSuccess && (
-                                 <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                   ✓ {inviteSuccess}
-                                 </div>
-                               )}
-          
-                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                 {/* Create / Invite Form */}
-                                 <form onSubmit={handleInviteAdminSubmit} className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                                   <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                     Invite / Onboard New Admin
-                                   </h4>
-                               
-                                   <div>
-                                     <label className="text-[11px] font-bold text-slate-500 block mb-1">New Admin Username</label>
-                                     <input id="invite-username" name="inviteUsername"
-                                       type="text"
-                                       value={inviteUsername}
-                                       onChange={(e) => setInviteUsername(e.target.value)}
-                                       placeholder="e.g. nikhil_admin"
-                                       className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                     />
-                                   </div>
-          
-                                   <div>
-                                     <label className="text-[11px] font-bold text-slate-500 block mb-1">Temporary Password</label>
-                                     <PasswordInput id="invite-password" name="invitePassword"
-                                       value={invitePassword}
-                                       onChange={(e) => setInvitePassword(e.target.value)}
-                                       placeholder="e.g. securePass123"
-                                       className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                     />
-                                   </div>                      <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1">Assigned Security Role</label>
-                                      <select id="invite-role" name="inviteRole"
+                          <div className="max-w-6xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
+                            {/* Page header */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div>
+                                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                                  <Shield size={22} className="text-[#ff791a]" />
+                                  Administration
+                                </h2>
+                                <p className="text-sm text-slate-500 mt-1">
+                                  Manage administrator accounts, roles, and access permissions
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-xs text-center min-w-[88px]">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Admins</p>
+                                  <p className="text-lg font-black text-slate-800">{isFetchingAdmins ? "…" : adminsList.length}</p>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-xs text-center min-w-[88px]">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Roles</p>
+                                  <p className="text-lg font-black text-slate-800">{isFetchingRoles ? "…" : rolesList.length}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Administrator accounts */}
+                            <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+                              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+                                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                                  <Users size={16} className="text-[#ff791a]" />
+                                  Administrator Accounts
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                  Invite and manage authorized logins. Public self-signup is disabled.
+                                </p>
+                              </div>
+
+                              <div className="p-6 space-y-4">
+                                {inviteError && (
+                                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
+                                    {inviteError}
+                                  </div>
+                                )}
+                                {inviteSuccess && (
+                                  <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
+                                    {inviteSuccess}
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  <form onSubmit={handleInviteAdminSubmit} className="rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
+                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                                      <UserPlus size={14} className="text-[#ff791a]" />
+                                      Invite New Admin
+                                    </h4>
+
+                                    <div>
+                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Username</label>
+                                      <input
+                                        id="invite-username"
+                                        name="inviteUsername"
+                                        type="text"
+                                        value={inviteUsername}
+                                        onChange={(e) => setInviteUsername(e.target.value)}
+                                        placeholder="e.g. nikhil_admin"
+                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Temporary password</label>
+                                      <PasswordInput
+                                        id="invite-password"
+                                        name="invitePassword"
+                                        value={invitePassword}
+                                        onChange={(e) => setInvitePassword(e.target.value)}
+                                        placeholder="Set initial password"
+                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Security role</label>
+                                      <select
+                                        id="invite-role"
+                                        name="inviteRole"
                                         value={inviteRole}
                                         onChange={(e) => setInviteRole(e.target.value)}
-                                        className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
+                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
                                       >
                                         <option value="admin">Super-Admin (Full Access)</option>
                                         {rolesList.map((r) => (
@@ -940,76 +1030,84 @@ export default function ModuleContent() {
                                         ))}
                                       </select>
                                     </div>
-          
+
                                     <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1">Assigned Worksite Locations</label>
-                                      <div className="border border-slate-200 rounded-lg p-2.5 bg-white max-h-36 overflow-y-auto space-y-1.5 shadow-inner">
+                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Worksite locations</label>
+                                      <div className="border border-slate-200 rounded-lg p-3 bg-white max-h-36 overflow-y-auto space-y-2">
                                         {customLocations.map((loc) => {
                                           const isChecked = inviteLocations.includes(loc);
                                           return (
-                                            <label key={loc} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 transition font-medium select-none">
-                                              <input id={`invite-loc-${loc}`} name={`inviteLocation_${loc}`}
+                                            <label key={loc} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 font-medium select-none">
+                                              <input
+                                                id={`invite-loc-${loc}`}
+                                                name={`inviteLocation_${loc}`}
                                                 type="checkbox"
                                                 checked={isChecked}
                                                 onChange={() => {
                                                   if (isChecked) {
-                                                    setInviteLocations(prev => prev.filter(l => l !== loc));
+                                                    setInviteLocations((prev) => prev.filter((l) => l !== loc));
                                                   } else {
-                                                    setInviteLocations(prev => [...prev, loc]);
+                                                    setInviteLocations((prev) => [...prev, loc]);
                                                   }
                                                 }}
-                                                className="rounded border-slate-350 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
+                                                className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
                                               />
                                               <span>{loc}</span>
                                             </label>
                                           );
                                         })}
                                         {customLocations.length === 0 && (
-                                          <p className="text-[10px] text-slate-400 text-center py-1 font-medium">No locations registered.</p>
+                                          <p className="text-[11px] text-slate-400 text-center py-2">No locations registered.</p>
                                         )}
                                       </div>
-                                      <p className="text-[10px] text-slate-400 mt-1 italic">
-                                        If unchecked, administrator defaults to having full unrestricted access to all locations.
+                                      <p className="text-[10px] text-slate-400 mt-1.5">
+                                        Leave unchecked for unrestricted access to all locations.
                                       </p>
                                     </div>
-                                   <button
-                                     type="submit"
-                                     className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-98 cursor-pointer"
-                                   >
-                                     Grant Administrator Credentials
-                                   </button>
-                                 </form>
-          
-                                 {/* Administrators List */}
-                                 <div className="space-y-3">
-                                   <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                     Active Administrators ({isFetchingAdmins ? "..." : adminsList.length})
-                                   </h4>
-                               
-                                   <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden bg-white max-h-64 overflow-y-auto">
-                                     {isFetchingAdmins ? (
-                                       <div className="p-4 text-center text-xs text-slate-400">Loading authorized administrators...</div>
-                                     ) : adminsList.length === 0 ? (
-                                       <div className="p-4 text-center text-xs text-slate-400">No administrators managed.</div>
-                                     ) : (                          adminsList.map((adm) => {
-                                          const isSelf = adm.username.toLowerCase() === sessionUser.toLowerCase();
+
+                                    <button
+                                      type="submit"
+                                      className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-[0.98] cursor-pointer"
+                                    >
+                                      Grant Administrator Access
+                                    </button>
+                                  </form>
+
+                                  <div className="space-y-3">
+                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                                      Active administrators ({isFetchingAdmins ? "…" : adminsList.length})
+                                    </h4>
+                                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden bg-white max-h-[420px] overflow-y-auto">
+                                      {isFetchingAdmins ? (
+                                        <div className="p-8 text-center text-xs text-slate-400">Loading administrators…</div>
+                                      ) : adminsList.length === 0 ? (
+                                        <div className="p-8 text-center text-xs text-slate-400">No administrators found.</div>
+                                      ) : (
+                                        adminsList.map((adm) => {
                                           const isRootAdmin = adm.username.toLowerCase() === "admin";
-                                      
+
                                           if (editingAdminUsername === adm.username) {
                                             return (
-                                              <div key={adm.username} className="p-3 bg-slate-50 space-y-3 transition text-xs border-b border-slate-100">
-                                                <div className="flex items-center justify-between">
-                                                  <span className="font-extrabold text-slate-800">⚙ Edit security: {adm.username}</span>
-                                                  <span className="text-[10px] text-slate-400 font-mono">Onboarded: {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}</span>
+                                              <div key={adm.username} className="p-4 bg-orange-50/40 space-y-3 text-xs border-b border-slate-100">
+                                                <div className="flex items-center justify-between gap-2">
+                                                  <span className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                                                    <Settings size={13} className="text-[#ff791a]" />
+                                                    Edit: {adm.username}
+                                                  </span>
+                                                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                                                    {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}
+                                                  </span>
                                                 </div>
-                                            
-                                                <div className="space-y-2.5 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+
+                                                <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200">
                                                   <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Assigned Security Role</label>
-                                                    <select id="edit-admin-role" name="editAdminRole"
+                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Security role</label>
+                                                    <select
+                                                      id="edit-admin-role"
+                                                      name="editAdminRole"
                                                       value={editAdminRole}
                                                       onChange={(e) => setEditAdminRole(e.target.value)}
-                                                      className="w-full px-2 py-1 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
+                                                      className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs text-slate-800 focus:outline-none focus:border-[#ff791a] transition"
                                                     >
                                                       <option value="admin">Super-Admin (Full Access)</option>
                                                       {rolesList.map((r) => (
@@ -1017,261 +1115,283 @@ export default function ModuleContent() {
                                                       ))}
                                                     </select>
                                                   </div>
-          
+
                                                   {!isRootAdmin && (
                                                     <div>
-                                                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Login Access Restrictions</label>
-                                                      <select id="editadmindisabled-disabled-active-4793" name="editadmindisabled-disabled-active"
+                                                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Login access</label>
+                                                      <select
+                                                        id="editadmindisabled-disabled-active-4793"
+                                                        name="editadmindisabled-disabled-active"
                                                         value={editAdminDisabled ? "disabled" : "active"}
                                                         onChange={(e) => setEditAdminDisabled(e.target.value === "disabled")}
-                                                        className="w-full px-2 py-1 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
+                                                        className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs text-slate-800 focus:outline-none focus:border-[#ff791a] transition"
                                                       >
-                                                        <option value="active">🟢 Active (Login Allowed)</option>
-                                                        <option value="disabled">🔴 Restricted (Block Login Access)</option>
+                                                        <option value="active">Active — login allowed</option>
+                                                        <option value="disabled">Restricted — block login</option>
                                                       </select>
                                                     </div>
                                                   )}
-          
+
                                                   <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Assigned Worksite Locations</label>
-                                                    <div className="border border-slate-200 rounded-md p-2 bg-slate-50 max-h-28 overflow-y-auto space-y-1.5 shadow-inner">
+                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Worksite locations</label>
+                                                    <div className="border border-slate-200 rounded-lg p-2.5 bg-slate-50 max-h-28 overflow-y-auto space-y-1.5">
                                                       {rawCustomLocations.map((loc) => {
                                                         const isChecked = editAdminLocations.includes(loc);
                                                         return (
-                                                          <label key={loc} className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 hover:text-slate-900 transition font-medium select-none">
-                                                            <input id={`edit-admin-loc-${loc}`} name={`editAdminLocation_${loc}`}
+                                                          <label key={loc} className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 font-medium select-none">
+                                                            <input
+                                                              id={`edit-admin-loc-${loc}`}
+                                                              name={`editAdminLocation_${loc}`}
                                                               type="checkbox"
                                                               checked={isChecked}
                                                               onChange={() => {
                                                                 if (isChecked) {
-                                                                  setEditAdminLocations(prev => prev.filter(l => l !== loc));
+                                                                  setEditAdminLocations((prev) => prev.filter((l) => l !== loc));
                                                                 } else {
-                                                                  setEditAdminLocations(prev => [...prev, loc]);
+                                                                  setEditAdminLocations((prev) => [...prev, loc]);
                                                                 }
                                                               }}
                                                               className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
                                                             />
-                                                            <span className="text-[11px]">{loc}</span>
+                                                            <span>{loc}</span>
                                                           </label>
                                                         );
                                                       })}
                                                     </div>
                                                   </div>
-          
+
                                                   <div className="flex items-center gap-2 pt-2 border-t border-slate-100 justify-end">
                                                     <button
                                                       type="button"
                                                       onClick={() => setEditingAdminUsername(null)}
-                                                      className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded transition cursor-pointer"
+                                                      className="px-3 py-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition cursor-pointer"
                                                     >
                                                       Cancel
                                                     </button>
                                                     <button
                                                       type="button"
                                                       onClick={() => handleUpdateAdminSubmit(adm.username)}
-                                                      className="px-2.5 py-1 text-[11px] font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded shadow-sm transition cursor-pointer"
+                                                      className="px-3 py-1.5 text-[11px] font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded-lg transition cursor-pointer"
                                                     >
-                                                      Save Rules
+                                                      Save changes
                                                     </button>
                                                   </div>
                                                 </div>
                                               </div>
                                             );
                                           }
-          
+
                                           return (
-                                            <div key={adm.username} className="p-3 hover:bg-slate-50/50 flex items-center justify-between transition text-xs">
-                                              <div className="space-y-0.5">
-                                                <p className="font-bold text-slate-800 flex items-center gap-1 flex-wrap">
-                                                  <span>👤 {adm.username}</span>
-                                                  {adm.disabled ? (
-                                                    <span className="bg-rose-50 text-rose-700 border border-rose-200/50 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase scale-90">Restricted</span>
-                                                  ) : (
-                                                    <span className="bg-emerald-50 text-emerald-700 border border-emerald-250/50 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase scale-90">Active</span>
-                                                  )}
-                                                  {adm.username === sessionUser && (
-                                                    <span className="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0.5 rounded font-normal uppercase scale-90">Current</span>
-                                                  )}
-                                                </p>
-                                                <p className="text-[10px] text-slate-400">
-                                                  Invited by: {adm.invitedBy || "System"} • Role: <span className="font-semibold text-slate-600 bg-slate-100 px-1 py-0.5 rounded text-[9px]">{adm.role === "admin" ? "Super-Admin" : adm.role || "Super-Admin"}</span>
-                                                </p>
-                                                <p className="text-[10px] text-slate-500 font-medium">
-                                                  📍 Locations: {adm.locations && adm.locations.length > 0 ? adm.locations.join(", ") : "All (Unrestricted)"}
-                                                </p>
+                                            <div key={adm.username} className="p-4 hover:bg-slate-50/60 flex items-start gap-3 transition text-xs">
+                                              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 text-slate-700 font-extrabold text-sm flex items-center justify-center shrink-0">
+                                                {adm.username.charAt(0).toUpperCase()}
                                               </div>
-                                              <div className="text-right flex flex-col items-end gap-1 text-[10px] text-slate-400">
-                                                <p className="font-mono">{adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}</p>
-                                                {adm.username !== "admin" && (
-                                                  <button
-                                                    onClick={() => {
-                                                      setEditingAdminUsername(adm.username);
-                                                      setEditAdminRole(adm.role || "admin");
-                                                      setEditAdminLocations(adm.locations || []);
-                                                      setEditAdminDisabled(!!adm.disabled);
-                                                    }}
-                                                    className="px-2 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
-                                                  >
-                                                    ⚙ Configure
-                                                  </button>
-                                                )}
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-start justify-between gap-2">
+                                                  <div className="min-w-0">
+                                                    <p className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                                                      <span className="truncate">{adm.username}</span>
+                                                      {adm.disabled ? (
+                                                        <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">Restricted</span>
+                                                      ) : (
+                                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">Active</span>
+                                                      )}
+                                                      {adm.username === sessionUser && (
+                                                        <span className="bg-orange-100 text-orange-700 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">You</span>
+                                                      )}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                                      Invited by {adm.invitedBy || "System"} ·{" "}
+                                                      <span className="font-semibold text-slate-600">
+                                                        {adm.role === "admin" ? "Super-Admin" : adm.role || "Super-Admin"}
+                                                      </span>
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
+                                                      <Map size={10} className="shrink-0" />
+                                                      {adm.locations && adm.locations.length > 0 ? adm.locations.join(", ") : "All locations"}
+                                                    </p>
+                                                  </div>
+                                                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                                                    <p className="text-[10px] text-slate-400 font-mono">
+                                                      {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}
+                                                    </p>
+                                                    {adm.username !== "admin" && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          setEditingAdminUsername(adm.username);
+                                                          setEditAdminRole(adm.role || "admin");
+                                                          setEditAdminLocations(adm.locations || []);
+                                                          setEditAdminDisabled(!!adm.disabled);
+                                                        }}
+                                                        className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-lg flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
+                                                      >
+                                                        <Settings size={11} />
+                                                        Configure
+                                                      </button>
+                                                    )}
+                                                  </div>
+                                                </div>
                                               </div>
                                             </div>
                                           );
                                         })
-                                     )}
-                                   </div>
-                                 </div>
-                               </div>
-                             </div>
-          
-                             {/* --- CUSTOM ROLES & PERMISSIONS MATRIX --- */}
-                             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 text-left">
-                               <div className="border-b border-slate-100 pb-3">
-                                 <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                   <Shield size={18} className="text-[#ff791a]" /> Custom Security Roles & Permissions Matrix
-                                 </h3>
-                                 <p className="text-xs text-slate-400 mt-1">
-                                   Define fine-grained view and edit access permissions for different admin ranks and assistants.
-                                   Employee documents are view-only in the profile viewer; upload requires Employees edit access via the edit form.
-                                 </p>
-                               </div>
-          
-                               {roleError && (
-                                 <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                   🚩 {roleError}
-                                 </div>
-                               )}
-          
-                               {roleSuccess && (
-                                 <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                   ✓ {roleSuccess}
-                                 </div>
-                               )}
-          
-                               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                 {/* Role Creation / Editing Form */}
-                                 <div className="lg:col-span-2 space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                                   <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                     Create / Modify Custom Role
-                                   </h4>
-                               
-                                   <form onSubmit={handleSaveRoleSubmit} className="space-y-4">
-                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                       <div>
-                                         <label className="text-[11px] font-bold text-slate-500 block mb-1">Role Name</label>
-                                         <input id="role-name-input" name="roleNameInput"
-                                           type="text"
-                                           value={roleNameInput}
-                                           onChange={(e) => setRoleNameInput(e.target.value)}
-                                           placeholder="e.g. HR Assistant"
-                                           className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                         />
-                                       </div>
-          
-                                       <div>
-                                         <label className="text-[11px] font-bold text-slate-500 block mb-1">Description</label>
-                                         <input id="role-desc-input" name="roleDescInput"
-                                           type="text"
-                                           value={roleDescInput}
-                                           onChange={(e) => setRoleDescInput(e.target.value)}
-                                           placeholder="e.g. Access to daily markings..."
-                                           className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500 transition font-medium"
-                                         />
-                                       </div>
-                                     </div>
-          
-                                     {/* Permission Grid Table */}
-                                     <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                       <table className="w-full border-collapse text-left text-xs">
-                                         <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
-                                           <tr>
-                                             <th className="p-2.5">Feature Module</th>
-                                             <th className="p-2.5 text-center w-24">View Module</th>
-                                             <th className="p-2.5 text-center w-24">Edit/Save</th>
-                                           </tr>
-                                         </thead>
-                                         <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
-                                           {ROLE_PERMISSION_MODULE_ROWS.map((mod) => (
-                                             <tr key={mod.key} className="hover:bg-slate-50/50">
-                                               <td className="p-2.5">
-                                                 <p className="font-semibold text-slate-800">{mod.name}</p>
-                                                 <p className="mt-0.5 text-[10px] font-normal leading-snug text-slate-400">
-                                                   {mod.includes}
-                                                 </p>
-                                               </td>
-                                               <td className="p-2.5 text-center">
-                                                 <input id={`role-perm-view-${mod.key}`} name={`rolePermView_${mod.key}`}
-                                                   type="checkbox"
-                                                   checked={!!rolePermsInput[mod.key]?.view}
-                                                   onChange={(e) => {
-                                                     const val = e.target.checked;
-                                                     setRolePermsInput(prev => ({
-                                                       ...prev,
-                                                       [mod.key]: {
-                                                         ...prev[mod.key],
-                                                         view: val,
-                                                         // Automatically disable edit if view is disabled
-                                                         edit: val ? prev[mod.key]?.edit : false
-                                                       }
-                                                     }));
-                                                   }}
-                                                   className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer"
-                                                 />
-                                               </td>
-                                               <td className="p-2.5 text-center">
-                                                 <input id={`role-perm-view-${mod.key}`} name={`rolePermView_${mod.key}`}
-                                                   type="checkbox"
-                                                   checked={!!rolePermsInput[mod.key]?.edit}
-                                                   disabled={!rolePermsInput[mod.key]?.view}
-                                                   onChange={(e) => {
-                                                     setRolePermsInput(prev => ({
-                                                       ...prev,
-                                                       [mod.key]: {
-                                                         ...prev[mod.key],
-                                                         edit: e.target.checked
-                                                       }
-                                                     }));
-                                                   }}
-                                                   className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer disabled:opacity-40"
-                                                 />
-                                               </td>
-                                             </tr>
-                                           ))}
-                                         </tbody>
-                                       </table>
-                                     </div>
-          
-                                     <button
-                                       type="submit"
-                                       className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-98 cursor-pointer"
-                                     >
-                                       Save Custom Role Matrix
-                                     </button>
-                                   </form>
-                                 </div>
-          
-                                 {/* Roles Overview List */}
-                                 <div className="space-y-3">
-                                   <h4 className="text-xs font-black text-slate-705 uppercase tracking-wider">
-                                     Configured Roles ({isFetchingRoles ? "..." : rolesList.length})
-                                   </h4>
-          
-                                   <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 overflow-hidden bg-white max-h-96 overflow-y-auto">
-                                     {isFetchingRoles ? (
-                                       <div className="p-4 text-center text-xs text-slate-400">Loading custom roles...</div>
-                                     ) : rolesList.length === 0 ? (
-                                       <div className="p-4 text-center text-xs text-slate-400">No custom roles defined.</div>
-                                     ) : (
-                                       rolesList.map((role) => (
-                                         <div key={role.name} className="p-3 hover:bg-slate-50/50 space-y-1.5 transition text-xs relative group">
-                                           <div className="flex items-start justify-between">
-                                             <div className="space-y-0.5">
-                                               <p className="font-extrabold text-slate-800 flex items-center gap-1.5">
-                                                 🛡️ {role.name}
-                                               </p>
-                                               <p className="text-[10px] text-slate-400">{role.description || "No description provided."}</p>
-                                             </div>                               <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition">
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Roles & permissions */}
+                            <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden text-left">
+                              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+                                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                                  <Shield size={16} className="text-[#ff791a]" />
+                                  Custom Roles & Permissions
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                  Define view and edit access for different admin ranks. Employee documents are view-only in the profile viewer.
+                                </p>
+                              </div>
+
+                              <div className="p-6 space-y-4">
+                                {roleError && (
+                                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
+                                    {roleError}
+                                  </div>
+                                )}
+                                {roleSuccess && (
+                                  <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
+                                    {roleSuccess}
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                  <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
+                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                                      Create or modify role
+                                    </h4>
+
+                                    <form onSubmit={handleSaveRoleSubmit} className="space-y-4">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                          <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Role name</label>
+                                          <input
+                                            id="role-name-input"
+                                            name="roleNameInput"
+                                            type="text"
+                                            value={roleNameInput}
+                                            onChange={(e) => setRoleNameInput(e.target.value)}
+                                            placeholder="e.g. HR Assistant"
+                                            className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Description</label>
+                                          <input
+                                            id="role-desc-input"
+                                            name="roleDescInput"
+                                            type="text"
+                                            value={roleDescInput}
+                                            onChange={(e) => setRoleDescInput(e.target.value)}
+                                            placeholder="Brief role description"
+                                            className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
+                                        <table className="w-full border-collapse text-left text-xs">
+                                          <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
+                                            <tr>
+                                              <th className="p-3">Module</th>
+                                              <th className="p-3 text-center w-24">View</th>
+                                              <th className="p-3 text-center w-24">Edit</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 text-slate-700">
+                                            {ROLE_PERMISSION_MODULE_ROWS.map((mod) => (
+                                              <tr key={mod.key} className="hover:bg-slate-50/50">
+                                                <td className="p-3">
+                                                  <p className="font-semibold text-slate-800">{mod.name}</p>
+                                                  <p className="mt-0.5 text-[10px] font-normal leading-snug text-slate-400">{mod.includes}</p>
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                  <input
+                                                    id={`role-perm-view-${mod.key}`}
+                                                    name={`rolePermView_${mod.key}`}
+                                                    type="checkbox"
+                                                    checked={!!rolePermsInput[mod.key]?.view}
+                                                    onChange={(e) => {
+                                                      const val = e.target.checked;
+                                                      setRolePermsInput((prev) => ({
+                                                        ...prev,
+                                                        [mod.key]: {
+                                                          ...prev[mod.key],
+                                                          view: val,
+                                                          edit: val ? prev[mod.key]?.edit : false,
+                                                        },
+                                                      }));
+                                                    }}
+                                                    className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer"
+                                                  />
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                  <input
+                                                    id={`role-perm-edit-${mod.key}`}
+                                                    name={`rolePermEdit_${mod.key}`}
+                                                    type="checkbox"
+                                                    checked={!!rolePermsInput[mod.key]?.edit}
+                                                    disabled={!rolePermsInput[mod.key]?.view}
+                                                    onChange={(e) => {
+                                                      setRolePermsInput((prev) => ({
+                                                        ...prev,
+                                                        [mod.key]: {
+                                                          ...prev[mod.key],
+                                                          edit: e.target.checked,
+                                                        },
+                                                      }));
+                                                    }}
+                                                    className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer disabled:opacity-40"
+                                                  />
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+
+                                      <button
+                                        type="submit"
+                                        className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-[0.98] cursor-pointer"
+                                      >
+                                        Save role permissions
+                                      </button>
+                                    </form>
+                                  </div>
+
+                                  <div className="space-y-3">
+                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                                      Configured roles ({isFetchingRoles ? "…" : rolesList.length})
+                                    </h4>
+                                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden bg-white max-h-[480px] overflow-y-auto">
+                                      {isFetchingRoles ? (
+                                        <div className="p-8 text-center text-xs text-slate-400">Loading roles…</div>
+                                      ) : rolesList.length === 0 ? (
+                                        <div className="p-8 text-center text-xs text-slate-400">No custom roles defined.</div>
+                                      ) : (
+                                        rolesList.map((role) => (
+                                          <div key={role.name} className="p-4 hover:bg-slate-50/60 space-y-2 transition text-xs group">
+                                            <div className="flex items-start justify-between gap-2">
+                                              <div className="min-w-0">
+                                                <p className="font-extrabold text-slate-800 flex items-center gap-1.5">
+                                                  <Shield size={12} className="text-[#ff791a] shrink-0" />
+                                                  {role.name}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">{role.description || "No description"}</p>
+                                              </div>
+                                              <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition shrink-0">
                                                 <button
                                                   type="button"
                                                   onClick={() => {
@@ -1280,43 +1400,45 @@ export default function ModuleContent() {
                                                     setRolePermsInput(role.permissions || createEmptyRolePermissions());
                                                     triggerSuccess(`Loaded security mappings for "${role.name}" into editor.`);
                                                   }}
-                                                  className="text-slate-500 hover:text-slate-800 p-1 transition cursor-pointer text-xs"
-                                                  title="Edit security mappings"
+                                                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
+                                                  title="Edit role"
                                                 >
-                                                  ✏️
+                                                  <Edit2 size={13} />
                                                 </button>
                                                 <button
                                                   type="button"
                                                   onClick={() => handleDeleteRole(role.name)}
-                                                  className="text-rose-600 hover:text-rose-800 p-1 transition cursor-pointer text-xs"
-                                                  title="Delete custom role"
+                                                  className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                                  title="Delete role"
                                                 >
-                                                  🗑️
+                                                  <Trash2 size={13} />
                                                 </button>
                                               </div>
-                                           </div>
-                                       
-                                           {/* Quick permissions badges */}
-                                           <div className="flex flex-wrap gap-1 mt-1">
-                                             {Object.entries(role.permissions || {}).map(([mod, perm]: any) => {
-                                               if (!perm.view) return null;
-                                               const label =
-                                                 ROLE_PERMISSION_MODULE_ROWS.find((row) => row.key === mod)?.name ?? mod;
-                                               return (
-                                                 <span key={mod} className={`text-[9px] px-1.5 py-0.5 rounded font-bold capitalize ${perm.edit ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                   {label}: {perm.edit ? "Edit" : "View"}
-                                                 </span>
-                                               );
-                                             })}
-                                           </div>
-                                         </div>
-                                       ))
-                                     )}
-                                   </div>
-                                 </div>
-                               </div>
-                             </div>
-                           </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1">
+                                              {Object.entries(role.permissions || {}).map(([mod, perm]: any) => {
+                                                if (!perm.view) return null;
+                                                const label =
+                                                  ROLE_PERMISSION_MODULE_ROWS.find((row) => row.key === mod)?.name ?? mod;
+                                                return (
+                                                  <span
+                                                    key={mod}
+                                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${perm.edit ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-600"}`}
+                                                  >
+                                                    {label}: {perm.edit ? "Edit" : "View"}
+                                                  </span>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                          ) : activeSidebarTab === "Audit Logs" ? (
                             /* --- ENTERPRISE SECURITY AUDIT TRAIL & EVENT LOGS --- */
                             <div className="max-w-7xl mx-auto space-y-6 animate-fade-in text-left" id="audit-trail-viewport">
@@ -5088,126 +5210,387 @@ export default function ModuleContent() {
                                 </>
                               )}
                             </div>
-                          ) : activeSidebarTab === "Expenses" || activeSidebarTab === "School Salary" ? (
+                          ) : isSchoolWorkTab(activeSidebarTab) ? (
                             <>
-                              {activeSidebarTab === "Expenses" && (
-                                <>
-                                  <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-                                      <div>
-                                        <span className="text-slate-400 text-xs font-bold block">Total Schools</span>
-                                        <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                          {isSchoolLoading ? "..." : `${schoolDashboardStats.totalCount}`}
-                                        </span>
-                                      </div>
-                                      <div className="bg-orange-50 p-3 rounded-xl text-[#ff791a] shrink-0">
-                                        <School size={20} />
-                                      </div>
+                              {activeSidebarTab === "Schools" && (
+                                <section className="flex-1 flex flex-col min-h-[400px] bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+                                  <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                    <div>
+                                      <h2 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                                        <School className="text-[#ff791a]" size={18} />
+                                        {isSchoolBulkEditMode ? "Bulk Edit Schools" : "Schools"}
+                                      </h2>
+                                      <p className="text-xs text-slate-400 mt-0.5">
+                                        {isSchoolLoading
+                                          ? "Loading..."
+                                          : `${schoolDashboardStats.totalCount} schools · ${schoolDashboardStats.totalToilets} toilets · ₹${schoolDashboardStats.totalPartnerPay.toLocaleString("en-IN")} partner pay/mo`}
+                                      </p>
                                     </div>
-                                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-                                      <div>
-                                        <span className="text-slate-400 text-xs font-bold block">Total Toilets</span>
-                                        <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                          {isSchoolLoading ? "..." : schoolDashboardStats.totalToilets}
-                                        </span>
+                                    {!isSchoolBulkEditMode && !!userPermissions.schoolWork?.edit && (
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => setIsSchoolImporterOpen((open) => !open)}
+                                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer"
+                                        >
+                                          <DownloadCloud size={14} />
+                                          {isSchoolImporterOpen ? "Hide Import" : "Import"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            if (Object.keys(schoolBulkEditDrafts).length > 0) {
+                                              const confirmed = await confirmAction({
+                                                title: "Exit bulk edit",
+                                                message: "Exit bulk edit? Unsaved changes are kept until you discard them.",
+                                                confirmLabel: "Exit",
+                                                variant: "warning",
+                                              });
+                                              if (!confirmed) return;
+                                            }
+                                            setIsSchoolBulkEditMode(true);
+                                          }}
+                                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition cursor-pointer"
+                                        >
+                                          Bulk Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={openAddSchoolForm}
+                                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white text-xs font-bold rounded-lg transition cursor-pointer"
+                                        >
+                                          <Plus size={14} />
+                                          Add School
+                                        </button>
                                       </div>
-                                    </div>
-                                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-                                      <div>
-                                        <span className="text-slate-400 text-xs font-bold block">Total Rates</span>
-                                        <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                          {isSchoolLoading ? "..." : `₹${schoolDashboardStats.totalRates.toLocaleString("en-IN")}`}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-                                      <div>
-                                        <span className="text-slate-400 text-xs font-bold block">Districts</span>
-                                        <span className="text-2xl font-black text-slate-850 mt-1 inline-block">
-                                          {isSchoolLoading ? "..." : schoolDashboardStats.uniqueDistricts}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </section>
+                                    )}
+                                    {isSchoolBulkEditMode && !!userPermissions.schoolWork?.edit && (
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          if (Object.keys(schoolBulkEditDrafts).length > 0) {
+                                            const confirmed = await confirmAction({
+                                              title: "Exit bulk edit",
+                                              message: "Exit bulk edit? Unsaved changes are kept until you discard them.",
+                                              confirmLabel: "Exit",
+                                              variant: "warning",
+                                            });
+                                            if (!confirmed) return;
+                                          }
+                                          setIsSchoolBulkEditMode(false);
+                                        }}
+                                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold rounded-lg border border-amber-300 transition cursor-pointer"
+                                      >
+                                        Exit Bulk Edit
+                                      </button>
+                                    )}
+                                  </div>
 
-                                  {!!userPermissions.schoolWork?.edit && (
-                                    <section className="animate-fade-in">
+                                  {isSchoolImporterOpen && !!userPermissions.schoolWork?.edit && !isSchoolBulkEditMode && (
+                                    <div className="mb-4">
                                       <SchoolWorkImporter
-                                        onImportSuccess={handleBulkSchoolImport}
+                                        onImportSuccess={(schools) => {
+                                          handleBulkSchoolImport(schools);
+                                          setIsSchoolImporterOpen(false);
+                                        }}
                                         existingUdiseCodes={existingSchoolUdiseCodes}
                                       />
-                                    </section>
+                                    </div>
                                   )}
 
-                                  <BlockMonthlyExpensePanel
-                                    schools={rawSchoolWorks}
-                                    monthKey={selectedMonth}
-                                    monthsList={MONTHS_LIST}
-                                    onMonthChange={(m) => setSelectedMonth(normalizeMonthKey(m))}
-                                    onDistribute={handleDistributeBlockExpense}
-                                    readOnly={!userPermissions.schoolWork?.edit}
-                                  />
-
-                                  <section className="flex-1 flex flex-col min-h-[400px] bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
-                                    <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                                      <div>
-                                        <h2 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-                                          <FileSpreadsheet className="text-slate-500" size={18} />
-                                          School Work Master Registry
-                                        </h2>
-                                        <p className="text-xs text-slate-400 mt-0.5">
-                                          Manage school toilet work records — school name, UDISE, headmaster, bank details, rates, block & district
-                                        </p>
-                                      </div>
-                                    </div>
-                                    {isSchoolLoading ? (
-                                      <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-400 font-medium">
-                                        <div className="relative w-10 h-10 mb-3 animate-spin">
-                                          <div className="absolute inset-0 rounded-full border-4 border-slate-200"></div>
-                                          <div className="absolute inset-0 rounded-full border-4 border-[#ff791a] border-t-transparent"></div>
-                                        </div>
-                                        Loading school work directory...
-                                      </div>
-                                    ) : (
-                                      <SchoolWorkTable
-                                        schools={rawSchoolWorks}
-                                        selectedIds={selectedSchoolIds}
-                                        onSelectionChange={setSelectedSchoolIds}
-                                        onEditClick={(school) => {
-                                          setCurrentSchool(school);
-                                          setIsSchoolFormOpen(true);
-                                        }}
-                                        onDeleteClick={handleDeleteSchoolWork}
-                                        onBulkDelete={handleBulkDeleteSchools}
-                                        onExportSelected={handleExportSchoolsSelected}
-                                        readOnly={!userPermissions.schoolWork?.edit}
-                                      />
-                                    )}
-                                  </section>
-                                </>
-                              )}
-
-                              {activeSidebarTab === "School Salary" && (
-                                <section className="flex-1 flex flex-col min-h-[400px] bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
                                   {isSchoolLoading ? (
                                     <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-400 font-medium">
                                       <div className="relative w-10 h-10 mb-3 animate-spin">
                                         <div className="absolute inset-0 rounded-full border-4 border-slate-200"></div>
                                         <div className="absolute inset-0 rounded-full border-4 border-[#ff791a] border-t-transparent"></div>
                                       </div>
-                                      Loading school salary sheet...
+                                      Loading school directory...
                                     </div>
                                   ) : (
-                                    <SchoolExpensesSalaryTab
+                                    <SchoolWorkTable
                                       schools={rawSchoolWorks}
-                                      selectedMonth={selectedMonth}
-                                      monthsList={MONTHS_LIST}
-                                      onMonthChange={(m) => setSelectedMonth(normalizeMonthKey(m))}
-                                      onExportCsv={(rows) => handleExportSchoolExpenseSalary("csv", rows)}
-                                      onExportExcel={(rows) => handleExportSchoolExpenseSalary("excel", rows)}
+                                      districts={schoolDistricts}
+                                      blocks={schoolBlocks}
+                                      supervisors={rawSchoolSupervisors}
+                                      selectedIds={selectedSchoolIds}
+                                      onSelectionChange={setSelectedSchoolIds}
+                                      onEditClick={(school) => {
+                                        setCurrentSchool(school);
+                                        setIsSchoolFormOpen(true);
+                                      }}
+                                      onDeleteClick={handleDeleteSchoolWork}
+                                      onBulkDelete={handleBulkDeleteSchools}
+                                      onExportSelected={handleExportSchoolsSelected}
+                                      readOnly={!userPermissions.schoolWork?.edit}
+                                      bulkEditMode={isSchoolBulkEditMode}
+                                      draftChanges={schoolBulkEditDrafts}
+                                      onDraftChange={handleSchoolBulkEditDraftChange}
+                                      onDraftChangeMany={handleSchoolBulkEditDraftChangeMany}
+                                      onDiscardBulkEdit={handleDiscardSchoolBulkEditDrafts}
+                                      onApplyBulkEdit={handleApplySchoolBulkEdit}
+                                      isApplyingBulkEdit={isSubmittingSchoolBulkEdit}
                                     />
                                   )}
                                 </section>
+                              )}
+
+                              {activeSidebarTab === "Monthly Billing" && (
+                                <MonthlyInvoiceTab
+                                  schools={rawSchoolWorks}
+                                  partners={rawSchoolPartners}
+                                  districts={schoolDistricts}
+                                  blocks={schoolBlocks}
+                                  billings={rawSchoolBillings}
+                                  selectedMonth={selectedMonth}
+                                  monthsList={MONTHS_LIST}
+                                  onMonthChange={(month) => setSelectedMonth(normalizeMonthKey(month))}
+                                  onGenerate={handleGenerateSchoolBilling}
+                                  onSaveWorkdays={handleSaveSchoolWorkdays}
+                                  onSavePayUpdates={handleSavePartnerPayUpdates}
+                                  onSavePartnerDetails={handleSavePartnerPayDetails}
+                                  onSavePaymentStatus={handleSavePartnerPaymentStatus}
+                                  onRefreshBillings={fetchSchoolBillings}
+                                  onExportAxisBulkPay={handleExportSchoolAxisBulkPay}
+                                  isExportingBulkPay={isExportingSchoolBulkPay}
+                                  lastSavedBulkPay={lastSavedSchoolBulkPay}
+                                  onViewSavedBulkPay={() => setActiveSidebarTab("Saved School Bulk Pay")}
+                                  readOnly={!userPermissions.schoolWork?.edit}
+                                />
+                              )}
+
+                              {activeSidebarTab === "Expenses" && (
+                                <SchoolExpensesPanel
+                                  schools={rawSchoolWorks}
+                                  districts={schoolDistricts}
+                                  blocks={schoolBlocks}
+                                  monthsList={MONTHS_LIST}
+                                  monthKey={selectedMonth}
+                                  onMonthChange={(month) => setSelectedMonth(normalizeMonthKey(month))}
+                                  onAddExpense={handleAddExpenseRecord}
+                                  onDeleteExpense={handleDeleteExpenseRecord}
+                                  readOnly={!userPermissions.schoolWork?.edit}
+                                />
+                              )}
+
+                              {activeSidebarTab === "Field Team" && (
+                                <FieldTeamPanel
+                                  visits={rawSchoolVisits}
+                                  requests={rawSupervisorRequests}
+                                  commitments={rawCommitmentDiary}
+                                  supervisors={rawSchoolSupervisors}
+                                  schools={rawSchoolWorks}
+                                  onAddSupervisor={openAddSupervisorForm}
+                                  onEditSupervisor={(supervisor) => {
+                                    setCurrentSupervisor(supervisor);
+                                    setIsSupervisorFormOpen(true);
+                                  }}
+                                  onDeleteSupervisor={handleDeleteSchoolSupervisor}
+                                  onUpdateVisitStatus={handleUpdateVisitStatus}
+                                  onRespondToRequest={handleRespondSupervisorRequest}
+                                  onCloseRequest={handleCloseSupervisorRequest}
+                                  onResolveEscalation={handleResolveSupervisorEscalation}
+                                  onUpdateCommitment={handleUpdateCommitmentDiary}
+                                  pendingRequestCount={pendingSupervisorRequestCount}
+                                  readOnly={!userPermissions.schoolWork?.edit}
+                                  isSuperAdmin={
+                                    String(sessionUser || "").toLowerCase() === "admin" ||
+                                    String(sessionRole || "").toLowerCase() === "admin"
+                                  }
+                                  view={fieldTeamView}
+                                  onViewChange={setFieldTeamView}
+                                />
+                              )}
+
+                              {activeSidebarTab === "Saved School Bulk Pay" && (
+                                <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="saved-school-bulk-pay-module-view">
+                                  <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                                      <div>
+                                        <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                                          <Archive size={20} className="text-[#ff791a]" /> Saved School Bulk Pay Files
+                                        </h3>
+                                        <p className="text-xs text-slate-400 mt-1">
+                                          Axis Bank bulk pay files for partner payments — includes bank upload rows plus the full partner payment sheet for preview and re-download.
+                                        </p>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                        {schoolBulkPayArchiveYears.length > 0 && (
+                                          <select
+                                            id="school-bulk-pay-year-filter"
+                                            value={schoolBulkPayArchiveYearFilter}
+                                            onChange={(e) => {
+                                              const value = e.target.value;
+                                              setSchoolBulkPayArchiveYearFilter(value);
+                                              fetchSchoolBulkPayArchives(value);
+                                            }}
+                                            className="px-3 py-1.5 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 shadow-sm focus:outline-none focus:border-[#ff791a] transition"
+                                          >
+                                            <option value="">All Years</option>
+                                            {schoolBulkPayArchiveYears.map((y) => (
+                                              <option key={y} value={y}>{y}</option>
+                                            ))}
+                                          </select>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => fetchSchoolBulkPayArchives()}
+                                          className="px-3.5 py-1.5 bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
+                                        >
+                                          <RotateCw size={13} /> Refresh
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {lastSavedSchoolBulkPay && highlightedSchoolBulkPayId === lastSavedSchoolBulkPay.id && (
+                                      <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div>
+                                          <p className="text-xs font-black text-orange-800 uppercase tracking-wider flex items-center gap-1.5">
+                                            <CheckCircle2 size={14} /> Just Saved
+                                          </p>
+                                          <p className="text-[11px] text-orange-700 mt-1 font-mono truncate" title={lastSavedSchoolBulkPay.filename}>
+                                            {lastSavedSchoolBulkPay.filename}
+                                          </p>
+                                          <p className="text-[10px] text-orange-500 mt-0.5">
+                                            {lastSavedSchoolBulkPay.month} {lastSavedSchoolBulkPay.year} · {lastSavedSchoolBulkPay.recordCount} records · ₹{Number(lastSavedSchoolBulkPay.totalAmount || 0).toLocaleString("en-IN")}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleViewSchoolBulkPayArchive(lastSavedSchoolBulkPay.id, lastSavedSchoolBulkPay.filename)}
+                                            className="px-3 py-1.5 bg-white hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Eye size={11} /> View Excel
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDownloadSchoolBulkPayArchive(lastSavedSchoolBulkPay.id, lastSavedSchoolBulkPay.filename)}
+                                            className="px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
+                                          >
+                                            <Download size={11} />
+                                            Re-download
+                                            <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-black leading-none">
+                                              {lastSavedSchoolBulkPay.downloadCount ?? 0}
+                                            </span>
+                                          </button>
+                                          {userPermissions.schoolWork?.edit && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteSchoolBulkPayArchive(lastSavedSchoolBulkPay.id)}
+                                              className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                                            >
+                                              Delete
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {isFetchingSchoolBulkPayArchives ? (
+                                      <p className="text-sm text-slate-500">Loading saved files...</p>
+                                    ) : filteredSchoolBulkPayArchives.length === 0 ? (
+                                      <div className="text-center py-12 space-y-2">
+                                        <Archive size={32} className="mx-auto text-slate-300" />
+                                        <p className="text-sm text-slate-500 font-semibold">No school bulk pay files saved yet</p>
+                                        <p className="text-xs text-slate-400">
+                                          Export bulk pay from Monthly Billing → Partner Pay to automatically archive the Excel sheet here.
+                                        </p>
+                                        <button
+                                          type="button"
+                                          onClick={() => setActiveSidebarTab("Monthly Billing")}
+                                          className="mt-2 px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg cursor-pointer transition"
+                                        >
+                                          Go to Monthly Billing
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs">
+                                          <thead>
+                                            <tr className="text-slate-500 uppercase tracking-wide border-b border-slate-200">
+                                              <th className="py-2.5 pr-4 font-bold">Saved On</th>
+                                              <th className="py-2.5 pr-4 font-bold">Month</th>
+                                              <th className="py-2.5 pr-4 font-bold">Year</th>
+                                              <th className="py-2.5 pr-4 font-bold">Filename</th>
+                                              <th className="py-2.5 pr-4 font-bold">Records</th>
+                                              <th className="py-2.5 pr-4 font-bold">Total Amount</th>
+                                              <th className="py-2.5 pr-4 font-bold">Exported By</th>
+                                              <th className="py-2.5 font-bold">Actions</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {filteredSchoolBulkPayArchives.map((item: any) => {
+                                              const displayMonth = item.year
+                                                ? item.month
+                                                : parseMonthYear(item.month).month;
+                                              const displayYear = item.year || parseMonthYear(item.month).year;
+                                              const isHighlighted = highlightedSchoolBulkPayId === item.id;
+                                              return (
+                                                <tr
+                                                  key={item.id}
+                                                  className={`border-b border-slate-50 hover:bg-slate-50/70 ${isHighlighted ? "bg-orange-50 ring-1 ring-inset ring-orange-200" : ""}`}
+                                                >
+                                                  <td className="py-2.5 pr-4 whitespace-nowrap text-slate-600">
+                                                    {item.createdAt ? new Date(item.createdAt).toLocaleString() : "—"}
+                                                  </td>
+                                                  <td className="py-2.5 pr-4 font-semibold text-slate-700">{displayMonth || "—"}</td>
+                                                  <td className="py-2.5 pr-4 font-semibold text-slate-700">{displayYear || "—"}</td>
+                                                  <td className="py-2.5 pr-4 max-w-[260px]" title={item.filename}>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleViewSchoolBulkPayArchive(item.id, item.filename)}
+                                                      className="flex items-center gap-1.5 min-w-0 text-left hover:text-[#ff791a] cursor-pointer group"
+                                                      title="Click to preview Excel in browser"
+                                                    >
+                                                      <FileSpreadsheet size={14} className="text-emerald-600 shrink-0 group-hover:text-[#ff791a]" />
+                                                      <span className="truncate font-mono text-[11px] text-slate-700 underline-offset-2 group-hover:underline">{item.filename}</span>
+                                                    </button>
+                                                  </td>
+                                                  <td className="py-2.5 pr-4">{item.recordCount ?? 0}</td>
+                                                  <td className="py-2.5 pr-4 font-mono">
+                                                    ₹{Number(item.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                  </td>
+                                                  <td className="py-2.5 pr-4">{item.username || "—"}</td>
+                                                  <td className="py-2.5 whitespace-nowrap">
+                                                    <div className="flex items-center gap-2">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleViewSchoolBulkPayArchive(item.id, item.filename)}
+                                                        className="px-2.5 py-1 bg-white hover:bg-orange-50 text-orange-700 border border-orange-200 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                                      >
+                                                        <Eye size={11} /> View
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleDownloadSchoolBulkPayArchive(item.id, item.filename)}
+                                                        className="px-2.5 py-1 bg-[#ff791a] hover:bg-[#e4640c] text-white rounded text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
+                                                      >
+                                                        <Download size={11} />
+                                                        Re-download
+                                                        <span className="min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-white/20 text-[9px] font-black leading-none">
+                                                          {item.downloadCount ?? 0}
+                                                        </span>
+                                                      </button>
+                                                      {userPermissions.schoolWork?.edit && (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleDeleteSchoolBulkPayArchive(item.id)}
+                                                          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[10px] font-bold cursor-pointer"
+                                                        >
+                                                          Delete
+                                                        </button>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               )}
                             </>
                           ) : activeSidebarTab !== "Employees" ? (

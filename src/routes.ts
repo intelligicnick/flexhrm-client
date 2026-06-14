@@ -1,3 +1,17 @@
+export const SCHOOL_WORK_TABS = [
+  "Schools",
+  "Monthly Billing",
+  "Saved School Bulk Pay",
+  "Expenses",
+  "Field Team",
+] as const;
+
+export type SchoolWorkTab = (typeof SCHOOL_WORK_TABS)[number];
+
+export function isSchoolWorkTab(tab: string): tab is SchoolWorkTab {
+  return (SCHOOL_WORK_TABS as readonly string[]).includes(tab);
+}
+
 export const TAB_TO_PATH: Record<string, string> = {
   "Employees": "/employees",
   "Admin": "/admin",
@@ -9,8 +23,11 @@ export const TAB_TO_PATH: Record<string, string> = {
   "Attendance": "/attendance",
   "Directory": "/directory",
   "Birthdays": "/birthdays",
-  "School Salary": "/school-salary",
-  "Expenses": "/school-expenses",
+  "Schools": "/schools",
+  "Monthly Billing": "/monthly-billing",
+  "Expenses": "/expenses",
+  "Field Team": "/field-team",
+  "Saved School Bulk Pay": "/saved-school-bulk-pay",
   "My Info": "/my-info",
 };
 
@@ -24,8 +41,22 @@ export function tabToPath(tab: string): string {
   return TAB_TO_PATH[tab] ?? DEFAULT_PATH;
 }
 
+const LEGACY_PATH_TO_TAB: Record<string, string> = {
+  "/all-schools": "Schools",
+  "/all-partners": "Monthly Billing",
+  "/monthly-invoice": "Monthly Billing",
+  "/monthly-partner-payments": "Monthly Billing",
+  "/all-expenses": "Expenses",
+  "/material-misc-expenses": "Expenses",
+  "/material-expenses": "Expenses",
+  "/miscellaneous-expense": "Expenses",
+  "/visits": "Field Team",
+  "/supervisors": "Field Team",
+  "/school-configuration": "Employees",
+};
+
 export function pathToTab(pathname: string): string {
-  return PATH_TO_TAB[pathname] ?? "Employees";
+  return LEGACY_PATH_TO_TAB[pathname] ?? PATH_TO_TAB[pathname] ?? "Employees";
 }
 
 export const APP_ROUTES = [
@@ -39,7 +70,10 @@ export const APP_ROUTES = [
   { path: "/attendance", tab: "Attendance" },
   { path: "/directory", tab: "Directory" },
   { path: "/birthdays", tab: "Birthdays" },
-  { path: "/school-salary", tab: "School Salary" },
-  { path: "/school-expenses", tab: "Expenses" },
+  { path: "/schools", tab: "Schools" },
+  { path: "/monthly-billing", tab: "Monthly Billing" },
+  { path: "/saved-school-bulk-pay", tab: "Saved School Bulk Pay" },
+  { path: "/expenses", tab: "Expenses" },
+  { path: "/field-team", tab: "Field Team" },
   { path: "/my-info", tab: "My Info" },
 ] as const;

@@ -18,8 +18,11 @@ export const getModuleKey = (tabName: string): string => {
     case "Audit Logs": return "admin";
     case "Employees": return "employees";
     case "School Work":
-    case "School Salary":
+    case "Schools":
+    case "Monthly Billing":
     case "Expenses":
+    case "Field Team":
+    case "Saved School Bulk Pay":
       return "schoolWork";
     case "Salary": return "salary";
     case "Saved Bulk Pay": return "salary";
@@ -55,7 +58,7 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   {
     key: "schoolWork",
     name: "School Work",
-    includes: "School roster, School Salary tab, Expenses tab, monthly expense blocks",
+    includes: "School registry, monthly billing, partner bulk pay, expenses, and field team (supervisors & visits)",
   },
   {
     key: "attendance",

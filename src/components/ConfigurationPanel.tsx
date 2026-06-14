@@ -1,5 +1,5 @@
 /**
- * HRMS Configuration panel — payroll rules, office locations, and job roles.
+ * HRMS Configuration panel — payroll rules, office locations, job roles, and school geography.
  */
 import React, { useMemo, useState } from "react";
 import {
@@ -7,6 +7,7 @@ import {
   Briefcase,
   Building,
   Check,
+  CreditCard,
   Edit2,
   IndianRupee,
   Loader2,
@@ -16,25 +17,42 @@ import {
   RotateCcw,
   Save,
   Search,
+  School,
   Shield,
+  Star,
   Trash2,
   Users,
   X,
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import PercentIcon from "./ui/PercentIcon";
+import TypeToConfirmDialog from "./ui/TypeToConfirmDialog";
+import SchoolConfigurationPanel from "./SchoolConfigurationPanel";
+import BlockedAppsConfigurationPanel from "./BlockedAppsConfigurationPanel";
 import { BASIC_SALARY_OPTIONS } from "../lib/hrms-config";
+import {
+  addBulkPayBankAccount,
+  deleteBulkPayBankAccounts,
+  loadBulkPayBankAccounts,
+  setDefaultBulkPayBankAccount,
+  updateBulkPayBankAccount,
+  validateBulkPayBankAccountInput,
+  type BulkPayBankAccount,
+} from "../lib/bulk-pay-bank-accounts";
 import {
   DEFAULT_LOCATION_PT_AMOUNT,
   resolveLocationPtAmount,
 } from "../utils";
 
-type ConfigSection = "payroll" | "locations" | "roles";
+type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "blockedApps";
 
 const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType }[] = [
   { id: "payroll", label: "Payroll Rules", icon: IndianRupee },
+  { id: "bankAccounts", label: "Bank Accounts", icon: CreditCard },
   { id: "locations", label: "Office Locations", icon: Map },
   { id: "roles", label: "Job Roles", icon: Briefcase },
+  { id: "schoolGeography", label: "District & Blocks", icon: School },
+  { id: "blockedApps", label: "Blocked Apps", icon: Shield },
 ];
 
 function StatCard({
@@ -124,11 +142,29 @@ export default function ConfigurationPanel() {
     updateLocationPtAmount,
     handleSavePayrollConfig,
     handleResetPayrollConfig,
+    schoolDistricts,
+    schoolBlocks,
+    isSchoolGeographyLoading,
+    handleAddSchoolBlock,
+    handleUpdateSchoolBlock,
+    handleDeleteSchoolBlocks,
+    handleAddSchoolDistrict,
+    handleUpdateSchoolDistrict,
+    handleDeleteSchoolDistricts,
+    userPermissions,
   } = useHRMS();
 
   const [activeSection, setActiveSection] = useState<ConfigSection>("payroll");
   const [locSearch, setLocSearch] = useState("");
   const [roleSearch, setRoleSearch] = useState("");
+  const [bankAccounts, setBankAccounts] = useState<BulkPayBankAccount[]>(() => loadBulkPayBankAccounts());
+  const [newBankLabelInput, setNewBankLabelInput] = useState("");
+  const [newBankAccountInput, setNewBankAccountInput] = useState("");
+  const [bankAccountError, setBankAccountError] = useState<string | null>(null);
+  const [editingBankId, setEditingBankId] = useState<string | null>(null);
+  const [editingBankLabel, setEditingBankLabel] = useState("");
+  const [editingBankAccountNo, setEditingBankAccountNo] = useState("");
+  const [bankAccountToDelete, setBankAccountToDelete] = useState<BulkPayBankAccount | null>(null);
 
   const filteredLocations = useMemo(() => {
     const q = locSearch.trim().toLowerCase();
@@ -159,6 +195,255 @@ export default function ConfigurationPanel() {
     const val = newRoleNameInput.trim();
     if (!val) return;
     handleAddRoleFromConfig(val);
+  };
+
+  const addBankAccount = () => {
+    const validationError = validateBulkPayBankAccountInput(newBankLabelInput, newBankAccountInput);
+    if (validationError) {
+      setBankAccountError(validationError);
+      return;
+    }
+
+    const updated = addBulkPayBankAccount(newBankLabelInput, newBankAccountInput);
+    if (updated.length === bankAccounts.length) {
+      setBankAccountError("This account number is already registered.");
+      return;
+    }
+
+    setBankAccounts(updated);
+    setNewBankLabelInput("");
+    setNewBankAccountInput("");
+    setBankAccountError(null);
+  };
+
+  const saveBankAccountEdit = (id: string) => {
+    const validationError = validateBulkPayBankAccountInput(editingBankLabel, editingBankAccountNo);
+    if (validationError) {
+      setBankAccountError(validationError);
+      return;
+    }
+
+    const updated = updateBulkPayBankAccount(id, {
+      label: editingBankLabel,
+      accountNo: editingBankAccountNo,
+    });
+    const current = bankAccounts.find((account) => account.id === id);
+    const next = updated.find((account) => account.id === id);
+    if (
+      current &&
+      next &&
+      current.label === next.label &&
+      current.accountNo === next.accountNo
+    ) {
+      setBankAccountError("This account number is already registered.");
+      return;
+    }
+
+    setBankAccounts(updated);
+    setEditingBankId(null);
+    setEditingBankLabel("");
+    setEditingBankAccountNo("");
+    setBankAccountError(null);
+  };
+
+  const renderBankAccountsSection = () => {
+    const defaultAccount = bankAccounts.find((account) => account.isDefault) || bankAccounts[0] || null;
+
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2.5 text-xs text-violet-900">
+          <p>
+            Add company debit accounts used for Axis Bank bulk pay exports. The account marked{" "}
+            <span className="font-bold">Default</span> is used automatically for salary bulk pay and school partner bulk pay.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+          <h4 className="text-sm font-bold text-slate-800">Add debit account</h4>
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+            <input
+              id="new-bank-label-input"
+              name="newBankLabelInput"
+              type="text"
+              placeholder="Account label (e.g. Axis Main)"
+              value={newBankLabelInput}
+              onChange={(e) => {
+                setBankAccountError(null);
+                setNewBankLabelInput(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addBankAccount();
+                }
+              }}
+              className="w-full px-3 py-2 border border-slate-200 bg-white text-sm text-slate-800 rounded-lg placeholder-slate-400 focus:outline-none focus:border-violet-500"
+            />
+            <input
+              id="new-bank-account-input"
+              name="newBankAccountInput"
+              type="text"
+              inputMode="numeric"
+              placeholder="Debit account number"
+              value={newBankAccountInput}
+              onChange={(e) => {
+                setBankAccountError(null);
+                setNewBankAccountInput(e.target.value.replace(/\D/g, ""));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addBankAccount();
+                }
+              }}
+              className="w-full px-3 py-2 border border-slate-200 bg-white text-sm font-mono text-slate-800 rounded-lg placeholder-slate-400 focus:outline-none focus:border-violet-500"
+            />
+            <button
+              type="button"
+              onClick={addBankAccount}
+              disabled={!newBankAccountInput.trim()}
+              className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center justify-center gap-1.5 cursor-pointer transition whitespace-nowrap"
+            >
+              <Plus size={14} /> Add Account
+            </button>
+          </div>
+          {bankAccountError && (
+            <p className="text-xs text-rose-600 font-semibold" role="alert">
+              {bankAccountError}
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="bg-slate-50 px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+              {bankAccounts.length} account{bankAccounts.length !== 1 ? "s" : ""}
+            </span>
+            {defaultAccount && (
+              <span className="text-[10px] font-bold text-violet-700 bg-violet-100 border border-violet-200 px-2 py-0.5 rounded-full">
+                Default: {defaultAccount.label}
+              </span>
+            )}
+          </div>
+          <div className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
+            {bankAccounts.length === 0 ? (
+              <RegistryEmptyState message="No debit accounts added yet. Add one to enable bulk pay exports." />
+            ) : (
+              bankAccounts.map((account) => {
+                const isEditing = editingBankId === account.id;
+
+                return (
+                  <div
+                    key={account.id}
+                    className={`px-3 py-3 transition ${account.isDefault ? "bg-violet-50/50" : "hover:bg-slate-50/70"}`}
+                  >
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            id={`edit-bank-label-${account.id}`}
+                            name={`editBankLabel_${account.id}`}
+                            type="text"
+                            value={editingBankLabel}
+                            onChange={(e) => setEditingBankLabel(e.target.value)}
+                            className="w-full px-2.5 py-1.5 border border-blue-300 bg-blue-50/30 text-slate-800 font-medium text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            autoFocus
+                          />
+                          <input
+                            id={`edit-bank-account-${account.id}`}
+                            name={`editBankAccount_${account.id}`}
+                            type="text"
+                            inputMode="numeric"
+                            value={editingBankAccountNo}
+                            onChange={(e) => setEditingBankAccountNo(e.target.value.replace(/\D/g, ""))}
+                            className="w-full px-2.5 py-1.5 border border-blue-300 bg-blue-50/30 text-slate-800 font-mono text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!editingBankAccountNo.trim()}
+                            onClick={() => saveBankAccountEdit(account.id)}
+                            className="p-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg transition cursor-pointer"
+                            title="Save"
+                          >
+                            <Check size={12} className="stroke-[3]" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingBankId(null);
+                              setBankAccountError(null);
+                            }}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg border border-slate-200 transition cursor-pointer"
+                            title="Cancel"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2 min-w-0">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-slate-800 leading-snug truncate" title={account.label}>
+                              {account.label}
+                            </p>
+                            {account.isDefault && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">
+                                <Star size={10} className="fill-violet-600 text-violet-600" />
+                                Default for bulk pay
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs font-mono text-slate-600 mt-0.5">{account.accountNo}</p>
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          {!account.isDefault && (
+                            <button
+                              type="button"
+                              onClick={() => setBankAccounts(setDefaultBulkPayBankAccount(account.id))}
+                              className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-violet-700 hover:bg-violet-100 rounded-lg transition cursor-pointer"
+                              title="Set as default for bulk pay"
+                            >
+                              Set default
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingBankId(account.id);
+                              setEditingBankLabel(account.label);
+                              setEditingBankAccountNo(account.accountNo);
+                              setBankAccountError(null);
+                            }}
+                            className="p-1.5 hover:bg-slate-100 text-slate-500 hover:text-slate-800 rounded-lg transition cursor-pointer"
+                            title={`Edit "${account.label}"`}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBankAccountToDelete(account)}
+                            className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition cursor-pointer"
+                            title={`Delete "${account.label}"`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400">
+          Bulk pay exports for employee salary and school partner payments use the default debit account automatically.
+        </p>
+      </div>
+    );
   };
 
   const renderPayrollSection = () => (
@@ -812,7 +1097,7 @@ export default function ConfigurationPanel() {
           <div>
             <h3 className="text-base font-extrabold text-slate-800 tracking-tight">System Configuration</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-              Manage payroll rules, office locations, and job roles. Location and role changes sync immediately; payroll rules require an explicit save.
+              Manage payroll rules, bulk pay debit accounts, office locations, job roles, districts/blocks, and supervisor blocked apps. Location, role, bank account, school geography, and blocked app changes sync immediately; payroll rules require an explicit save.
             </p>
           </div>
           {configHasUnsavedChanges && activeSection !== "payroll" && (
@@ -822,10 +1107,12 @@ export default function ConfigurationPanel() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-4">
           <StatCard label="Employees" value={configSummary.totalEmployees} accent="slate" />
           <StatCard label="Locations" value={customLocations.length} hint={`${Object.keys(configSummary.locationCounts).length} in use`} accent="blue" />
           <StatCard label="Job Roles" value={customRoles.length} hint={`${Object.keys(configSummary.roleCounts).length} in use`} accent="orange" />
+          <StatCard label="Bank Accounts" value={bankAccounts.length} hint={bankAccounts.some((a) => a.isDefault) ? "Default set" : "No default"} accent="slate" />
+          <StatCard label="Blocks" value={schoolBlocks.length} hint={`${schoolDistricts.length} districts`} accent="slate" />
           <StatCard
             label="ESIC Covered"
             value={configSummary.esicCoveredCount}
@@ -846,13 +1133,14 @@ export default function ConfigurationPanel() {
                 type="button"
                 onClick={() => setActiveSection(id)}
                 className={[
-                  "relative flex items-center gap-2 px-3 py-2.5 rounded-lg text-left text-xs font-bold whitespace-nowrap transition cursor-pointer",
+                  "relative flex items-center gap-2 px-3 py-2.5 rounded-lg text-left text-xs font-bold transition cursor-pointer",
+                  "whitespace-nowrap lg:whitespace-normal lg:w-full lg:items-start lg:leading-snug",
                   isActive
                     ? "bg-white text-[#ff791a] shadow-sm border border-slate-200"
                     : "text-slate-600 hover:bg-white/70 hover:text-slate-800",
                 ].join(" ")}
               >
-                <Icon size={14} className="shrink-0" />
+                <Icon size={14} className="shrink-0 lg:mt-0.5" />
                 {label}
                 {showDot && <span className="ml-auto w-2 h-2 rounded-full bg-amber-500" title="Unsaved changes" />}
               </button>
@@ -862,10 +1150,46 @@ export default function ConfigurationPanel() {
 
         <div className="flex-1 p-4 lg:p-5 min-w-0">
           {activeSection === "payroll" && renderPayrollSection()}
+          {activeSection === "bankAccounts" && renderBankAccountsSection()}
           {activeSection === "locations" && renderLocationsSection()}
           {activeSection === "roles" && renderRolesSection()}
+          {activeSection === "schoolGeography" && (
+            <SchoolConfigurationPanel
+              districts={schoolDistricts}
+              blocks={schoolBlocks}
+              isLoading={isSchoolGeographyLoading}
+              readOnly={!userPermissions.schoolWork?.edit}
+              onAddDistrict={handleAddSchoolDistrict}
+              onUpdateDistrict={handleUpdateSchoolDistrict}
+              onDeleteDistricts={handleDeleteSchoolDistricts}
+              onAddBlock={handleAddSchoolBlock}
+              onUpdateBlock={handleUpdateSchoolBlock}
+              onDeleteBlocks={handleDeleteSchoolBlocks}
+            />
+          )}
+          {activeSection === "blockedApps" && (
+            <BlockedAppsConfigurationPanel readOnly={!userPermissions.schoolWork?.edit} />
+          )}
         </div>
       </div>
+
+      <TypeToConfirmDialog
+        open={!!bankAccountToDelete}
+        title="Delete bank account"
+        message={
+          bankAccountToDelete
+            ? `This will permanently remove "${bankAccountToDelete.label}" (${bankAccountToDelete.accountNo}). Bulk pay exports will use another default account if one is set.`
+            : ""
+        }
+        requiredConfirmText="DELETE"
+        confirmLabel="Delete account"
+        onConfirm={() => {
+          if (!bankAccountToDelete) return;
+          setBankAccounts(deleteBulkPayBankAccounts([bankAccountToDelete.id]));
+          setBankAccountToDelete(null);
+        }}
+        onCancel={() => setBankAccountToDelete(null)}
+      />
     </div>
   );
 }

@@ -16,7 +16,35 @@ function resolveFetchUrl(input: RequestInfo | URL): string {
 }
 
 function isPublicAuthUrl(urlStr: string): boolean {
-  return urlStr.includes("/api/auth/login") || urlStr.includes("/api/auth/quick-login");
+  return (
+    urlStr.includes("/api/auth/login") ||
+    urlStr.includes("/api/auth/quick-login") ||
+    urlStr.includes("/api/auth/supervisor/login") ||
+    urlStr.includes("/api/auth/supervisor/portal-policy") ||
+    urlStr.includes("/api/auth/supervisor/register-device")
+  );
+}
+
+function isNetworkFetchError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("networkerror") ||
+    msg.includes("network request failed") ||
+    msg.includes("load failed")
+  );
+}
+
+export function formatNetworkFetchError(err: unknown, fallback?: string): Error {
+  if (isNetworkFetchError(err)) {
+    return new Error(
+      fallback ||
+        "Cannot reach the API server. Ensure the NestJS backend is running (port 3001) and reload this page.",
+    );
+  }
+  if (err instanceof Error) return err;
+  return new Error(fallback || "Request failed.");
 }
 
 function isPublicIdCardUrl(urlStr: string): boolean {
@@ -65,7 +93,13 @@ export function setupFetchInterceptor(): void {
       resolvedInit = appendAuthHeader(init, token);
     }
 
-    const response = await originalFetch(resolvedInput, resolvedInit);
+    let response: Response;
+    try {
+      response = await originalFetch(resolvedInput, resolvedInit);
+    } catch (err) {
+      if (isApiCall) throw formatNetworkFetchError(err);
+      throw err;
+    }
 
     if (
       isApiCall &&

@@ -7,9 +7,22 @@ import "dotenv/config";
 import express from "express";
 import http from "http";
 import https from "https";
+import os from "os";
 import path from "path";
 import type { Request, Response } from "express";
 import { createServer as createViteServer } from "vite";
+
+function getLanAddresses(): string[] {
+  const addrs: string[] = [];
+  for (const interfaces of Object.values(os.networkInterfaces())) {
+    for (const net of interfaces ?? []) {
+      if (net.family === "IPv4" && !net.internal) {
+        addrs.push(net.address);
+      }
+    }
+  }
+  return addrs;
+}
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
@@ -69,11 +82,16 @@ async function startServer() {
     app.use("/api", createApiProxy(BACKEND_URL));
   }
 
+  const httpServer = http.createServer(app);
+
   if (isDev) {
     console.log("Starting Flex HRM frontend in development mode...");
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        hmr: { server: httpServer },
+        host: true,
+        allowedHosts: true,
         proxy: BACKEND_URL
           ? {
               "/api": {
@@ -95,13 +113,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Flex HRM UI running on port ${PORT}`);
     if (BACKEND_URL) {
       console.log(`API proxy target: ${BACKEND_URL}`);
     }
     if (isDev) {
       console.log("Browser API base: same-origin (/api proxy)");
+      console.log(`Desktop:  http://localhost:${PORT}/supervisor/login`);
+      for (const ip of getLanAddresses()) {
+        console.log(`Phone:    http://${ip}:${PORT}/supervisor/login`);
+      }
     }
   });
 }

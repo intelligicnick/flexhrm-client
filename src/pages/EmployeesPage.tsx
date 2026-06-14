@@ -62,7 +62,7 @@ import {
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EXCEL_ROW_HEADERS, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import PasswordInput from "../components/PasswordInput";
 import {
   generateCSV,
@@ -91,16 +91,6 @@ import EmployeeTable from "../components/EmployeeTable";
 import BulkEmployeeEditTable from "../components/BulkEmployeeEditTable";
 import EmployeeChangeRequestsPanel from "../components/EmployeeChangeRequestsPanel";
 import EmployeeFormModal from "../components/EmployeeFormModal";
-import SchoolWorkImporter from "../components/SchoolWorkImporter";
-import SchoolWorkTable from "../components/SchoolWorkTable";
-import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
-import BlockMonthlyExpensePanel from "../components/BlockMonthlyExpensePanel";
-import SchoolExpensesSalaryTab, {
-  buildSchoolExpenseSalaryCsv,
-  SCHOOL_EXPENSE_SALARY_HEADERS,
-  getSchoolExpenseSalaryRow,
-} from "../components/SchoolExpensesSalaryTab";
-import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -408,13 +398,6 @@ export default function EmployeesPage() {
     navigateToTab,
     toggleSidebarGroup,
     expandedSidebarGroups,
-    isSchoolFormOpen,
-    setIsSchoolFormOpen,
-    currentSchool,
-    setCurrentSchool,
-    handleSaveSchoolWork,
-    activeSchoolSubTab,
-    setActiveSchoolSubTab,
     showFlushAuditModal,
     closeFlushAuditModal,
     flushAuditPassword,
@@ -425,7 +408,6 @@ export default function EmployeesPage() {
     setBulkPayPreview,
     registryLocations,
     registeredJobRoles,
-    handleSchoolSubTabClick,
     reportLocationExportLabel,
     setNewPassword,
     openFlushAuditModal,
@@ -435,18 +417,6 @@ export default function EmployeesPage() {
     birthdayTodayLabel,
     isFetchingBirthdays,
     resolveEmployeePhone,
-    isSchoolLoading,
-    schoolDashboardStats,
-    handleBulkSchoolImport,
-    existingSchoolUdiseCodes,
-    rawSchoolWorks,
-    selectedSchoolIds,
-    setSelectedSchoolIds,
-    handleDeleteSchoolWork,
-    handleBulkDeleteSchools,
-    handleExportSchoolsSelected,
-    handleExportSchoolExpenseSalary,
-    handleDistributeBlockExpense,
     PERMISSION_MODULES,
     sidebarItems,
     filteredSidebarItems,

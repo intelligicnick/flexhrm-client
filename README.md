@@ -2,6 +2,18 @@
 
 React 19 + Vite UI. Serves on port `3000` and proxies `/api/*` to the NestJS backend.
 
+**Repository:** https://github.com/intelligicnick/flexhrm-client
+
+## Live deployment
+
+| Service | URL |
+|---------|-----|
+| **UI** | https://greenyellow-woodpecker-750354.hostingersite.com |
+| **API** | https://midnightblue-partridge-476451.hostingersite.com/api |
+| **Supervisor login** | https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login |
+
+Production URLs are defined in `src/deploy-urls.ts` and overridden via `.env.production`.
+
 ## Quick start
 
 ```bash

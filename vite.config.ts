@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 import { fileURLToPath } from 'url';
 import { DEFAULT_PRODUCTION_API_BASE } from './src/api-config';
+import { PRODUCTION_ID_CARD_VERIFY_BASE } from './src/deploy-urls';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,9 +28,6 @@ const extensionErrorGuardPlugin = {
   },
 };
 
-const DEFAULT_ID_CARD_VERIFY_BASE =
-  "https://greenyellow-woodpecker-750354.hostingersite.com/employee";
-
 function resolveProductionApiBase(env: Record<string, string>): string {
   const fromEnv =
     env.FLEXHRM_API_BASE || env.PUBLIC_API_URL || env.VITE_API_BASE || "";
@@ -40,7 +38,7 @@ function resolveProductionApiBase(env: Record<string, string>): string {
 function resolveIdCardVerifyBase(env: Record<string, string>): string {
   const fromEnv =
     env.VITE_ID_CARD_VERIFY_BASE_URL || env.ID_CARD_VERIFY_BASE_URL || "";
-  return (fromEnv || DEFAULT_ID_CARD_VERIFY_BASE).trim().replace(/\/$/, "");
+  return (fromEnv || PRODUCTION_ID_CARD_VERIFY_BASE).trim().replace(/\/$/, "");
 }
 
 export default defineConfig(({ mode }) => {
@@ -62,6 +60,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      host: true,
+      allowedHosts: true,
       proxy: backendUrl
         ? {
             '/api': {

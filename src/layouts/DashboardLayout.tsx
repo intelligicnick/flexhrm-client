@@ -89,16 +89,8 @@ import { formatAuditLogDetails } from "../utils/formatAuditLogDetails";
 import CsvImporter from "../components/CsvImporter";
 import EmployeeTable from "../components/EmployeeTable";
 import EmployeeFormModal from "../components/EmployeeFormModal";
-import SchoolWorkImporter from "../components/SchoolWorkImporter";
-import SchoolWorkTable from "../components/SchoolWorkTable";
 import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
-import BlockMonthlyExpensePanel from "../components/BlockMonthlyExpensePanel";
-import SchoolExpensesSalaryTab, {
-  buildSchoolExpenseSalaryCsv,
-  SCHOOL_EXPENSE_SALARY_HEADERS,
-  getSchoolExpenseSalaryRow,
-} from "../components/SchoolExpensesSalaryTab";
-import { getSchoolHeaderValue } from "../lib/school-work-helpers";
+import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { parseApiError } from "../api";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -119,6 +111,7 @@ import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 import { useHRMS } from "../context/HRMSContext";
 import ModuleContent from "../pages/ModuleContent";
+import NotificationsBell from "../components/NotificationsBell";
 
 export default function DashboardLayout() {
   const {
@@ -392,8 +385,14 @@ export default function DashboardLayout() {
     currentSchool,
     setCurrentSchool,
     handleSaveSchoolWork,
-    activeSchoolSubTab,
-    setActiveSchoolSubTab,
+    rawSchoolSupervisors,
+    schoolDistricts,
+    schoolBlocks,
+    isSupervisorFormOpen,
+    setIsSupervisorFormOpen,
+    currentSupervisor,
+    setCurrentSupervisor,
+    handleSaveSchoolSupervisor,
     showFlushAuditModal,
     closeFlushAuditModal,
     flushAuditPassword,
@@ -402,9 +401,11 @@ export default function DashboardLayout() {
     isFlushingAuditLogs,
     bulkPayPreview,
     setBulkPayPreview,
+    schoolBulkPayPreview,
+    setSchoolBulkPayPreview,
+    handleDownloadSchoolBulkPayArchive,
     registryLocations,
     registeredJobRoles,
-    handleSchoolSubTabClick,
     reportLocationExportLabel,
     setNewPassword,
     openFlushAuditModal,
@@ -424,8 +425,6 @@ export default function DashboardLayout() {
     handleDeleteSchoolWork,
     handleBulkDeleteSchools,
     handleExportSchoolsSelected,
-    handleExportSchoolExpenseSalary,
-    handleDistributeBlockExpense,
     PERMISSION_MODULES,
     sidebarItems,
     filteredSidebarItems,
@@ -641,6 +640,13 @@ export default function DashboardLayout() {
     setIsRoleDropdownOpen,
     setReportSearchQuery,
     setSelectedReportEmployeeIds,
+    adminNotifications,
+    adminNotificationUnreadCount,
+    isFetchingAdminNotifications,
+    fetchAdminNotifications,
+    handleMarkAdminNotificationRead,
+    handleMarkAllAdminNotificationsRead,
+    handleAdminNotificationNavigate,
     navigate,
     location,
   } = useHRMS();
@@ -968,7 +974,19 @@ export default function DashboardLayout() {
                         </div>
         
                         {/* Desktop Profile Dropdown with Logout (Hidden on mobile) */}
-                        <div className="hidden md:block relative" ref={profileDropdownRef}>
+                        <div className="hidden md:flex items-center gap-2">
+                          {sessionPermissions?.schoolWork?.view !== false && (
+                            <NotificationsBell
+                              unreadCount={adminNotificationUnreadCount}
+                              notifications={adminNotifications}
+                              loading={isFetchingAdminNotifications}
+                              onRefresh={fetchAdminNotifications}
+                              onMarkRead={handleMarkAdminNotificationRead}
+                              onMarkAllRead={handleMarkAllAdminNotificationsRead}
+                              onNavigate={handleAdminNotificationNavigate}
+                            />
+                          )}
+                        <div className="relative" ref={profileDropdownRef}>
                           <button
                             onClick={() => setIsProfileOpen(!isProfileOpen)}
                             className="flex items-center gap-2.5 p-1 px-2.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 transition cursor-pointer"
@@ -1030,30 +1048,10 @@ export default function DashboardLayout() {
                             </div>
                           )}
                         </div>
+                        </div>
                       </div>
                     </header>
         
-                    {(activeSidebarTab === "Expenses" || activeSidebarTab === "School Salary") && (
-                      <div className="bg-white border-b border-slate-200 px-6 py-1.5 flex items-center gap-2 shrink-0 overflow-x-auto select-none relative z-30" id="school-sub-menu-band">
-                        {["School Salary", "Add School"].map((tab) => {
-                          const isActive = activeSchoolSubTab === tab;
-                          return (
-                            <button
-                              key={tab}
-                              onClick={() => handleSchoolSubTabClick(tab)}
-                              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                                isActive
-                                  ? "bg-orange-50 text-[#ff791a] font-extrabold shadow-xs"
-                                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                              }`}
-                            >
-                              {tab}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
                     {/* 3. Employees SUB-HEADER BAND (Like OrangeHRM: Configuration, Employee List, Add Employee, Reports) */}
                     {activeSidebarTab === "Employees" && (
                       <div className="bg-white border-b border-slate-200 px-6 py-1.5 flex items-center gap-2 shrink-0 overflow-x-auto select-none relative z-30" id="pim-sub-menu-band">
@@ -1092,14 +1090,25 @@ export default function DashboardLayout() {
                   {isSchoolFormOpen && (
                     <SchoolWorkFormModal
                       school={currentSchool}
+                      districts={schoolDistricts}
+                      blocks={schoolBlocks}
                       onClose={() => {
                         setIsSchoolFormOpen(false);
                         setCurrentSchool(null);
-                        if (activeSchoolSubTab === "Add School") {
-                          setActiveSchoolSubTab("School Salary");
-                        }
                       }}
                       onSave={handleSaveSchoolWork}
+                    />
+                  )}
+
+                  {isSupervisorFormOpen && (
+                    <SchoolSupervisorFormModal
+                      supervisor={currentSupervisor}
+                      blocks={schoolBlocks}
+                      onClose={() => {
+                        setIsSupervisorFormOpen(false);
+                        setCurrentSupervisor(null);
+                      }}
+                      onSave={handleSaveSchoolSupervisor}
                     />
                   )}
 
@@ -1278,6 +1287,81 @@ export default function DashboardLayout() {
                       </div>
                     </div>
                   )}
+
+                  {/* Saved School Bulk Pay Excel Preview Modal */}
+                  {schoolBulkPayPreview && (
+                    <div
+                      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-3 md:p-5"
+                      onClick={() => setSchoolBulkPayPreview(null)}
+                    >
+                      <div
+                        className="bg-[#f3f3f3] rounded-xl shadow-2xl border border-[#d4d4d4] w-full max-w-[96vw] h-[92vh] flex flex-col animate-fade-in"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[#d4d4d4] bg-white shrink-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <FileSpreadsheet size={16} className="text-[#ff791a] shrink-0" />
+                            <p className="text-[11px] text-slate-600 font-mono truncate" title={schoolBulkPayPreview.filename}>
+                              {schoolBulkPayPreview.filename}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadSchoolBulkPayArchive(schoolBulkPayPreview.id, schoolBulkPayPreview.filename)}
+                              className="px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] text-white rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Download size={11} /> Download
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSchoolBulkPayPreview(null)}
+                              className="p-1.5 rounded hover:bg-slate-100 text-slate-500 cursor-pointer"
+                              aria-label="Close preview"
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0 p-3 flex flex-col gap-2">
+                          {schoolBulkPayPreview.loading ? (
+                            <p className="text-sm text-slate-500 text-center py-12">Loading Excel preview...</p>
+                          ) : (
+                            <>
+                              {schoolBulkPayPreview.sheetNames.length > 1 && (
+                                <div className="flex flex-wrap items-center gap-1 shrink-0">
+                                  {schoolBulkPayPreview.sheetNames.map((sheetName) => (
+                                    <button
+                                      key={sheetName}
+                                      type="button"
+                                      onClick={() =>
+                                        setSchoolBulkPayPreview((prev) =>
+                                          prev ? { ...prev, activeSheet: sheetName } : prev
+                                        )
+                                      }
+                                      className={`px-3 py-1 rounded-md text-[10px] font-bold border transition cursor-pointer ${
+                                        schoolBulkPayPreview.activeSheet === sheetName
+                                          ? "bg-[#ff791a] text-white border-[#ff791a]"
+                                          : "bg-white text-slate-600 border-[#d4d4d4] hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      {sheetName}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex-1 min-h-0">
+                                <ExcelPreviewGrid
+                                  rows={schoolBulkPayPreview.sheets[schoolBulkPayPreview.activeSheet] || []}
+                                  headerRowCount={getBulkPayPreviewHeaderRowCount(schoolBulkPayPreview.activeSheet)}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
         
                   {/* Mobile Drawer backdrop overlay */}
                   {!isSidebarCollapsed && (
@@ -1289,7 +1373,7 @@ export default function DashboardLayout() {
                   )}
         
                   {/* Premium Floating Mobile Bottom Navigation Bar */}
-                  <div className="fixed bottom-4 left-4 right-4 bg-white/90 backdrop-blur-md border border-slate-200/80 rounded-2xl p-2.5 shadow-xl flex items-center justify-around z-40 md:hidden animate-slide-up" id="mobile-bottom-nav">
+                  <div className="fixed bottom-4 left-4 right-4 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-xl flex items-center justify-around z-40 md:hidden animate-slide-up" id="mobile-bottom-nav">
                     {[
                       { name: "Employees", label: "Staff", icon: Users },
                       { name: "Attendance", label: "Records", icon: Clock },

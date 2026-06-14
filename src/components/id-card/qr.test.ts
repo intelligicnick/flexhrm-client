@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  PRODUCTION_FRONTEND_ORIGIN,
+  PRODUCTION_ID_CARD_VERIFY_BASE,
+} from "../../deploy-urls";
 
 vi.mock("../../env", () => ({
-  getIdCardVerifyBase: () =>
-    "https://greenyellow-woodpecker-750354.hostingersite.com/employee",
+  getIdCardVerifyBase: () => PRODUCTION_ID_CARD_VERIFY_BASE,
 }));
 
 import { buildQrPayload } from "./qr";
@@ -11,7 +14,7 @@ import { getIdCardVerifyUrl, parseIdCardFromVerifyParam } from "./verify-url";
 describe("getIdCardVerifyUrl", () => {
   it("uses a dedicated public verify route instead of the portal root", () => {
     expect(getIdCardVerifyUrl("IS0111")).toBe(
-      "https://greenyellow-woodpecker-750354.hostingersite.com/verify/IS0111",
+      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111`,
     );
   });
 });
@@ -32,7 +35,7 @@ describe("parseIdCardFromVerifyParam", () => {
   it("reads the id query param from a full verification URL", () => {
     expect(
       parseIdCardFromVerifyParam(
-        "https://greenyellow-woodpecker-750354.hostingersite.com/verify?id=IS0111",
+        `${PRODUCTION_FRONTEND_ORIGIN}/verify?id=IS0111`,
       ),
     ).toBe("IS0111");
   });
@@ -51,7 +54,7 @@ describe("buildQrPayload", () => {
     });
 
     expect(payload).toBe(
-      "https://greenyellow-woodpecker-750354.hostingersite.com/verify/IS0111",
+      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111`,
     );
   });
 });

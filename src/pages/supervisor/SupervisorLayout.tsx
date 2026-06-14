@@ -1,0 +1,299 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  CalendarDays,
+  History,
+  LogOut,
+  MessageSquarePlus,
+  School,
+  User,
+  Languages,
+  Bell,
+} from "lucide-react";
+import { apiUrl } from "../../api";
+import { getSupervisorDeviceId } from "../../lib/supervisor-device";
+import {
+  clearSupervisorImpersonatedFlag,
+  SUPERVISOR_IMPERSONATED_KEY,
+} from "../../lib/supervisor-login";
+import { AppNotification } from "../../types";
+import { useNotificationPoller } from "../../hooks/useNotificationPoller";
+import { requestBrowserNotificationPermission } from "../../lib/notification-alerts";
+import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
+import SupervisorPermissionsGate from "./SupervisorPermissionsGate";
+
+function supervisorFetch(input: string, init?: RequestInit): Promise<Response> {
+  const token = localStorage.getItem("hrms_supervisor_token");
+  const headers = new Headers(init?.headers || {});
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set("X-Supervisor-Device-Id", getSupervisorDeviceId());
+  return fetch(apiUrl(input), { ...init, headers });
+}
+
+export function useSupervisorApi() {
+  return { supervisorFetch };
+}
+
+function getPageTitle(pathname: string, t: (key: string) => string): string {
+  if (pathname === "/supervisor" || pathname === "/supervisor/") return t("home");
+  if (pathname.startsWith("/supervisor/calendar")) return t("calendar");
+  if (pathname.startsWith("/supervisor/history")) return t("history");
+  if (pathname.startsWith("/supervisor/requests")) return t("requests");
+  if (pathname.startsWith("/supervisor/profile")) return t("profile");
+  if (pathname.includes("/visit/")) return t("logVisit");
+  return t("appTitle");
+}
+
+function SupervisorLayoutInner() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { t, lang, setLang } = useSupervisorI18n();
+  const token = localStorage.getItem("hrms_supervisor_token");
+  const name = localStorage.getItem("hrms_supervisor_name") || "Supervisor";
+  const [valid, setValid] = useState<boolean | null>(null);
+  const [impersonated, setImpersonated] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const pageTitle = useMemo(
+    () => getPageTitle(location.pathname, t),
+    [location.pathname, t],
+  );
+
+  const checkSession = useCallback(async () => {
+    const sessionToken = localStorage.getItem("hrms_supervisor_token");
+    if (!sessionToken) {
+      setValid(false);
+      return;
+    }
+    try {
+      const res = await supervisorFetch("/api/auth/supervisor/me");
+      if (!res.ok) throw new Error("invalid");
+      const data = await res.json();
+      if (data.defaultLanguage === "en" || data.defaultLanguage === "hi") {
+        setLang(data.defaultLanguage);
+      }
+      if (data.name) {
+        localStorage.setItem("hrms_supervisor_name", data.name);
+      }
+
+      const isImpersonated = !!data.impersonated;
+      setImpersonated(isImpersonated);
+      if (isImpersonated) {
+        localStorage.setItem(SUPERVISOR_IMPERSONATED_KEY, "1");
+      } else {
+        clearSupervisorImpersonatedFlag();
+      }
+
+      const localDeviceId = getSupervisorDeviceId();
+      if (!isImpersonated && !data.hasRegisteredDevice) {
+        navigate("/supervisor/login?step=device", { replace: true });
+        return;
+      }
+      if (!isImpersonated && data.registeredDeviceId && data.registeredDeviceId !== localDeviceId) {
+        navigate("/supervisor/login?step=device", { replace: true });
+        return;
+      }
+
+      setValid(true);
+      try {
+        const unreadRes = await supervisorFetch("/api/notifications/supervisor/unread-count");
+        if (unreadRes.ok) {
+          const data = await unreadRes.json();
+          setUnreadCount(data.count || 0);
+        }
+      } catch {
+        setUnreadCount(0);
+      }
+    } catch {
+      localStorage.removeItem("hrms_supervisor_token");
+      localStorage.removeItem("hrms_supervisor_name");
+      localStorage.removeItem("hrms_supervisor_id");
+      clearSupervisorImpersonatedFlag();
+      setValid(false);
+    }
+  }, [setLang, navigate]);
+
+  useEffect(() => {
+    checkSession();
+  }, [checkSession]);
+
+  useEffect(() => {
+    if (valid !== true) return;
+    const timer = window.setInterval(() => {
+      void checkSession();
+    }, 45_000);
+    return () => window.clearInterval(timer);
+  }, [valid, checkSession]);
+
+  const fetchSupervisorUnreadCount = useCallback(async (): Promise<number> => {
+    try {
+      const unreadRes = await supervisorFetch("/api/notifications/supervisor/unread-count");
+      if (unreadRes.ok) {
+        const data = await unreadRes.json();
+        const count = data.count || 0;
+        setUnreadCount(count);
+        return count;
+      }
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  }, []);
+
+  const fetchSupervisorNotifications = useCallback(async (): Promise<AppNotification[]> => {
+    try {
+      const res = await supervisorFetch("/api/notifications/supervisor/mine");
+      if (res.ok) return await res.json();
+    } catch {
+      /* ignore */
+    }
+    return [];
+  }, []);
+
+  useNotificationPoller({
+    enabled: valid === true,
+    unreadCount,
+    fetchUnreadCount: fetchSupervisorUnreadCount,
+    fetchNotifications: fetchSupervisorNotifications,
+  });
+
+  useEffect(() => {
+    if (valid === true) {
+      void requestBrowserNotificationPermission();
+    }
+  }, [valid]);
+
+  const logout = async () => {
+    try {
+      await supervisorFetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+    localStorage.removeItem("hrms_supervisor_token");
+    localStorage.removeItem("hrms_supervisor_name");
+    localStorage.removeItem("hrms_supervisor_id");
+    clearSupervisorImpersonatedFlag();
+    navigate("/supervisor/login");
+  };
+
+  const toggleLang = () => setLang(lang === "en" ? "hi" : "en");
+
+  if (valid === null) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center text-slate-400 bg-[#f4f6f9]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+          <p className="text-sm font-medium">{t("loading")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!valid) {
+    return <Navigate to="/supervisor/login" replace />;
+  }
+
+  const navItems = [
+    { to: "/supervisor", icon: School, label: t("schools"), exact: true },
+    { to: "/supervisor/calendar", icon: CalendarDays, label: t("calendar") },
+    { to: "/supervisor/history", icon: History, label: t("history") },
+    { to: "/supervisor/requests", icon: MessageSquarePlus, label: t("requests"), badge: unreadCount },
+    { to: "/supervisor/profile", icon: User, label: t("profile") },
+  ];
+
+  const hideNav = location.pathname.includes("/visit/");
+
+  return (
+    <SupervisorPermissionsGate skipPermissions={impersonated}>
+      <div className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
+        <header className="sticky top-0 z-30 safe-area-top">
+          <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-4 shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300/80">
+                  {t("appTitle")}
+                </p>
+                <h1 className="text-base font-black text-white truncate">{pageTitle}</h1>
+                <p className="text-[11px] text-slate-300 mt-0.5 truncate">{name}</p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {unreadCount > 0 && !location.pathname.startsWith("/supervisor/requests") && (
+                  <Link
+                    to="/supervisor/requests?tab=notifications"
+                    className="relative p-2 text-white/80 hover:text-white"
+                    aria-label={t("notifications")}
+                  >
+                    <Bell size={20} />
+                    <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleLang}
+                  className="p-2 text-white/80 hover:text-white cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                  title={t("language")}
+                >
+                  <Languages size={18} />
+                  {lang === "en" ? "हि" : "EN"}
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="p-2 text-white/80 hover:text-white cursor-pointer"
+                  title={t("logout")}
+                >
+                  <LogOut size={20} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className={`flex-1 px-4 pt-4 ${hideNav ? "pb-4" : "pb-24"}`}>
+          <Outlet context={{ supervisorFetch }} />
+        </main>
+
+        {!hideNav && (
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-30 safe-area-bottom px-3 pt-2 pb-2 bg-[#f4f6f9] border-t border-slate-200 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.1)]">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-lg shadow-slate-200/50 flex">
+              {navItems.map(({ to, icon: Icon, label, exact, badge }) => {
+                const active = exact ? location.pathname === to : location.pathname.startsWith(to);
+                return (
+                  <Link
+                    key={to}
+                    to={to}
+                    className={`flex-1 relative py-2.5 flex flex-col items-center gap-0.5 text-[9px] font-bold transition rounded-xl mx-0.5 my-1 ${
+                      active
+                        ? "text-[#ff791a] bg-orange-50"
+                        : "text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    <Icon size={20} strokeWidth={active ? 2.5 : 2} />
+                    {label}
+                    {badge ? (
+                      <span className="absolute top-0.5 right-2 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                        {badge > 9 ? "9+" : badge}
+                      </span>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        )}
+      </div>
+    </SupervisorPermissionsGate>
+  );
+}
+
+export default function SupervisorLayout() {
+  return (
+    <SupervisorI18nProvider>
+      <SupervisorLayoutInner />
+    </SupervisorI18nProvider>
+  );
+}
+
+export { supervisorFetch };

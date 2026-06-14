@@ -11,6 +11,14 @@ import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
 import DashboardLayout from "./layouts/DashboardLayout";
 import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
+import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
+import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
+import SupervisorHomePage from "./pages/supervisor/SupervisorHomePage";
+import SupervisorVisitPage from "./pages/supervisor/SupervisorVisitPage";
+import SupervisorCalendarPage from "./pages/supervisor/SupervisorCalendarPage";
+import SupervisorHistoryPage from "./pages/supervisor/SupervisorHistoryPage";
+import SupervisorProfilePage from "./pages/supervisor/SupervisorProfilePage";
+import SupervisorRequestsPage from "./pages/supervisor/SupervisorRequestsPage";
 import { DEFAULT_PATH } from "./routes";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -69,6 +77,15 @@ export default function App() {
         <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />
         <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
+        <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
+        <Route path="/supervisor" element={<SupervisorLayout />}>
+          <Route index element={<SupervisorHomePage />} />
+          <Route path="visit/:schoolId" element={<SupervisorVisitPage />} />
+          <Route path="calendar" element={<SupervisorCalendarPage />} />
+          <Route path="history" element={<SupervisorHistoryPage />} />
+          <Route path="requests" element={<SupervisorRequestsPage />} />
+          <Route path="profile" element={<SupervisorProfilePage />} />
+        </Route>
         <Route
           path="/*"
           element={

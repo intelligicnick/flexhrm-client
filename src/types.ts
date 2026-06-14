@@ -165,11 +165,42 @@ export const EXCEL_ROW_HEADERS = [
   "Family Member Mobile (3)"
 ];
 
+export interface SchoolMaterialItem {
+  item: string;
+  qty: number;
+  cost: number;
+}
+
 export interface SchoolMonthlyExpenseEntry {
   material: number;
+  trek: number;
   miscellaneous: number;
   materialRemark?: string;
+  trekRemark?: string;
   miscellaneousRemark?: string;
+  materialDate?: string;
+  trekDate?: string;
+  miscellaneousDate?: string;
+  materialItems?: SchoolMaterialItem[];
+}
+
+export interface SchoolMonthlyWorkdaysEntry {
+  cleaningDays: number;
+  billingToilets?: number;
+}
+
+export interface SchoolDistrict {
+  id: string;
+  name: string;
+  deleted?: boolean;
+}
+
+export interface SchoolBlock {
+  id: string;
+  name: string;
+  districtId: string;
+  districtName: string;
+  deleted?: boolean;
 }
 
 export interface SchoolWork {
@@ -177,39 +208,263 @@ export interface SchoolWork {
   srNo: number;
   udise: string;
   schoolName: string;
+  schoolCategory: string;
   headmasterName: string;
   headmasterNumber: string;
   sweeperName: string;
   accountHolderName: string;
   accountNumber: string;
   ifscCode: string;
+  paymentMethod: string;
   noOfToilets: number;
   rates: number;
+  govtUnitRate: number;
+  partnerMonthlyPay: number;
   rateExplanation: string;
   block: string;
   district: string;
+  assignedSupervisorId: string;
   materialCost: number;
   remarks: string;
   monthlyExpenseLedger?: Record<string, SchoolMonthlyExpenseEntry>;
+  monthlyWorkdaysLedger?: Record<string, SchoolMonthlyWorkdaysEntry>;
 }
+
+export interface SchoolPartner {
+  id: string;
+  schoolWorkId: string;
+  schoolName: string;
+  partnerName: string;
+  accountHolderName: string;
+  accountNumber: string;
+  ifscCode: string;
+  perToiletPay: number;
+  noOfToilets: number;
+  monthlyPay: number;
+  block: string;
+  district: string;
+  status: string;
+  remarks?: string;
+  monthlyPayLedger?: Record<string, { paymentStatus?: "Unpaid" | "Paid" | "Hold" }>;
+}
+
+export interface SchoolSupervisor {
+  id: string;
+  name: string;
+  phone: string;
+  assignedBlocks: string[];
+  loginEnabled?: boolean;
+  loginPhone?: string;
+  status: string;
+  hasRegisteredDevice?: boolean;
+  profilePhotoBase64?: string;
+  registeredDeviceId?: string;
+  registeredDeviceName?: string;
+  deviceRegisteredAt?: string | null;
+  defaultLanguage?: "en" | "hi";
+  email?: string;
+  alternatePhone?: string;
+  designation?: string;
+  bio?: string;
+  isOnline?: boolean;
+  lastActiveAt?: string | null;
+}
+
+export interface PlannedVisit {
+  id: string;
+  supervisorId: string;
+  schoolWorkId: string;
+  schoolName: string;
+  block: string;
+  plannedDate: string;
+  notes: string;
+  status: "planned" | "completed" | "cancelled";
+}
+
+export interface CommitmentDiary {
+  id: string;
+  supervisorId: string;
+  supervisorName: string;
+  fromDate: string;
+  toDate: string;
+  schoolWorkId: string;
+  schoolName: string;
+  block: string;
+  notes: string;
+  adminNotes: string;
+  status: "committed" | "in_progress" | "completed" | "cancelled";
+  lastUpdatedBy: string;
+  lastUpdatedByRole: "supervisor" | "admin";
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SchoolBillingLineItem {
+  schoolWorkId: string;
+  udise: string;
+  schoolName: string;
+  schoolCategory: string;
+  toilets: number;
+  govtUnitRate: number;
+  cleaningDays: number;
+  totalCleanings: number;
+  govtAmount: number;
+  remarks: string;
+}
+
+export interface SchoolMonthlyBilling {
+  id: string;
+  block: string;
+  district: string;
+  monthKey: string;
+  financialYear: string;
+  cleaningDays: number;
+  category: "elementary" | "secondary" | "all";
+  schools: SchoolBillingLineItem[];
+  totals: { schools: number; toilets: number; cleanings: number; amount: number };
+}
+
+export interface SchoolVisitPhoto {
+  id: string;
+  caption: string;
+  mimeType: string;
+  filename: string;
+  photoDataBase64: string;
+  takenAt: string;
+  lat?: number;
+  lng?: number;
+  locationLabel?: string;
+}
+
+export interface SchoolVisit {
+  id: string;
+  supervisorId: string;
+  supervisorName: string;
+  schoolWorkId: string;
+  schoolName: string;
+  udise: string;
+  block: string;
+  visitDate: string;
+  materialsGiven: { item: string; qty: number }[];
+  notes: string;
+  photos: SchoolVisitPhoto[];
+  gpsLocation?: { lat: number; lng: number; locationLabel?: string };
+  status: "submitted" | "approved" | "rejected";
+  visitType?: "commitment" | "adhoc";
+  commitmentId?: string;
+}
+
+export interface SupervisorRequestPhoto {
+  id: string;
+  caption: string;
+  mimeType: string;
+  filename: string;
+  photoDataBase64: string;
+  takenAt: string;
+}
+
+export interface SupervisorRequestSchool {
+  id: string;
+  schoolName: string;
+  udise: string;
+  block: string;
+}
+
+export interface SupervisorRequestFollowUp {
+  id: string;
+  message: string;
+  photos: SupervisorRequestPhoto[];
+  createdAt?: string;
+}
+
+export interface SupervisorRequest {
+  id: string;
+  supervisorId: string;
+  supervisorName: string;
+  schools: SupervisorRequestSchool[];
+  message: string;
+  photos: SupervisorRequestPhoto[];
+  status: "pending" | "responded" | "closed" | "escalated";
+  adminResponse: string;
+  respondedBy: string;
+  respondedAt?: string;
+  supervisorReadAt?: string;
+  followUps?: SupervisorRequestFollowUp[];
+  escalationMessage?: string;
+  escalatedAt?: string;
+  escalationResolution?: string;
+  escalationResolvedBy?: string;
+  escalationResolvedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type NotificationType =
+  | "commitment_created"
+  | "commitment_overdue"
+  | "commitment_reminder"
+  | "commitment_admin_update"
+  | "supervisor_request_new"
+  | "supervisor_request_response"
+  | "supervisor_request_escalated"
+  | "visit_submitted"
+  | "visit_reviewed"
+  | "planned_visit_due"
+  | "planned_visit_missed";
+
+export interface AppNotification {
+  id: string;
+  recipientType: "admin" | "supervisor";
+  recipientId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  refType: string;
+  refId: string;
+  readAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const SCHOOL_CATEGORIES = [
+  "Primary School",
+  "Middle School",
+  "High School",
+  "UHS",
+  "UMV",
+  "UMS",
+];
 
 export const SCHOOL_EXCEL_ROW_HEADERS = [
   "SR NO",
   "School Name",
   "UDISE",
+  "School Category",
   "Headmaster Name",
   "Headmaster Number",
-  "Sweeper Name",
+  "Cleaning Partner",
   "Account Holder Name",
   "Account Number",
   "IFSC Code",
+  "Payment Method",
   "No of Toilets",
+  "Govt Unit Rate",
+  "Partner Monthly Pay",
   "Rates",
   "Explanation for Rate",
   "Block",
   "District",
   "Material Cost",
   "Remarks",
+];
+
+export const SCHOOL_MATERIAL_ITEMS = [
+  "Phenyl",
+  "Brush",
+  "Jhaadu",
+  "Harpic",
+  "Broom",
+  "Mop",
 ];
 
 export interface RolePermission {
