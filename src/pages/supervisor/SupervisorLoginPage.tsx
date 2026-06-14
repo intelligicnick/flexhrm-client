@@ -14,6 +14,14 @@ import {
 import PasswordInput from "../../components/PasswordInput";
 import { apiUrl, formatNetworkFetchError } from "../../api";
 import { getSupervisorDeviceId, getSupervisorDeviceName } from "../../lib/supervisor-device";
+import {
+  canScanInstalledApps,
+  findInstalledBlockedApps,
+  getInstalledApps,
+  isAndroidDevice,
+  openAppUninstall,
+  type DetectedBlockedApp,
+} from "../../lib/supervisor-installed-apps";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
 
@@ -24,8 +32,11 @@ function LoginForm() {
   const [searchParams] = useSearchParams();
   const { t, lang, setLang } = useSupervisorI18n();
   const [step, setStep] = useState<LoginStep>("apps");
-  const [blockedApps, setBlockedApps] = useState<string[]>([]);
+  const [blockedAppsPolicy, setBlockedAppsPolicy] = useState<string[]>([]);
+  const [detectedBlockedApps, setDetectedBlockedApps] = useState<DetectedBlockedApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
+  const [appsScanning, setAppsScanning] = useState(false);
+  const [canScanDevice, setCanScanDevice] = useState(false);
   const [appsConfirmed, setAppsConfirmed] = useState(false);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -35,34 +46,70 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [deviceRegistering, setDeviceRegistering] = useState(false);
   const [deviceRegistered, setDeviceRegistered] = useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installingApp, setInstallingApp] = useState(false);
+  const [appInstalled, setAppInstalled] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches,
+  );
 
   const deviceId = getSupervisorDeviceId();
   const deviceName = getSupervisorDeviceName();
+
+  const scanDeviceForBlockedApps = useCallback(async (policy: string[]) => {
+    setAppsScanning(true);
+    try {
+      const scanAvailable = canScanInstalledApps();
+      setCanScanDevice(scanAvailable);
+
+      if (!scanAvailable || policy.length === 0) {
+        setDetectedBlockedApps([]);
+        return;
+      }
+
+      const installedApps = await getInstalledApps();
+      setDetectedBlockedApps(findInstalledBlockedApps(policy, installedApps));
+    } catch {
+      setDetectedBlockedApps([]);
+    } finally {
+      setAppsScanning(false);
+    }
+  }, []);
 
   const fetchBlockedApps = useCallback(async () => {
     setAppsLoading(true);
     try {
       const res = await fetch(apiUrl("/api/auth/supervisor/portal-policy"));
+      let policy: string[] = [];
       if (res.ok) {
         const data = await res.json();
-        setBlockedApps(Array.isArray(data.blockedAppsToUninstall) ? data.blockedAppsToUninstall : []);
+        policy = Array.isArray(data.blockedAppsToUninstall) ? data.blockedAppsToUninstall : [];
       }
+      setBlockedAppsPolicy(policy);
+      await scanDeviceForBlockedApps(policy);
     } catch {
-      setBlockedApps([]);
+      setBlockedAppsPolicy([]);
+      setDetectedBlockedApps([]);
     } finally {
       setAppsLoading(false);
     }
-  }, []);
+  }, [scanDeviceForBlockedApps]);
 
   useEffect(() => {
     void fetchBlockedApps();
   }, [fetchBlockedApps]);
 
+  const requiresManualAppsConfirm =
+    blockedAppsPolicy.length > 0 && !canScanDevice && isAndroidDevice();
+
+  const appsGateActive =
+    blockedAppsPolicy.length > 0 &&
+    (canScanDevice ? detectedBlockedApps.length > 0 : requiresManualAppsConfirm);
+
   useEffect(() => {
-    if (!appsLoading && blockedApps.length === 0) {
+    if (!appsLoading && !appsScanning && !appsGateActive) {
       setStep("login");
     }
-  }, [appsLoading, blockedApps.length]);
+  }, [appsLoading, appsScanning, appsGateActive]);
 
   useEffect(() => {
     const requestedStep = searchParams.get("step");
@@ -72,9 +119,50 @@ function LoginForm() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const onBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPromptEvent(event as BeforeInstallPromptEvent);
+    };
+    const onAppInstalled = () => {
+      setAppInstalled(true);
+      setInstallPromptEvent(null);
+    };
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) return;
+    setInstallingApp(true);
+    try {
+      await installPromptEvent.prompt();
+      const choice = await installPromptEvent.userChoice;
+      if (choice.outcome === "accepted") {
+        setAppInstalled(true);
+      }
+      setInstallPromptEvent(null);
+    } finally {
+      setInstallingApp(false);
+    }
+  };
+
   const handleAppsContinue = () => {
-    if (blockedApps.length > 0 && !appsConfirmed) return;
+    if (requiresManualAppsConfirm && !appsConfirmed) return;
+    if (canScanDevice && detectedBlockedApps.length > 0) return;
     setStep("login");
+  };
+
+  const handleRescanApps = () => {
+    void scanDeviceForBlockedApps(blockedAppsPolicy);
+  };
+
+  const handleUninstallApp = (packageName: string) => {
+    openAppUninstall(packageName);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -210,6 +298,17 @@ function LoginForm() {
           <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-1">{t("appTitle")}</p>
         </div>
         {children}
+        {!appInstalled && installPromptEvent && step === "login" && (
+          <button
+            type="button"
+            onClick={() => void handleInstallApp()}
+            disabled={installingApp}
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-white px-4 py-3 text-sm font-bold text-[#ff791a] shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            <Smartphone size={16} />
+            {installingApp ? t("loading") : "Install Field Team App"}
+          </button>
+        )}
         {step === "login" && (
           <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">
             {t("adminLoginHint")}
@@ -237,17 +336,65 @@ function LoginForm() {
           </button>
         </div>
         <div className="p-6 space-y-4">
-          {appsLoading ? (
+          {appsLoading || appsScanning ? (
             <div className="flex items-center justify-center py-8 text-slate-400 gap-2">
               <Loader2 size={20} className="animate-spin" />
-              <span className="text-sm">{t("loading")}</span>
+              <span className="text-sm">{appsScanning ? t("appsCheckScanning") : t("loading")}</span>
             </div>
-          ) : blockedApps.length === 0 ? (
+          ) : blockedAppsPolicy.length === 0 ? (
             <p className="text-sm text-slate-600 text-center py-4">{t("appsCheckEmpty")}</p>
-          ) : (
+          ) : canScanDevice ? (
+            detectedBlockedApps.length === 0 ? (
+              <div className="text-center py-4 space-y-2">
+                <CheckCircle2 size={40} className="mx-auto text-emerald-500" />
+                <p className="text-sm font-semibold text-emerald-700">{t("appsCheckClear")}</p>
+                <p className="text-xs text-slate-500">{t("appsCheckClearHint")}</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs font-semibold text-rose-700">{t("appsCheckFound")}</p>
+                <ul className="space-y-2">
+                  {detectedBlockedApps.map((app) => (
+                    <li
+                      key={app.packageName}
+                      className="flex items-center justify-between gap-3 p-3 bg-rose-50 border border-rose-100 rounded-xl text-sm font-semibold text-rose-900"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Trash2 size={16} className="text-rose-500 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="truncate">{app.appName || app.blockedEntry}</p>
+                          <p className="text-[10px] font-mono text-rose-600/80 truncate">{app.packageName}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleUninstallApp(app.packageName)}
+                        className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase tracking-wide"
+                      >
+                        {t("appsCheckUninstall")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-slate-500">{t("appsCheckUninstallHint")}</p>
+                <button
+                  type="button"
+                  onClick={handleRescanApps}
+                  disabled={appsScanning}
+                  className="w-full py-3 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2"
+                >
+                  <Smartphone size={14} />
+                  {t("appsCheckRescan")}
+                </button>
+              </>
+            )
+          ) : requiresManualAppsConfirm ? (
             <>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                {t("appsCheckManualHint")}
+              </p>
               <ul className="space-y-2">
-                {blockedApps.map((app) => (
+                {blockedAppsPolicy.map((app) => (
                   <li
                     key={app}
                     className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-100 rounded-xl text-sm font-semibold text-rose-900"
@@ -267,11 +414,18 @@ function LoginForm() {
                 <span className="text-xs font-semibold text-slate-700">{t("appsCheckConfirm")}</span>
               </label>
             </>
+          ) : (
+            <p className="text-sm text-slate-600 text-center py-4">{t("appsCheckEmpty")}</p>
           )}
           <button
             type="button"
             onClick={handleAppsContinue}
-            disabled={appsLoading || (blockedApps.length > 0 && !appsConfirmed)}
+            disabled={
+              appsLoading ||
+              appsScanning ||
+              (requiresManualAppsConfirm && !appsConfirmed) ||
+              (canScanDevice && detectedBlockedApps.length > 0)
+            }
             className="w-full py-4 bg-[#ff791a] hover:bg-[#e4640c] text-white font-black rounded-2xl text-sm shadow-lg shadow-orange-200/50 active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
           >
             {t("appsCheckContinue")}
@@ -482,12 +636,13 @@ function LoginForm() {
           {loading ? t("signingIn") : needsDeviceOtp ? t("verifyDevice") : t("signIn")}
         </button>
 
-        {blockedApps.length > 0 && (
+        {appsGateActive && (
           <button
             type="button"
             onClick={() => {
               setAppsConfirmed(false);
               setStep("apps");
+              void scanDeviceForBlockedApps(blockedAppsPolicy);
             }}
             className="w-full py-2 text-xs font-bold text-slate-400 hover:text-slate-600"
           >

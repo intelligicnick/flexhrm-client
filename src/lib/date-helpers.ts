@@ -187,3 +187,38 @@ export const getOrdinalDay = (n: number) => {
   const v = n % 100;
   return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
 };
+
+/** Human-readable relative time, e.g. "just now", "2 min ago", "1 hr ago". */
+export const formatRelativeTimeAgo = (value: string | Date): string => {
+  const then = new Date(value).getTime();
+  if (!Number.isFinite(then)) return "—";
+
+  const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diffSec < 60) return "just now";
+
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hr ago`;
+
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
+
+  return new Date(value).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+/** Human-readable duration from minutes, e.g. "45 min", "1 hr 20 min". */
+export const formatDurationMinutes = (minutes: number): string => {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "< 1 min";
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0) return `${hours} hr`;
+  return `${hours} hr ${remainingMinutes} min`;
+};

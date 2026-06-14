@@ -117,7 +117,7 @@ export default function BlockedAppsConfigurationPanel({ readOnly = false }: Bloc
             Blocked apps before supervisor login
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Supervisors must confirm these blocked apps are removed from their device before signing in.
+            Supervisors cannot sign in if these apps are installed. Use Android package IDs for automatic scanning.
           </p>
         </div>
 
@@ -169,7 +169,7 @@ export default function BlockedAppsConfigurationPanel({ readOnly = false }: Bloc
                     void handleAddBlockedApps();
                   }
                 }}
-                placeholder="App name (e.g. WhatsApp) or comma-separated list"
+                placeholder="Package ID (e.g. com.whatsapp) or Name|com.package"
                 className="flex-1 min-w-[200px] px-3 py-2 border border-rose-200 rounded-lg text-xs focus:outline-none focus:border-rose-400"
               />
               <button
@@ -185,7 +185,7 @@ export default function BlockedAppsConfigurationPanel({ readOnly = false }: Bloc
           )}
 
           <p className="text-[10px] text-slate-400">
-            Each app is saved as a blocked app shown on the supervisor login screen.
+            Use Android package IDs (e.g. com.whatsapp) or Display Name|com.package for reliable device scanning.
             {!readOnly && blockedApps.length > 0 && " Select tags and use Delete to remove them."}
           </p>
         </div>

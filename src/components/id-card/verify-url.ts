@@ -20,6 +20,11 @@ export function getSupervisorLoginUrl(): string {
   return `${getIdCardVerifySiteOrigin()}/supervisor/login`;
 }
 
+/** Web app manifest for the supervisor-only PWA (scope: /supervisor/). */
+export function getSupervisorPwaManifestUrl(): string {
+  return `${getIdCardVerifySiteOrigin()}/manifest.webmanifest`;
+}
+
 /** Normalize route/query values, including malformed multi-line QR scanner URLs. */
 export function parseIdCardFromVerifyParam(raw: string): string {
   let value = raw.trim();

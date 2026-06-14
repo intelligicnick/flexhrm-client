@@ -6,6 +6,7 @@ import SupervisorVisitsPanel from "./SupervisorVisitsPanel";
 import SchoolSupervisorsTable from "./SchoolSupervisorsTable";
 import SupervisorRequestsPanel from "./SupervisorRequestsPanel";
 import CommitmentDiaryPanel from "./CommitmentDiaryPanel";
+import SupervisorPwaInstallCard from "./SupervisorPwaInstallCard";
 
 interface FieldTeamPanelProps {
   visits: SchoolVisit[];
@@ -89,6 +90,8 @@ export default function FieldTeamPanel({
 
   return (
     <div className="space-y-4">
+      <SupervisorPwaInstallCard />
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex bg-slate-200/60 p-1 rounded-lg gap-1">
           <button

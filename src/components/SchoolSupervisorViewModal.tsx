@@ -14,11 +14,15 @@ import {
   Smartphone,
   Globe,
   Briefcase,
+  Clock,
+  Loader2,
 } from "lucide-react";
+import { apiUrl } from "../api";
+import { formatDurationMinutes, formatRelativeTimeAgo } from "../lib/date-helpers";
 import { getSchoolsForSupervisor } from "../lib/school-work-helpers";
 import { loginAsSupervisor } from "../lib/supervisor-login";
 import { getSupervisorLoginUrl } from "./id-card/verify-url";
-import { SchoolSupervisor, SchoolWork } from "../types";
+import { SchoolSupervisor, SchoolWork, SupervisorActivityHistory } from "../types";
 
 interface SchoolSupervisorViewModalProps {
   supervisor: SchoolSupervisor;
@@ -37,6 +41,9 @@ export default function SchoolSupervisorViewModal({
 }: SchoolSupervisorViewModalProps) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [activityHistory, setActivityHistory] = useState<SupervisorActivityHistory | null>(null);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const coveredSchools = useMemo(
     () => getSchoolsForSupervisor(supervisor, schools),
     [supervisor, schools],
@@ -63,6 +70,31 @@ export default function SchoolSupervisorViewModal({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadActivityHistory = async () => {
+      setActivityLoading(true);
+      setActivityError(null);
+      try {
+        const res = await fetch(apiUrl(`/api/school-supervisors/${supervisor.id}/activity-history`));
+        if (!res.ok) throw new Error("Could not load activity history.");
+        const data = (await res.json()) as SupervisorActivityHistory;
+        if (!cancelled) setActivityHistory(data);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setActivityHistory(null);
+          setActivityError(err instanceof Error ? err.message : "Could not load activity history.");
+        }
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
+    };
+    void loadActivityHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [supervisor.id]);
+
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose();
   };
@@ -81,6 +113,29 @@ export default function SchoolSupervisorViewModal({
 
   const formatDeviceDate = (iso?: string | null) => {
     if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return "—";
+    }
+  };
+
+  const formatActivityTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      return "—";
+    }
+  };
+
+  const formatActivityDate = (iso: string) => {
     try {
       return new Date(iso).toLocaleDateString("en-IN", {
         day: "numeric",
@@ -277,6 +332,93 @@ export default function SchoolSupervisorViewModal({
                     supervisor.hasRegisteredDevice ? "Registered" : "Not registered",
                   )}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">
+                <p className="mb-3 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  <Clock size={11} />
+                  Active Time History
+                </p>
+
+                {activityLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400 py-4">
+                    <Loader2 size={14} className="animate-spin" />
+                    Loading activity history...
+                  </div>
+                ) : activityError ? (
+                  <p className="text-xs text-rose-600 font-semibold">{activityError}</p>
+                ) : activityHistory && activityHistory.sessions.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+                          Today
+                        </p>
+                        <p className="text-sm font-extrabold text-emerald-800">
+                          {formatDurationMinutes(activityHistory.summary.todayMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+                          Last 7 days
+                        </p>
+                        <p className="text-sm font-extrabold text-blue-800">
+                          {formatDurationMinutes(activityHistory.summary.last7DaysMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 col-span-2 sm:col-span-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                          Sessions logged
+                        </p>
+                        <p className="text-sm font-extrabold text-slate-800">
+                          {activityHistory.summary.sessionCount}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto space-y-2 border-t border-slate-100 pt-3">
+                      {activityHistory.sessions.map((session) => (
+                        <div
+                          key={session.id}
+                          className="rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800">
+                                {formatActivityDate(session.startedAt)}
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-slate-600">
+                                {formatActivityTime(session.startedAt)}
+                                {" – "}
+                                {session.isOngoing
+                                  ? "Ongoing"
+                                  : session.endedAt
+                                    ? formatActivityTime(session.endedAt)
+                                    : formatActivityTime(session.lastActiveAt)}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              {session.isOngoing ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Online · {formatRelativeTimeAgo(session.lastActiveAt)}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-500">
+                                  {formatDurationMinutes(session.durationMinutes)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic py-2">
+                    No app activity recorded yet. History appears when the supervisor logs in and uses the mobile portal.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">

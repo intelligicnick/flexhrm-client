@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Edit2, ExternalLink, Eye, LogIn, Phone, Plus, School, ShieldCheck, Trash2, Users } from "lucide-react";
 import { getSupervisorLoginUrl } from "./id-card/verify-url";
 import { loginAsSupervisor } from "../lib/supervisor-login";
@@ -8,6 +8,7 @@ import {
   countSchoolsWithoutSupervisorCoverage,
   getSchoolsForSupervisor,
 } from "../lib/school-work-helpers";
+import { formatRelativeTimeAgo } from "../lib/date-helpers";
 import { SchoolSupervisor, SchoolWork } from "../types";
 
 interface SchoolSupervisorsTableProps {
@@ -96,6 +97,42 @@ export default function SchoolSupervisorsTable({
     () => countSchoolsWithoutSupervisorCoverage(schools, supervisors),
     [schools, supervisors],
   );
+
+  const [, setActivityTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setActivityTick((tick) => tick + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const renderSupervisorActivity = (supervisor: SchoolSupervisor) => {
+    if (supervisor.isOnline && supervisor.lastActiveAt) {
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1"
+          title={new Date(supervisor.lastActiveAt).toLocaleString("en-IN")}
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+          Online · {formatRelativeTimeAgo(supervisor.lastActiveAt)}
+        </span>
+      );
+    }
+    if (supervisor.lastActiveAt) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2 py-1"
+          title={new Date(supervisor.lastActiveAt).toLocaleString("en-IN")}
+        >
+          Last active {formatRelativeTimeAgo(supervisor.lastActiveAt)}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 bg-slate-50 border border-slate-100 rounded-full px-2 py-1">
+        <span className="w-2 h-2 rounded-full bg-slate-300 shrink-0" />
+        Offline
+      </span>
+    );
+  };
 
   return (
     <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
@@ -194,10 +231,11 @@ export default function SchoolSupervisorsTable({
         </p>
       ) : (
         <div className="overflow-x-auto border border-slate-200 rounded-lg">
-          <table className="w-full text-xs min-w-[760px]">
+          <table className="w-full text-xs min-w-[860px]">
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="text-left px-3 py-2 font-bold">Name</th>
+                <th className="text-left px-3 py-2 font-bold">Activity</th>
                 <th className="text-left px-3 py-2 font-bold">Phone</th>
                 <th className="text-left px-3 py-2 font-bold">Assigned Blocks</th>
                 <th className="text-left px-3 py-2 font-bold">Schools Covered</th>
@@ -210,24 +248,8 @@ export default function SchoolSupervisorsTable({
                 const coveredSchools = getSchoolsForSupervisor(supervisor, schools);
                 return (
                   <tr key={supervisor.id} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-slate-800">{supervisor.name || "—"}</span>
-                        {supervisor.isOnline && (
-                          <span
-                            className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5"
-                            title={
-                              supervisor.lastActiveAt
-                                ? `Active ${new Date(supervisor.lastActiveAt).toLocaleString("en-IN")}`
-                                : "Currently using the supervisor app"
-                            }
-                          >
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Online
-                          </span>
-                        )}
-                      </div>
-                    </td>
+                    <td className="px-3 py-2 font-semibold text-slate-800">{supervisor.name || "—"}</td>
+                    <td className="px-3 py-2">{renderSupervisorActivity(supervisor)}</td>
                     <td className="px-3 py-2 text-slate-600">
                       <span className="inline-flex items-center gap-1">
                         <Phone size={12} />

@@ -270,6 +270,27 @@ export interface SchoolSupervisor {
   lastActiveAt?: string | null;
 }
 
+export interface SupervisorActivitySession {
+  id: string;
+  supervisorId: string;
+  startedAt: string;
+  endedAt: string | null;
+  lastActiveAt: string;
+  durationMinutes: number;
+  isOngoing: boolean;
+}
+
+export interface SupervisorActivitySummary {
+  todayMinutes: number;
+  last7DaysMinutes: number;
+  sessionCount: number;
+}
+
+export interface SupervisorActivityHistory {
+  sessions: SupervisorActivitySession[];
+  summary: SupervisorActivitySummary;
+}
+
 export interface PlannedVisit {
   id: string;
   supervisorId: string;

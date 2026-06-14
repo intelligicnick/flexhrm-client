@@ -1,0 +1,57 @@
+package com.flexhrm.supervisor;
+
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.webkit.JavascriptInterface;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * Expose installed-app scanning to the supervisor WebView.
+ * Register in MainActivity:
+ *   webView.addJavascriptInterface(new FlexHrmAndroidBridge(this), "FlexHrmAndroid");
+ */
+public class FlexHrmAndroidBridge {
+  private final MainActivity activity;
+
+  public FlexHrmAndroidBridge(MainActivity activity) {
+    this.activity = activity;
+  }
+
+  @JavascriptInterface
+  public String getInstalledApps() {
+    PackageManager pm = activity.getPackageManager();
+    JSONArray apps = new JSONArray();
+
+    for (ApplicationInfo info : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
+      if ((info.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+        continue;
+      }
+      try {
+        JSONObject item = new JSONObject();
+        item.put("packageName", info.packageName);
+        CharSequence label = pm.getApplicationLabel(info);
+        if (label != null) {
+          item.put("appName", label.toString());
+        }
+        apps.put(item);
+      } catch (Exception ignored) {
+        // Skip malformed entries.
+      }
+    }
+
+    return apps.toString();
+  }
+
+  @JavascriptInterface
+  public void uninstallApp(String packageName) {
+    if (packageName == null || packageName.trim().isEmpty()) {
+      return;
+    }
+    Intent intent = new Intent(Intent.ACTION_DELETE);
+    intent.setData(Uri.parse("package:" + packageName.trim()));
+    activity.startActivity(intent);
+  }
+}
