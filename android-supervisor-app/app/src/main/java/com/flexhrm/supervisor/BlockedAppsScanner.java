@@ -15,28 +15,21 @@ public final class BlockedAppsScanner {
   private static final Map<String, String[]> KNOWN_APP_PACKAGES = new HashMap<>();
 
   static {
-    KNOWN_APP_PACKAGES.put("whatsapp", new String[] {"com.whatsapp", "com.whatsapp.w4b"});
     KNOWN_APP_PACKAGES.put("anyto", new String[] {"com.imyfone.anytoandroid", "com.tenorshare.ianygo"});
-    KNOWN_APP_PACKAGES.put("imyfone anyto", new String[] {"com.imyfone.anytoandroid"});
-    KNOWN_APP_PACKAGES.put("tenorshare ianygo", new String[] {"com.tenorshare.ianygo"});
-    KNOWN_APP_PACKAGES.put("unicool tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
-    KNOWN_APP_PACKAGES.put("tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
-    KNOWN_APP_PACKAGES.put(
-        "fake gps",
-        new String[] {
-          "com.lexa.fakegps",
-          "com.incorporateapps.fakegps.fre",
-          "com.blogspot.newapphorizons.fakegps"
-        });
-    KNOWN_APP_PACKAGES.put("virtual location", new String[] {"com.lexa.fakegps", "com.imyfone.anytoandroid"});
-    KNOWN_APP_PACKAGES.put(
-        "locationsimulator",
-        new String[] {"com.lexa.fakegps", "com.incorporateapps.fakegps.fre"});
-    KNOWN_APP_PACKAGES.put("dr.fone virtual location", new String[] {"com.wondershare.drfonevirtuallocation"});
-    KNOWN_APP_PACKAGES.put("3utools", new String[] {"com.3u.tools"});
-    KNOWN_APP_PACKAGES.put("easeus mobianygo", new String[] {"com.easeus.mobianygo"});
-    KNOWN_APP_PACKAGES.put("wootechy imovego", new String[] {"com.wootechy.imovego"});
-    KNOWN_APP_PACKAGES.put("anydesk", new String[] {"com.anydesk.anydeskandroid", "com.anydesk.adcontrol.ad1"});
+    KNOWN_APP_PACKAGES.put("fake gps", new String[] {
+        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
+        "com.blogspot.newapphorizons.fakegps", "com.fakegps.mock"
+    });
+    KNOWN_APP_PACKAGES.put("fake gps location", new String[] {
+        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre"
+    });
+    KNOWN_APP_PACKAGES.put("gps emulator", new String[] {"com.rosteam.gpsemulator"});
+    KNOWN_APP_PACKAGES.put("lexa fake gps", new String[] {"com.lexa.fakegps"});
+    KNOWN_APP_PACKAGES.put("mock locations", new String[] {"com.lexa.fakegps"});
+    KNOWN_APP_PACKAGES.put("location changer", new String[] {"com.lexa.fakegps"});
+    KNOWN_APP_PACKAGES.put("gps joystick", new String[] {"com.theappninjas.gpsjoystick"});
+    KNOWN_APP_PACKAGES.put("fly gps", new String[] {"com.fakegps.mock"});
+    KNOWN_APP_PACKAGES.put("anydesk", new String[] {"com.anydesk.anydeskandroid"});
   }
 
   private BlockedAppsScanner() {}
@@ -50,10 +43,9 @@ public final class BlockedAppsScanner {
         continue;
       }
       CharSequence label = pm.getApplicationLabel(info);
-      apps.add(
-          new InstalledApp(
-              info.packageName,
-              label != null ? label.toString() : info.packageName));
+      apps.add(new InstalledApp(
+          info.packageName,
+          label != null ? label.toString() : info.packageName));
     }
     return apps;
   }
@@ -65,9 +57,7 @@ public final class BlockedAppsScanner {
 
     for (InstalledApp app : installedApps) {
       installedByPackage.put(normalize(app.packageName), app);
-      if (app.appName != null && !app.appName.isEmpty()) {
-        installedByLabel.put(normalize(app.appName), app);
-      }
+      installedByLabel.put(normalize(app.appName), app);
     }
 
     List<DetectedBlockedApp> detected = new ArrayList<>();
@@ -75,57 +65,38 @@ public final class BlockedAppsScanner {
 
     for (String entry : blockedEntries) {
       ParsedEntry parsed = parseBlockedAppEntry(entry);
-      if (parsed.label.isEmpty()) {
-        continue;
-      }
+      if (parsed.label.isEmpty()) continue;
 
       InstalledApp match = null;
       for (String packageName : parsed.packageNames) {
         match = installedByPackage.get(normalize(packageName));
-        if (match != null) {
-          break;
-        }
+        if (match != null) break;
       }
-
       if (match == null) {
         match = installedByLabel.get(normalize(parsed.label));
       }
-
       if (match == null && parsed.packageNames.length == 0) {
         match = fuzzyMatchByLabel(parsed.label, installedApps);
       }
-
-      if (match == null) {
-        continue;
-      }
+      if (match == null) continue;
 
       String dedupeKey = normalize(match.packageName);
-      if (seen.contains(dedupeKey)) {
-        continue;
-      }
+      if (seen.contains(dedupeKey)) continue;
       seen.add(dedupeKey);
 
-      String displayName =
-          match.appName != null && !match.appName.isEmpty() ? match.appName : parsed.label;
+      String displayName = match.appName != null && !match.appName.isEmpty()
+          ? match.appName : parsed.label;
       detected.add(new DetectedBlockedApp(entry, match.packageName, displayName));
     }
-
     return detected;
   }
 
   private static InstalledApp fuzzyMatchByLabel(String label, List<InstalledApp> installedApps) {
     String labelNorm = normalize(label);
-    if (labelNorm.length() < 3) {
-      return null;
-    }
+    if (labelNorm.length() < 3) return null;
     for (InstalledApp app : installedApps) {
-      if (app.appName == null || app.appName.isEmpty()) {
-        continue;
-      }
       String appNorm = normalize(app.appName);
-      if (appNorm.equals(labelNorm)
-          || appNorm.contains(labelNorm)
-          || labelNorm.contains(appNorm)) {
+      if (appNorm.equals(labelNorm) || appNorm.contains(labelNorm) || labelNorm.contains(appNorm)) {
         return app;
       }
     }
@@ -134,9 +105,7 @@ public final class BlockedAppsScanner {
 
   private static ParsedEntry parseBlockedAppEntry(String entry) {
     String trimmed = entry.trim();
-    if (trimmed.isEmpty()) {
-      return new ParsedEntry("", new String[0]);
-    }
+    if (trimmed.isEmpty()) return new ParsedEntry("", new String[0]);
 
     String[] pipeParts = trimmed.split("\\|");
     if (pipeParts.length >= 2) {
@@ -144,9 +113,7 @@ public final class BlockedAppsScanner {
       List<String> packages = new ArrayList<>();
       for (int i = 1; i < pipeParts.length; i++) {
         String part = pipeParts[i].trim();
-        if (looksLikePackageName(part)) {
-          packages.add(part);
-        }
+        if (looksLikePackageName(part)) packages.add(part);
       }
       if (!packages.isEmpty()) {
         return new ParsedEntry(label, packages.toArray(new String[0]));
@@ -158,9 +125,7 @@ public final class BlockedAppsScanner {
     }
 
     String[] known = KNOWN_APP_PACKAGES.get(normalize(trimmed));
-    if (known != null) {
-      return new ParsedEntry(trimmed, known);
-    }
+    if (known != null) return new ParsedEntry(trimmed, known);
 
     return new ParsedEntry(trimmed, new String[0]);
   }

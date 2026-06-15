@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { apiUrl } from "../../api";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
+import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
 import {
   clearSupervisorImpersonatedFlag,
   SUPERVISOR_IMPERSONATED_KEY,
@@ -204,7 +205,7 @@ function SupervisorLayoutInner() {
   const hideNav = location.pathname.includes("/visit/");
 
   return (
-    <SupervisorPermissionsGate skipPermissions={impersonated}>
+    <SupervisorPermissionsGate skipPermissions={impersonated || isFlexHrmNativeApp()}>
       <div className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
         <header className="sticky top-0 z-30 safe-area-top">
           <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-4 shadow-lg">

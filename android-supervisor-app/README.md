@@ -8,7 +8,6 @@ Lightweight native Android shell for the **Flex HRM Field Team** supervisor port
 |---------|----------------|
 | Login (phone + password) | Loads `/supervisor/login` |
 | Device registration & OTP | Native Android device ID via `FlexHrmAndroid.getDeviceId()` |
-| Blocked apps scan | `FlexHrmAndroid.getInstalledApps()` + uninstall helper |
 | Schools dashboard | Web UI at `/supervisor` |
 | Log visits (GPS + camera photos) | WebView camera + geolocation permissions |
 | Calendar & commitments | Web UI at `/supervisor/calendar` |
@@ -76,15 +75,12 @@ Also update `SUPERVISOR_HOST` in `MainActivity.java` if you use a custom domain 
 |--------|---------|
 | `getDeviceId()` | Stable Android ID for device binding |
 | `getBuildNumber()` | Device build string for display name |
-| `getInstalledApps()` | JSON list of user-installed apps |
-| `uninstallApp(packageName)` | Opens system uninstall screen |
 
 ## Permissions
 
 - **Internet** — load supervisor portal
 - **Camera** — visit photos & profile photo
 - **Location** — GPS-stamped visits
-- **QUERY_ALL_PACKAGES** — blocked-app policy enforcement
 
 ## Architecture
 

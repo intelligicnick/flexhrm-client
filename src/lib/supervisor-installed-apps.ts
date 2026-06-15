@@ -14,6 +14,7 @@ type NativeAndroidBridge = {
   getInstalledPackages?: () => string;
   uninstallApp?: (packageName: string) => void;
   openUninstall?: (packageName: string) => void;
+  isNativeApp?: () => boolean;
 };
 
 declare global {
@@ -129,21 +130,17 @@ function parseInstalledAppsPayload(raw: string): InstalledApp[] {
 }
 
 export function canScanInstalledApps(): boolean {
-  if (isFlexHrmNativeApp()) return true;
   if (typeof window === "undefined") return false;
   const bridge = window.FlexHrmAndroid || window.Android;
   return Boolean(bridge?.getInstalledApps || bridge?.getInstalledPackages);
 }
 
 export function isFlexHrmNativeApp(): boolean {
-  if (typeof navigator !== "undefined" && /FlexHrmSupervisor/i.test(navigator.userAgent)) {
-    return true;
-  }
   if (typeof window !== "undefined") {
     const bridge = window.FlexHrmAndroid || window.Android;
-    return Boolean(bridge?.getInstalledApps || bridge?.getInstalledPackages);
+    if (bridge?.isNativeApp?.()) return true;
   }
-  return false;
+  return typeof navigator !== "undefined" && /FlexHrmSupervisor/i.test(navigator.userAgent);
 }
 
 export function isAndroidDevice(): boolean {

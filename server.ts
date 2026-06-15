@@ -38,6 +38,43 @@ function resolveBackendUrl(): string {
 
 const BACKEND_URL = resolveBackendUrl();
 
+function pingBackend(backendUrl: string) {
+  const target = new URL(backendUrl);
+  const transport = target.protocol === "https:" ? https : http;
+  const defaultPort = target.protocol === "https:" ? 443 : 80;
+  const req = transport.request(
+    {
+      hostname: target.hostname,
+      port: target.port || defaultPort,
+      path: "/api/health",
+      method: "GET",
+      timeout: 3000,
+    },
+    (res) => {
+      if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+        console.log("Backend API: reachable");
+      } else {
+        console.warn(`Backend API: responded with HTTP ${res.statusCode}`);
+      }
+      res.resume();
+    }
+  );
+  req.on("error", () => {
+    console.warn(
+      `Backend API: not reachable at ${backendUrl}\n` +
+        "  Start it in another terminal: cd backend && npm run start:dev"
+    );
+  });
+  req.on("timeout", () => {
+    req.destroy();
+    console.warn(
+      `Backend API: timed out connecting to ${backendUrl}\n` +
+        "  Start it in another terminal: cd backend && npm run start:dev"
+    );
+  });
+  req.end();
+}
+
 function createApiProxy(backendUrl: string) {
   const target = new URL(backendUrl);
   const transport = target.protocol === "https:" ? https : http;
@@ -117,6 +154,7 @@ async function startServer() {
     console.log(`Flex HRM UI running on port ${PORT}`);
     if (BACKEND_URL) {
       console.log(`API proxy target: ${BACKEND_URL}`);
+      pingBackend(BACKEND_URL);
     }
     if (isDev) {
       console.log("Browser API base: same-origin (/api proxy)");

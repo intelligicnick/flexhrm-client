@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -21,6 +22,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -37,58 +39,54 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
+import androidx.webkit.WebViewAssetLoader;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
-  private static final String SUPERVISOR_HOST = "greenyellow-woodpecker-750354.hostingersite.com";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.0";
+  private static final String TAG = "FlexHrmSupervisor";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.4";
+  private static final String LOCAL_LOGIN_URL =
+      "https://appassets.androidplatform.net/supervisor/login";
 
   private WebView webView;
   private ProgressBar progressBar;
   private LinearLayout errorPanel;
   private LinearLayout securityCheckPanel;
   private TextView errorMessage;
+  private WebViewAssetLoader assetLoader;
   private ValueCallback<Uri[]> filePathCallback;
+  private PermissionRequest pendingWebPermissionRequest;
+  private GeolocationPermissions.Callback pendingGeoCallback;
+  private String pendingGeoOrigin;
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
   private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
 
-  private final ActivityResultLauncher<String[]> permissionLauncher =
+  private final ActivityResultLauncher<String[]> startupPermissionLauncher =
       registerForActivityResult(
           new ActivityResultContracts.RequestMultiplePermissions(),
-          result -> {
-            boolean allGranted = true;
-            for (Boolean granted : result.values()) {
-              if (!Boolean.TRUE.equals(granted)) {
-                allGranted = false;
-                break;
-              }
-            }
-            if (allGranted && filePathCallback != null) {
-              openFileChooser();
-            } else if (filePathCallback != null) {
-              filePathCallback.onReceiveValue(null);
-              filePathCallback = null;
-            }
-          });
+          result -> onStartupPermissionsResult());
+
+  private final ActivityResultLauncher<String[]> webPermissionLauncher =
+      registerForActivityResult(
+          new ActivityResultContracts.RequestMultiplePermissions(),
+          result -> onWebPermissionsResult());
 
   private final ActivityResultLauncher<Intent> fileChooserLauncher =
       registerForActivityResult(
           new ActivityResultContracts.StartActivityForResult(),
           result -> {
-            if (filePathCallback == null) {
-              return;
-            }
+            if (filePathCallback == null) return;
             Uri[] uris = null;
             Intent data = result.getData();
             if (result.getResultCode() == RESULT_OK && data != null) {
               Uri uri = data.getData();
-              if (uri != null) {
-                uris = new Uri[] {uri};
-              }
+              if (uri != null) uris = new Uri[] {uri};
             }
             filePathCallback.onReceiveValue(uris);
             filePathCallback = null;
@@ -111,6 +109,12 @@ public class MainActivity extends AppCompatActivity {
     retryButton.setOnClickListener(v -> runSecurityCheck());
     webView.setVisibility(View.GONE);
 
+    assetLoader =
+        new WebViewAssetLoader.Builder()
+            .setDomain("appassets.androidplatform.net")
+            .addPathHandler("/", new SpaAssetPathHandler(this))
+            .build();
+
     configureWebView();
     requestStartupPermissions();
     runSecurityCheck();
@@ -121,9 +125,7 @@ public class MainActivity extends AppCompatActivity {
             new OnBackPressedCallback(true) {
               @Override
               public void handleOnBackPressed() {
-                if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) {
-                  return;
-                }
+                if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) return;
                 if (webView.getVisibility() == View.VISIBLE && webView.canGoBack()) {
                   webView.goBack();
                 } else {
@@ -156,8 +158,7 @@ public class MainActivity extends AppCompatActivity {
     securityExecutor.execute(
         () -> {
           try {
-            List<String> policy =
-                PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
+            List<String> policy = PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
             if (policy.isEmpty()) {
               runOnUiThread(this::openPortal);
               return;
@@ -178,11 +179,8 @@ public class MainActivity extends AppCompatActivity {
                   }
                 });
           } catch (Exception error) {
-            runOnUiThread(
-                () -> {
-                  securityCheckPanel.setVisibility(View.GONE);
-                  showError(getString(R.string.security_check_failed));
-                });
+            Log.w(TAG, "Security scan failed, opening login without list UI", error);
+            runOnUiThread(this::openPortal);
           }
         });
   }
@@ -237,7 +235,8 @@ public class MainActivity extends AppCompatActivity {
             .setTitle(getString(R.string.blocked_apps_title))
             .setView(scrollView)
             .setCancelable(false)
-            .setPositiveButton(getString(R.string.blocked_apps_check_again), (dialog, which) -> runSecurityCheck())
+            .setPositiveButton(
+                getString(R.string.blocked_apps_check_again), (dialog, which) -> runSecurityCheck())
             .create();
     blockedAppsDialog.show();
   }
@@ -253,6 +252,7 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void openPortal() {
+    securityCheckPanel.setVisibility(View.GONE);
     if (portalLoaded) {
       webView.setVisibility(View.VISIBLE);
       return;
@@ -269,7 +269,7 @@ public class MainActivity extends AppCompatActivity {
     settings.setDomStorageEnabled(true);
     settings.setDatabaseEnabled(true);
     settings.setMediaPlaybackRequiresUserGesture(false);
-    settings.setAllowFileAccess(true);
+    settings.setAllowFileAccess(false);
     settings.setAllowContentAccess(true);
     settings.setGeolocationEnabled(true);
     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
@@ -292,6 +292,15 @@ public class MainActivity extends AppCompatActivity {
     webView.setWebViewClient(
         new WebViewClient() {
           @Override
+          public WebResourceResponse shouldInterceptRequest(
+              WebView view, WebResourceRequest request) {
+            if (request != null && request.getUrl() != null) {
+              return assetLoader.shouldInterceptRequest(request.getUrl());
+            }
+            return super.shouldInterceptRequest(view, request);
+          }
+
+          @Override
           public void onPageStarted(WebView view, String url, Bitmap favicon) {
             progressBar.setVisibility(View.VISIBLE);
             errorPanel.setVisibility(View.GONE);
@@ -313,21 +322,16 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
-            if (uri == null) {
-              return false;
-            }
-
+            if (uri == null) return false;
             String host = uri.getHost();
-            if (host != null && host.equalsIgnoreCase(SUPERVISOR_HOST)) {
+            if (host != null && host.contains("appassets.androidplatform.net")) {
               return false;
             }
-
             if ("https".equalsIgnoreCase(uri.getScheme())
                 || "http".equalsIgnoreCase(uri.getScheme())) {
               startActivity(new Intent(Intent.ACTION_VIEW, uri));
               return true;
             }
-
             return false;
           }
         });
@@ -337,12 +341,18 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public void onGeolocationPermissionsShowPrompt(
               String origin, GeolocationPermissions.Callback callback) {
-            callback.invoke(origin, true, false);
+            if (hasLocationPermission()) {
+              callback.invoke(origin, true, false);
+              return;
+            }
+            pendingGeoCallback = callback;
+            pendingGeoOrigin = origin;
+            webPermissionLauncher.launch(getLocationPermissions());
           }
 
           @Override
-          public void onPermissionRequest(PermissionRequest request) {
-            runOnUiThread(() -> request.grant(request.getResources()));
+          public void onPermissionRequest(final PermissionRequest request) {
+            runOnUiThread(() -> handleWebPermissionRequest(request));
           }
 
           @Override
@@ -356,7 +366,7 @@ public class MainActivity extends AppCompatActivity {
             MainActivity.this.filePathCallback = filePathCallback;
 
             if (needsCameraPermission()) {
-              permissionLauncher.launch(new String[] {Manifest.permission.CAMERA});
+              webPermissionLauncher.launch(new String[] {Manifest.permission.CAMERA});
               return true;
             }
 
@@ -371,28 +381,87 @@ public class MainActivity extends AppCompatActivity {
         });
   }
 
-  private void requestStartupPermissions() {
-    List<String> needed = new ArrayList<>();
-    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-        != PackageManager.PERMISSION_GRANTED) {
-      needed.add(Manifest.permission.CAMERA);
+  private void handleWebPermissionRequest(PermissionRequest request) {
+    Set<String> androidPerms = new LinkedHashSet<>();
+    for (String resource : request.getResources()) {
+      if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)
+          && needsCameraPermission()) {
+        androidPerms.add(Manifest.permission.CAMERA);
+      }
     }
-    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-        != PackageManager.PERMISSION_GRANTED) {
-      needed.add(Manifest.permission.ACCESS_FINE_LOCATION);
+
+    if (androidPerms.isEmpty()) {
+      request.grant(request.getResources());
+      return;
     }
-    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
-        != PackageManager.PERMISSION_GRANTED) {
-      needed.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+
+    pendingWebPermissionRequest = request;
+    webPermissionLauncher.launch(androidPerms.toArray(new String[0]));
+  }
+
+  private void onWebPermissionsResult() {
+    if (pendingWebPermissionRequest != null) {
+      if (hasCameraPermission()) {
+        pendingWebPermissionRequest.grant(pendingWebPermissionRequest.getResources());
+      } else {
+        pendingWebPermissionRequest.deny();
+      }
+      pendingWebPermissionRequest = null;
     }
-    if (!needed.isEmpty()) {
-      permissionLauncher.launch(needed.toArray(new String[0]));
+
+    if (pendingGeoCallback != null) {
+      boolean granted = hasLocationPermission();
+      pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
+      pendingGeoCallback = null;
+      pendingGeoOrigin = null;
+    }
+
+    if (filePathCallback != null && hasCameraPermission()) {
+      openFileChooser();
+    } else if (filePathCallback != null) {
+      filePathCallback.onReceiveValue(null);
+      filePathCallback = null;
     }
   }
 
+  private void onStartupPermissionsResult() {
+    Log.d(TAG, "Startup permissions granted");
+  }
+
+  private void requestStartupPermissions() {
+    List<String> needed = new ArrayList<>();
+    if (needsCameraPermission()) needed.add(Manifest.permission.CAMERA);
+    for (String perm : getLocationPermissions()) {
+      if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+        needed.add(perm);
+      }
+    }
+    if (!needed.isEmpty()) {
+      startupPermissionLauncher.launch(needed.toArray(new String[0]));
+    }
+  }
+
+  private String[] getLocationPermissions() {
+    return new String[] {
+      Manifest.permission.ACCESS_FINE_LOCATION,
+      Manifest.permission.ACCESS_COARSE_LOCATION
+    };
+  }
+
   private boolean needsCameraPermission() {
+    return !hasCameraPermission();
+  }
+
+  private boolean hasCameraPermission() {
     return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-        != PackageManager.PERMISSION_GRANTED;
+        == PackageManager.PERMISSION_GRANTED;
+  }
+
+  private boolean hasLocationPermission() {
+    return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED
+        || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED;
   }
 
   private void openFileChooser() {
@@ -409,7 +478,7 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     errorPanel.setVisibility(View.GONE);
-    webView.loadUrl(BuildConfig.SUPERVISOR_URL);
+    webView.loadUrl(LOCAL_LOGIN_URL);
   }
 
   private void showError(@NonNull String message) {
@@ -422,26 +491,18 @@ public class MainActivity extends AppCompatActivity {
 
   private boolean isOnline() {
     ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-    if (cm == null) {
-      return false;
-    }
+    if (cm == null) return false;
     android.net.Network network = cm.getActiveNetwork();
-    if (network == null) {
-      return false;
-    }
+    if (network == null) return false;
     NetworkCapabilities capabilities = cm.getNetworkCapabilities(network);
     return capabilities != null
-        && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-            || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-            || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+        && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
   }
 
   @Override
   protected void onDestroy() {
     securityExecutor.shutdownNow();
-    if (webView != null) {
-      webView.destroy();
-    }
+    if (webView != null) webView.destroy();
     super.onDestroy();
   }
 }
