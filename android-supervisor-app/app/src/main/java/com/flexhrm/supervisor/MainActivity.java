@@ -6,11 +6,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Typeface;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
@@ -24,25 +27,34 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
   private static final String SUPERVISOR_HOST = "greenyellow-woodpecker-750354.hostingersite.com";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.0";
 
   private WebView webView;
   private ProgressBar progressBar;
   private LinearLayout errorPanel;
+  private LinearLayout securityCheckPanel;
   private TextView errorMessage;
   private ValueCallback<Uri[]> filePathCallback;
+  private AlertDialog blockedAppsDialog;
+  private boolean portalLoaded;
+  private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
 
   private final ActivityResultLauncher<String[]> permissionLauncher =
       registerForActivityResult(
@@ -92,14 +104,16 @@ public class MainActivity extends AppCompatActivity {
     webView = findViewById(R.id.webView);
     progressBar = findViewById(R.id.progressBar);
     errorPanel = findViewById(R.id.errorPanel);
+    securityCheckPanel = findViewById(R.id.securityCheckPanel);
     errorMessage = findViewById(R.id.errorMessage);
     Button retryButton = findViewById(R.id.retryButton);
 
-    retryButton.setOnClickListener(v -> loadPortal());
+    retryButton.setOnClickListener(v -> runSecurityCheck());
+    webView.setVisibility(View.GONE);
 
     configureWebView();
     requestStartupPermissions();
-    loadPortal();
+    runSecurityCheck();
 
     getOnBackPressedDispatcher()
         .addCallback(
@@ -107,7 +121,10 @@ public class MainActivity extends AppCompatActivity {
             new OnBackPressedCallback(true) {
               @Override
               public void handleOnBackPressed() {
-                if (webView.canGoBack()) {
+                if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) {
+                  return;
+                }
+                if (webView.getVisibility() == View.VISIBLE && webView.canGoBack()) {
                   webView.goBack();
                 } else {
                   setEnabled(false);
@@ -115,6 +132,134 @@ public class MainActivity extends AppCompatActivity {
                 }
               }
             });
+  }
+
+  @Override
+  protected void onResume() {
+    super.onResume();
+    if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) {
+      runSecurityCheck();
+    }
+  }
+
+  private void runSecurityCheck() {
+    if (!isOnline()) {
+      showError(getString(R.string.error_no_internet));
+      return;
+    }
+
+    errorPanel.setVisibility(View.GONE);
+    securityCheckPanel.setVisibility(View.VISIBLE);
+    webView.setVisibility(View.GONE);
+    portalLoaded = false;
+
+    securityExecutor.execute(
+        () -> {
+          try {
+            List<String> policy =
+                PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
+            if (policy.isEmpty()) {
+              runOnUiThread(this::openPortal);
+              return;
+            }
+
+            List<BlockedAppsScanner.InstalledApp> installed =
+                BlockedAppsScanner.getUserInstalledApps(MainActivity.this);
+            List<DetectedBlockedApp> detected =
+                BlockedAppsScanner.findInstalledBlockedApps(policy, installed);
+
+            runOnUiThread(
+                () -> {
+                  securityCheckPanel.setVisibility(View.GONE);
+                  if (detected.isEmpty()) {
+                    openPortal();
+                  } else {
+                    showBlockedAppsDialog(detected);
+                  }
+                });
+          } catch (Exception error) {
+            runOnUiThread(
+                () -> {
+                  securityCheckPanel.setVisibility(View.GONE);
+                  showError(getString(R.string.security_check_failed));
+                });
+          }
+        });
+  }
+
+  private void showBlockedAppsDialog(List<DetectedBlockedApp> detected) {
+    if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) {
+      blockedAppsDialog.dismiss();
+    }
+
+    ScrollView scrollView = new ScrollView(this);
+    int padding = dp(16);
+    scrollView.setPadding(padding, padding, padding, padding);
+
+    LinearLayout container = new LinearLayout(this);
+    container.setOrientation(LinearLayout.VERTICAL);
+
+    TextView intro = new TextView(this);
+    intro.setText(getString(R.string.blocked_apps_message));
+    intro.setTextColor(0xFF475569);
+    intro.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+    intro.setPadding(0, 0, 0, dp(12));
+    container.addView(intro);
+
+    for (DetectedBlockedApp app : detected) {
+      LinearLayout row = new LinearLayout(this);
+      row.setOrientation(LinearLayout.HORIZONTAL);
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setPadding(0, 0, 0, dp(10));
+
+      TextView name = new TextView(this);
+      name.setLayoutParams(
+          new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+      name.setText(app.appName);
+      name.setTextColor(0xFF0F172A);
+      name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+      name.setTypeface(Typeface.DEFAULT_BOLD);
+
+      Button uninstall = new Button(this);
+      uninstall.setText(getString(R.string.blocked_apps_uninstall));
+      uninstall.setAllCaps(false);
+      uninstall.setOnClickListener(v -> uninstallApp(app.packageName));
+
+      row.addView(name);
+      row.addView(uninstall);
+      container.addView(row);
+    }
+
+    scrollView.addView(container);
+
+    blockedAppsDialog =
+        new AlertDialog.Builder(this)
+            .setTitle(getString(R.string.blocked_apps_title))
+            .setView(scrollView)
+            .setCancelable(false)
+            .setPositiveButton(getString(R.string.blocked_apps_check_again), (dialog, which) -> runSecurityCheck())
+            .create();
+    blockedAppsDialog.show();
+  }
+
+  private void uninstallApp(String packageName) {
+    Intent intent = new Intent(Intent.ACTION_DELETE);
+    intent.setData(Uri.parse("package:" + packageName));
+    startActivity(intent);
+  }
+
+  private int dp(int value) {
+    return Math.round(value * getResources().getDisplayMetrics().density);
+  }
+
+  private void openPortal() {
+    if (portalLoaded) {
+      webView.setVisibility(View.VISIBLE);
+      return;
+    }
+    portalLoaded = true;
+    webView.setVisibility(View.VISIBLE);
+    loadPortal();
   }
 
   @SuppressLint("SetJavaScriptEnabled")
@@ -132,6 +277,11 @@ public class MainActivity extends AppCompatActivity {
     settings.setLoadWithOverviewMode(true);
     settings.setBuiltInZoomControls(false);
     settings.setDisplayZoomControls(false);
+
+    String defaultUa = settings.getUserAgentString();
+    if (defaultUa == null || !defaultUa.contains(NATIVE_USER_AGENT_TOKEN)) {
+      settings.setUserAgentString(defaultUa + " " + NATIVE_USER_AGENT_TOKEN);
+    }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       settings.setSafeBrowsingEnabled(true);
@@ -264,6 +414,8 @@ public class MainActivity extends AppCompatActivity {
 
   private void showError(@NonNull String message) {
     progressBar.setVisibility(View.GONE);
+    securityCheckPanel.setVisibility(View.GONE);
+    webView.setVisibility(View.GONE);
     errorMessage.setText(message);
     errorPanel.setVisibility(View.VISIBLE);
   }
@@ -286,6 +438,7 @@ public class MainActivity extends AppCompatActivity {
 
   @Override
   protected void onDestroy() {
+    securityExecutor.shutdownNow();
     if (webView != null) {
       webView.destroy();
     }

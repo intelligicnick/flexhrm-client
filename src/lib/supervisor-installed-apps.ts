@@ -129,9 +129,21 @@ function parseInstalledAppsPayload(raw: string): InstalledApp[] {
 }
 
 export function canScanInstalledApps(): boolean {
+  if (isFlexHrmNativeApp()) return true;
   if (typeof window === "undefined") return false;
   const bridge = window.FlexHrmAndroid || window.Android;
   return Boolean(bridge?.getInstalledApps || bridge?.getInstalledPackages);
+}
+
+export function isFlexHrmNativeApp(): boolean {
+  if (typeof navigator !== "undefined" && /FlexHrmSupervisor/i.test(navigator.userAgent)) {
+    return true;
+  }
+  if (typeof window !== "undefined") {
+    const bridge = window.FlexHrmAndroid || window.Android;
+    return Boolean(bridge?.getInstalledApps || bridge?.getInstalledPackages);
+  }
+  return false;
 }
 
 export function isAndroidDevice(): boolean {

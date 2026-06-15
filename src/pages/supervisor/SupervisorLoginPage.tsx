@@ -17,6 +17,7 @@ import {
   canScanInstalledApps,
   findInstalledBlockedApps,
   getInstalledApps,
+  isFlexHrmNativeApp,
   openAppUninstall,
   type DetectedBlockedApp,
 } from "../../lib/supervisor-installed-apps";
@@ -118,8 +119,14 @@ function LoginForm() {
 
   const deviceId = getSupervisorDeviceId();
   const deviceName = getSupervisorDeviceName();
+  const nativeApp = isFlexHrmNativeApp();
 
   const scanDeviceForBlockedApps = useCallback(async (policy: string[]): Promise<DetectedBlockedApp[]> => {
+    if (nativeApp) {
+      setCanScanDevice(true);
+      setDetectedBlockedApps([]);
+      return [];
+    }
     setAppsScanning(true);
     try {
       const scanAvailable = canScanInstalledApps();
@@ -140,9 +147,16 @@ function LoginForm() {
     } finally {
       setAppsScanning(false);
     }
-  }, []);
+  }, [nativeApp]);
 
   const fetchBlockedApps = useCallback(async () => {
+    if (nativeApp) {
+      setBlockedAppsPolicy([]);
+      setDetectedBlockedApps([]);
+      setCanScanDevice(true);
+      setAppsLoading(false);
+      return;
+    }
     setAppsLoading(true);
     try {
       const res = await fetch(apiUrl("/api/auth/supervisor/portal-policy"));
@@ -159,7 +173,7 @@ function LoginForm() {
     } finally {
       setAppsLoading(false);
     }
-  }, [scanDeviceForBlockedApps]);
+  }, [nativeApp, scanDeviceForBlockedApps]);
 
   useEffect(() => {
     void fetchBlockedApps();
@@ -240,7 +254,7 @@ function LoginForm() {
     setLoading(true);
     setError(null);
     try {
-      if (blockedAppsPolicy.length > 0) {
+      if (!nativeApp && blockedAppsPolicy.length > 0) {
         if (!canScanInstalledApps()) {
           throw new Error(t("appsCheckNativeAppRequired"));
         }
@@ -326,7 +340,7 @@ function LoginForm() {
     </div>
   );
 
-  if (appsLoading) {
+  if (!nativeApp && appsLoading) {
     return shell(
       <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/80 p-10 flex flex-col items-center justify-center gap-3">
         <Loader2 size={28} className="animate-spin text-[#ff791a]" />
