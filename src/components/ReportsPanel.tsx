@@ -177,7 +177,7 @@ export default function ReportsPanel() {
   const canExport = filteredReportEmployees.length > 0 && selectedReportColumns.length > 0;
   const previewRows = filteredReportEmployees.slice(0, 50);
 
-  const toggleColumnGroup = (groupHeaders: string[], isAllChecked: boolean) => {
+  const toggleColumnGroup = (groupHeaders: readonly string[], isAllChecked: boolean) => {
     if (isAllChecked) {
       setSelectedReportColumns((prev) => prev.filter((h) => !groupHeaders.includes(h)));
     } else {

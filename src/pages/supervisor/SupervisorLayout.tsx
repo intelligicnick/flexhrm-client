@@ -10,8 +10,8 @@ import {
   Languages,
   Bell,
 } from "lucide-react";
-import { apiUrl } from "../../api";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
+import { supervisorFetch } from "../../lib/supervisor-fetch";
 import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
 import {
   clearSupervisorImpersonatedFlag,
@@ -22,14 +22,6 @@ import { useNotificationPoller } from "../../hooks/useNotificationPoller";
 import { requestBrowserNotificationPermission } from "../../lib/notification-alerts";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPermissionsGate from "./SupervisorPermissionsGate";
-
-function supervisorFetch(input: string, init?: RequestInit): Promise<Response> {
-  const token = localStorage.getItem("hrms_supervisor_token");
-  const headers = new Headers(init?.headers || {});
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  headers.set("X-Supervisor-Device-Id", getSupervisorDeviceId());
-  return fetch(apiUrl(input), { ...init, headers });
-}
 
 export function useSupervisorApi() {
   return { supervisorFetch };
@@ -296,5 +288,3 @@ export default function SupervisorLayout() {
     </SupervisorI18nProvider>
   );
 }
-
-export { supervisorFetch };

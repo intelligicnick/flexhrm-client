@@ -7,9 +7,12 @@ import './index.css';
 setupFetchInterceptor();
 
 if (typeof window !== 'undefined' && window.location.pathname.startsWith('/supervisor')) {
-  void import('virtual:pwa-register').then(({ registerSW }) => {
-    registerSW({ immediate: true });
-  });
+  const isNativeApp = /FlexHrmSupervisor/i.test(navigator.userAgent);
+  if (!isNativeApp) {
+    void import('virtual:pwa-register').then(({ registerSW }) => {
+      registerSW({ immediate: true });
+    });
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

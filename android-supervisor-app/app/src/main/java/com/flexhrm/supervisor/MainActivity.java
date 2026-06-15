@@ -35,6 +35,7 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -50,8 +51,8 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmSupervisor";
   private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.4";
-  private static final String LOCAL_LOGIN_URL =
-      "https://appassets.androidplatform.net/supervisor/login";
+  private static final String REMOTE_LOGIN_URL =
+      "https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login";
 
   private WebView webView;
   private ProgressBar progressBar;
@@ -65,6 +66,7 @@ public class MainActivity extends AppCompatActivity {
   private String pendingGeoOrigin;
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
+  private boolean useRemoteFallback;
   private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
 
   private final ActivityResultLauncher<String[]> startupPermissionLauncher =
@@ -291,13 +293,14 @@ public class MainActivity extends AppCompatActivity {
 
     webView.setWebViewClient(
         new WebViewClient() {
+          @Nullable
           @Override
           public WebResourceResponse shouldInterceptRequest(
               WebView view, WebResourceRequest request) {
-            if (request != null && request.getUrl() != null) {
-              return assetLoader.shouldInterceptRequest(request.getUrl());
+            if (useRemoteFallback || request.getUrl() == null) {
+              return super.shouldInterceptRequest(view, request);
             }
-            return super.shouldInterceptRequest(view, request);
+            return assetLoader.shouldInterceptRequest(request.getUrl());
           }
 
           @Override
@@ -314,9 +317,15 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public void onReceivedError(
               WebView view, WebResourceRequest request, WebResourceError error) {
-            if (request.isForMainFrame()) {
-              showError(getString(R.string.error_page_load));
+            if (!request.isForMainFrame()) return;
+            if (!useRemoteFallback) {
+              Log.w(TAG, "Bundled UI failed, falling back to remote login URL");
+              useRemoteFallback = true;
+              portalLoaded = false;
+              webView.loadUrl(REMOTE_LOGIN_URL);
+              return;
             }
+            showError(getString(R.string.error_page_load));
           }
 
           @Override
@@ -324,7 +333,9 @@ public class MainActivity extends AppCompatActivity {
             Uri uri = request.getUrl();
             if (uri == null) return false;
             String host = uri.getHost();
-            if (host != null && host.contains("appassets.androidplatform.net")) {
+            if (host != null
+                && (host.contains("appassets.androidplatform.net")
+                    || host.contains("hostingersite.com"))) {
               return false;
             }
             if ("https".equalsIgnoreCase(uri.getScheme())
@@ -377,6 +388,20 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public void onProgressChanged(WebView view, int newProgress) {
             progressBar.setProgress(newProgress);
+          }
+
+          @Override
+          public boolean onConsoleMessage(android.webkit.ConsoleMessage consoleMessage) {
+            Log.d(
+                TAG,
+                "WebView: "
+                    + consoleMessage.message()
+                    + " ("
+                    + consoleMessage.sourceId()
+                    + ":"
+                    + consoleMessage.lineNumber()
+                    + ")");
+            return super.onConsoleMessage(consoleMessage);
           }
         });
   }
@@ -478,7 +503,10 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     errorPanel.setVisibility(View.GONE);
-    webView.loadUrl(LOCAL_LOGIN_URL);
+    webView.loadUrl(
+        useRemoteFallback
+            ? REMOTE_LOGIN_URL
+            : "https://appassets.androidplatform.net/supervisor/login");
   }
 
   private void showError(@NonNull String message) {

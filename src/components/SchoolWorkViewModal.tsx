@@ -55,6 +55,14 @@ export default function SchoolWorkViewModal({
     [supervisors, school.block],
   );
 
+  const assignedSupervisor = useMemo(
+    () =>
+      school.assignedSupervisorId
+        ? supervisors.find((supervisor) => supervisor.id === school.assignedSupervisorId)
+        : undefined,
+    [supervisors, school.assignedSupervisorId],
+  );
+
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";

@@ -65,6 +65,7 @@ function notificationTypeLabel(type: AppNotification["type"], t: (key: string) =
     commitment_admin_update: t("notifCommitmentAdminUpdate"),
     supervisor_request_new: t("notifRequestNew"),
     supervisor_request_response: t("adminResponse"),
+    supervisor_request_escalated: t("notifRequestEscalated"),
     visit_submitted: t("notifVisitSubmitted"),
     visit_reviewed: t("notifVisitReviewed"),
     planned_visit_due: t("notifPlannedVisitDue"),

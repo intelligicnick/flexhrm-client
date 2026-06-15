@@ -980,7 +980,9 @@ export default function DashboardLayout() {
                               unreadCount={adminNotificationUnreadCount}
                               notifications={adminNotifications}
                               loading={isFetchingAdminNotifications}
-                              onRefresh={fetchAdminNotifications}
+                              onRefresh={async () => {
+                                await fetchAdminNotifications();
+                              }}
                               onMarkRead={handleMarkAdminNotificationRead}
                               onMarkAllRead={handleMarkAllAdminNotificationsRead}
                               onNavigate={handleAdminNotificationNavigate}

@@ -61,6 +61,21 @@ const COLUMNS: { key: keyof SchoolWork; label: string }[] = [
 const FILTER_SELECT_CLASS =
   "py-2 pr-6 pl-1 bg-transparent border-0 text-xs font-semibold text-slate-700 focus:ring-0 focus:outline-none cursor-pointer max-w-[140px] truncate";
 
+function renderSchoolWorkCell(school: SchoolWork, key: keyof SchoolWork): React.ReactNode {
+  const value = school[key];
+  if (key === "schoolCategory" && typeof value === "string" && value) {
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-100 text-[10px] font-bold">
+        {value}
+      </span>
+    );
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  return "";
+}
+
 export default function SchoolWorkTable({
   schools,
   districts = [],
@@ -460,13 +475,7 @@ export default function SchoolWorkTable({
                         }`}
                         title={String(school[col.key] ?? "")}
                       >
-                        {col.key === "schoolCategory" && school[col.key] ? (
-                          <span className="inline-flex px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-100 text-[10px] font-bold">
-                            {school[col.key]}
-                          </span>
-                        ) : (
-                          (school[col.key] ?? "")
-                        )}
+                        {renderSchoolWorkCell(school, col.key)}
                       </td>
                     ))}
                     <td

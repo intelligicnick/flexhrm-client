@@ -23,6 +23,10 @@ interface SchoolWorkFormModalProps {
 
 type FormTab = "school" | "contacts" | "pay" | "banking" | "notes";
 
+type SchoolWorkScalarKey = {
+  [K in keyof SchoolWork]: SchoolWork[K] extends string | number ? K : never;
+}[keyof SchoolWork];
+
 const FORM_TABS: { id: FormTab; label: string; icon: React.ReactNode }[] = [
   { id: "school", label: "School & Location", icon: <School size={14} /> },
   { id: "contacts", label: "Contacts", icon: <Users size={14} /> },
@@ -134,7 +138,7 @@ export default function SchoolWorkFormModal({
   };
 
   const renderTextInput = (
-    key: keyof SchoolWork,
+    key: SchoolWorkScalarKey,
     label: string,
     type: "text" | "number" = "text",
     placeholder?: string,

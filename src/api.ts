@@ -72,8 +72,9 @@ function appendAuthHeader(init: RequestInit | undefined, token: string): Request
 export function setupFetchInterceptor(): void {
   if (typeof window === "undefined") return;
   const marker = "__flexhrm_fetch_interceptor__";
-  if ((window as Window & { [key: string]: boolean })[marker]) return;
-  (window as Window & { [key: string]: boolean })[marker] = true;
+  const win = window as unknown as Window & Record<string, boolean>;
+  if (win[marker]) return;
+  win[marker] = true;
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
