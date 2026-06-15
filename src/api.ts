@@ -36,12 +36,27 @@ function isNetworkFetchError(err: unknown): boolean {
   );
 }
 
+function defaultNetworkFetchMessage(): string {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    ) {
+      return "Cannot reach the API server. Ensure the NestJS backend is running (port 3001) and reload this page.";
+    }
+  }
+  return "Cannot reach the API server. Check your internet connection and try again. If the problem continues, contact your admin.";
+}
+
 export function formatNetworkFetchError(err: unknown, fallback?: string): Error {
   if (isNetworkFetchError(err)) {
-    return new Error(
-      fallback ||
-        "Cannot reach the API server. Ensure the NestJS backend is running (port 3001) and reload this page.",
-    );
+    return new Error(fallback || defaultNetworkFetchMessage());
   }
   if (err instanceof Error) return err;
   return new Error(fallback || "Request failed.");
