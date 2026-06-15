@@ -85,12 +85,12 @@ function SupervisorLayoutInner() {
       }
 
       const localDeviceId = getSupervisorDeviceId();
-      if (!isImpersonated && !data.hasRegisteredDevice) {
-        navigate("/supervisor/login?step=device", { replace: true });
-        return;
-      }
       if (!isImpersonated && data.registeredDeviceId && data.registeredDeviceId !== localDeviceId) {
-        navigate("/supervisor/login?step=device", { replace: true });
+        localStorage.removeItem("hrms_supervisor_token");
+        localStorage.removeItem("hrms_supervisor_name");
+        localStorage.removeItem("hrms_supervisor_id");
+        clearSupervisorImpersonatedFlag();
+        navigate("/supervisor/login?reason=device_mismatch", { replace: true });
         return;
       }
 

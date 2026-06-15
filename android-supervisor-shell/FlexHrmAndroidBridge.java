@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.webkit.JavascriptInterface;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -18,6 +19,11 @@ public class FlexHrmAndroidBridge {
 
   public FlexHrmAndroidBridge(MainActivity activity) {
     this.activity = activity;
+  }
+
+  @JavascriptInterface
+  public String getBuildNumber() {
+    return Build.DISPLAY != null ? Build.DISPLAY : "";
   }
 
   @JavascriptInterface
