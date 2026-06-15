@@ -1,3 +1,4 @@
+import { DEFAULT_PRODUCTION_API_BASE } from "./api-config";
 import { PRODUCTION_ID_CARD_VERIFY_BASE } from "./deploy-urls";
 
 /** Injected at build time from FLEXHRM_API_BASE / PUBLIC_API_URL / VITE_API_BASE. */
@@ -26,8 +27,37 @@ function isLocalUiHost(): boolean {
   );
 }
 
+function isBundledNativeShellHost(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.hostname.toLowerCase().endsWith("appassets.androidplatform.net");
+}
+
+function isNativeSupervisorShell(): boolean {
+  if (typeof window === "undefined") return false;
+  if (isBundledNativeShellHost()) return true;
+  return /FlexHrmSupervisor/i.test(navigator.userAgent);
+}
+
+function readNativeApiBase(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const fromBridge = window.FlexHrmAndroid?.getApiBase?.();
+    if (fromBridge) return String(fromBridge).trim().replace(/\/$/, "");
+  } catch {
+    // Bridge may be unavailable during very early boot.
+  }
+  return "";
+}
+
 /** API origin. Local/dev uses same-origin /api proxy; remote production uses build-time API base. */
 export function getApiBase(): string {
+  const nativeBase = readNativeApiBase();
+  if (nativeBase) return nativeBase;
+
+  if (isNativeSupervisorShell()) {
+    return DEFAULT_PRODUCTION_API_BASE.replace(/\/$/, "");
+  }
+
   if (import.meta.env.DEV || isLocalUiHost()) return "";
   return (__FLEXHRM_API_BASE__ || "").replace(/\/$/, "");
 }

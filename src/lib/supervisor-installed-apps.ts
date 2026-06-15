@@ -10,6 +10,8 @@ export type DetectedBlockedApp = {
 };
 
 type NativeAndroidBridge = {
+  getApiBase?: () => string;
+  getDeviceId?: () => string;
   getInstalledApps?: () => string;
   getInstalledPackages?: () => string;
   uninstallApp?: (packageName: string) => void;
@@ -92,14 +94,10 @@ export function parseBlockedAppEntry(entry: string): { label: string; packageNam
   return { label: trimmed, packageNames: [] };
 }
 
-function fuzzyMatchByLabel(label: string, installedApps: InstalledApp[]): InstalledApp | undefined {
+function exactLabelMatch(label: string, installedApps: InstalledApp[]): InstalledApp | undefined {
   const labelNorm = normalizeKey(label);
-  if (labelNorm.length < 3) return undefined;
-
   for (const app of installedApps) {
-    if (!app.appName) continue;
-    const appNorm = normalizeKey(app.appName);
-    if (appNorm === labelNorm || appNorm.includes(labelNorm) || labelNorm.includes(appNorm)) {
+    if (app.appName && normalizeKey(app.appName) === labelNorm) {
       return app;
     }
   }
@@ -168,13 +166,9 @@ export function findInstalledBlockedApps(
   installedApps: InstalledApp[],
 ): DetectedBlockedApp[] {
   const installedByPackage = new Map<string, InstalledApp>();
-  const installedByLabel = new Map<string, InstalledApp>();
 
   for (const app of installedApps) {
     installedByPackage.set(normalizeKey(app.packageName), app);
-    if (app.appName) {
-      installedByLabel.set(normalizeKey(app.appName), app);
-    }
   }
 
   const detected: DetectedBlockedApp[] = [];
@@ -192,11 +186,7 @@ export function findInstalledBlockedApps(
     }
 
     if (!match) {
-      match = installedByLabel.get(normalizeKey(label));
-    }
-
-    if (!match && packageNames.length === 0) {
-      match = fuzzyMatchByLabel(label, installedApps);
+      match = exactLabelMatch(label, installedApps);
     }
 
     if (!match) continue;

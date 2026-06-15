@@ -13,6 +13,7 @@ import { apiUrl, formatNetworkFetchError } from "../../api";
 import { getSupervisorDeviceId, getSupervisorDeviceName } from "../../lib/supervisor-device";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
+import SupervisorBlockedAppsGate from "./SupervisorBlockedAppsGate";
 
 function LoginForm() {
   const navigate = useNavigate();
@@ -262,7 +263,9 @@ function LoginForm() {
 export default function SupervisorLoginPage() {
   return (
     <SupervisorI18nProvider>
-      <LoginForm />
+      <SupervisorBlockedAppsGate>
+        <LoginForm />
+      </SupervisorBlockedAppsGate>
     </SupervisorI18nProvider>
   );
 }

@@ -30,6 +30,33 @@ public final class BlockedAppsScanner {
     KNOWN_APP_PACKAGES.put("gps joystick", new String[] {"com.theappninjas.gpsjoystick"});
     KNOWN_APP_PACKAGES.put("fly gps", new String[] {"com.fakegps.mock"});
     KNOWN_APP_PACKAGES.put("anydesk", new String[] {"com.anydesk.anydeskandroid"});
+    KNOWN_APP_PACKAGES.put("teamviewer", new String[] {"com.teamviewer.teamviewer.market.mobile"});
+    KNOWN_APP_PACKAGES.put("whatsapp", new String[] {"com.whatsapp", "com.whatsapp.w4b"});
+    KNOWN_APP_PACKAGES.put("telegram", new String[] {"org.telegram.messenger", "org.telegram.messenger.web"});
+    KNOWN_APP_PACKAGES.put("facebook", new String[] {"com.facebook.katana", "com.facebook.lite"});
+    KNOWN_APP_PACKAGES.put("instagram", new String[] {"com.instagram.android"});
+    KNOWN_APP_PACKAGES.put("snapchat", new String[] {"com.snapchat.android"});
+    KNOWN_APP_PACKAGES.put("tiktok", new String[] {"com.zhiliaoapp.musically", "com.ss.android.ugc.trill"});
+    KNOWN_APP_PACKAGES.put("twitter", new String[] {"com.twitter.android"});
+    KNOWN_APP_PACKAGES.put("x", new String[] {"com.twitter.android"});
+    KNOWN_APP_PACKAGES.put("zoom", new String[] {"us.zoom.videomeetings"});
+    KNOWN_APP_PACKAGES.put("teams", new String[] {"com.microsoft.teams"});
+    KNOWN_APP_PACKAGES.put("discord", new String[] {"com.discord"});
+    KNOWN_APP_PACKAGES.put("signal", new String[] {"org.thoughtcrime.securesms"});
+    KNOWN_APP_PACKAGES.put("viber", new String[] {"com.viber.voip"});
+    KNOWN_APP_PACKAGES.put("wechat", new String[] {"com.tencent.mm"});
+    KNOWN_APP_PACKAGES.put("truecaller", new String[] {"com.truecaller"});
+    KNOWN_APP_PACKAGES.put("shareit", new String[] {"com.lenovo.anyshare.gps"});
+    KNOWN_APP_PACKAGES.put("pubg", new String[] {"com.tencent.ig", "com.pubg.imobile"});
+    KNOWN_APP_PACKAGES.put("free fire", new String[] {"com.dts.freefireth", "com.dts.freefiremax"});
+    KNOWN_APP_PACKAGES.put("unicool tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
+    KNOWN_APP_PACKAGES.put("tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
+    KNOWN_APP_PACKAGES.put("virtual location", new String[] {"com.lexa.fakegps", "com.imyfone.anytoandroid"});
+    KNOWN_APP_PACKAGES.put("locationsimulator", new String[] {"com.lexa.fakegps", "com.incorporateapps.fakegps.fre"});
+    KNOWN_APP_PACKAGES.put("dr.fone virtual location", new String[] {"com.wondershare.drfonevirtuallocation"});
+    KNOWN_APP_PACKAGES.put("3utools", new String[] {"com.3u.tools"});
+    KNOWN_APP_PACKAGES.put("easeus mobianygo", new String[] {"com.easeus.mobianygo"});
+    KNOWN_APP_PACKAGES.put("wootechy imovego", new String[] {"com.wootechy.imovego"});
   }
 
   private BlockedAppsScanner() {}
@@ -53,11 +80,9 @@ public final class BlockedAppsScanner {
   public static List<DetectedBlockedApp> findInstalledBlockedApps(
       List<String> blockedEntries, List<InstalledApp> installedApps) {
     Map<String, InstalledApp> installedByPackage = new HashMap<>();
-    Map<String, InstalledApp> installedByLabel = new HashMap<>();
 
     for (InstalledApp app : installedApps) {
       installedByPackage.put(normalize(app.packageName), app);
-      installedByLabel.put(normalize(app.appName), app);
     }
 
     List<DetectedBlockedApp> detected = new ArrayList<>();
@@ -73,10 +98,7 @@ public final class BlockedAppsScanner {
         if (match != null) break;
       }
       if (match == null) {
-        match = installedByLabel.get(normalize(parsed.label));
-      }
-      if (match == null && parsed.packageNames.length == 0) {
-        match = fuzzyMatchByLabel(parsed.label, installedApps);
+        match = exactLabelMatch(parsed.label, installedApps);
       }
       if (match == null) continue;
 
@@ -91,12 +113,10 @@ public final class BlockedAppsScanner {
     return detected;
   }
 
-  private static InstalledApp fuzzyMatchByLabel(String label, List<InstalledApp> installedApps) {
+  private static InstalledApp exactLabelMatch(String label, List<InstalledApp> installedApps) {
     String labelNorm = normalize(label);
-    if (labelNorm.length() < 3) return null;
     for (InstalledApp app : installedApps) {
-      String appNorm = normalize(app.appName);
-      if (appNorm.equals(labelNorm) || appNorm.contains(labelNorm) || labelNorm.contains(appNorm)) {
+      if (app.appName != null && normalize(app.appName).equals(labelNorm)) {
         return app;
       }
     }

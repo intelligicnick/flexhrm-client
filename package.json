@@ -8,6 +8,7 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "NODE_ENV=production node dist/server.cjs",
     "export": "bash scripts/export-for-hostinger.sh",
+    "build:android-apk": "bash scripts/build-android-apk.sh",
     "install:server": "bash scripts/install-on-server.sh",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

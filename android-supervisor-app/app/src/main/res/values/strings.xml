@@ -6,9 +6,11 @@
     <string name="error_page_load">Could not load the supervisor portal.</string>
     <string name="retry">Retry</string>
     <string name="permission_rationale">Camera and location are required for school visits.</string>
-    <string name="security_check_scanning">Checking device…</string>
+    <string name="security_check_scanning">Scanning installed apps…</string>
+    <string name="error_security_check">Could not verify device security. Check your internet and try again.</string>
     <string name="blocked_apps_title">Restricted app found</string>
-    <string name="blocked_apps_message">Please uninstall this app to continue.</string>
+    <string name="blocked_apps_message">The following restricted apps are installed on this device. Please uninstall them to continue.</string>
+    <string name="blocked_apps_message_single">%1$s is installed on your device. Please remove it to proceed.</string>
     <string name="blocked_apps_uninstall">Uninstall now</string>
     <string name="blocked_apps_check_again">Check again</string>
 </resources>

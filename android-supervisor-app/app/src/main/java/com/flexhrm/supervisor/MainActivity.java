@@ -50,7 +50,9 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmSupervisor";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.4";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.5.1";
+  private static final String BUNDLED_LOGIN_URL =
+      "https://appassets.androidplatform.net/supervisor/login";
   private static final String REMOTE_LOGIN_URL =
       "https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login";
 
@@ -66,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
   private String pendingGeoOrigin;
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
-  private boolean useRemoteFallback;
+  private boolean useBundledFallback;
   private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
 
   private final ActivityResultLauncher<String[]> startupPermissionLauncher =
@@ -170,6 +172,14 @@ public class MainActivity extends AppCompatActivity {
                 BlockedAppsScanner.getUserInstalledApps(MainActivity.this);
             List<DetectedBlockedApp> detected =
                 BlockedAppsScanner.findInstalledBlockedApps(policy, installed);
+            Log.d(
+                TAG,
+                "Blocked app scan: policy="
+                    + policy.size()
+                    + " installed="
+                    + installed.size()
+                    + " detected="
+                    + detected.size());
 
             runOnUiThread(
                 () -> {
@@ -181,8 +191,12 @@ public class MainActivity extends AppCompatActivity {
                   }
                 });
           } catch (Exception error) {
-            Log.w(TAG, "Security scan failed, opening login without list UI", error);
-            runOnUiThread(this::openPortal);
+            Log.w(TAG, "Security scan failed", error);
+            runOnUiThread(
+                () -> {
+                  securityCheckPanel.setVisibility(View.GONE);
+                  showError(getString(R.string.error_security_check));
+                });
           }
         });
   }
@@ -200,7 +214,10 @@ public class MainActivity extends AppCompatActivity {
     container.setOrientation(LinearLayout.VERTICAL);
 
     TextView intro = new TextView(this);
-    intro.setText(getString(R.string.blocked_apps_message));
+    intro.setText(
+        detected.size() == 1
+            ? getString(R.string.blocked_apps_message_single, detected.get(0).appName)
+            : getString(R.string.blocked_apps_message));
     intro.setTextColor(0xFF475569);
     intro.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
     intro.setPadding(0, 0, 0, dp(12));
@@ -297,7 +314,7 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public WebResourceResponse shouldInterceptRequest(
               WebView view, WebResourceRequest request) {
-            if (useRemoteFallback || request.getUrl() == null) {
+            if (useBundledFallback || request.getUrl() == null) {
               return super.shouldInterceptRequest(view, request);
             }
             return assetLoader.shouldInterceptRequest(request.getUrl());
@@ -318,11 +335,11 @@ public class MainActivity extends AppCompatActivity {
           public void onReceivedError(
               WebView view, WebResourceRequest request, WebResourceError error) {
             if (!request.isForMainFrame()) return;
-            if (!useRemoteFallback) {
-              Log.w(TAG, "Bundled UI failed, falling back to remote login URL");
-              useRemoteFallback = true;
+            if (!useBundledFallback) {
+              Log.w(TAG, "Remote UI failed, falling back to bundled login URL");
+              useBundledFallback = true;
               portalLoaded = false;
-              webView.loadUrl(REMOTE_LOGIN_URL);
+              webView.loadUrl(BUNDLED_LOGIN_URL);
               return;
             }
             showError(getString(R.string.error_page_load));
@@ -503,10 +520,7 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     errorPanel.setVisibility(View.GONE);
-    webView.loadUrl(
-        useRemoteFallback
-            ? REMOTE_LOGIN_URL
-            : "https://appassets.androidplatform.net/supervisor/login");
+    webView.loadUrl(useBundledFallback ? BUNDLED_LOGIN_URL : REMOTE_LOGIN_URL);
   }
 
   private void showError(@NonNull String message) {

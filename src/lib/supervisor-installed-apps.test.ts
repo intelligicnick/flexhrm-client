@@ -35,4 +35,27 @@ describe("supervisor-installed-apps", () => {
     expect(detected).toHaveLength(1);
     expect(detected[0].packageName).toBe("com.whatsapp");
   });
+
+  it("does not flag blocked labels that are not installed", () => {
+    const installed: InstalledApp[] = [
+      { packageName: "com.flexhrm.supervisor", appName: "Flex HRM Field Team" },
+    ];
+
+    const detected = findInstalledBlockedApps(
+      ["WhatsApp", "Telegram", "Zoom", "AnyTo", "Fake GPS"],
+      installed,
+    );
+
+    expect(detected).toHaveLength(0);
+  });
+
+  it("does not fuzzy-match partial app names", () => {
+    const installed: InstalledApp[] = [
+      { packageName: "com.google.android.apps.photos", appName: "Photos" },
+    ];
+
+    const detected = findInstalledBlockedApps(["To"], installed);
+
+    expect(detected).toHaveLength(0);
+  });
 });
