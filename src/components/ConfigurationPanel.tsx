@@ -23,12 +23,14 @@ import {
   Trash2,
   Users,
   X,
+  Archive,
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import PercentIcon from "./ui/PercentIcon";
 import TypeToConfirmDialog from "./ui/TypeToConfirmDialog";
 import SchoolConfigurationPanel from "./SchoolConfigurationPanel";
 import BlockedAppsConfigurationPanel from "./BlockedAppsConfigurationPanel";
+import DataArchivePanel from "./DataArchivePanel";
 import { BASIC_SALARY_OPTIONS } from "../lib/hrms-config";
 import {
   addBulkPayBankAccount,
@@ -44,15 +46,16 @@ import {
   resolveLocationPtAmount,
 } from "../utils";
 
-type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "blockedApps";
+type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "blockedApps" | "dataArchive";
 
-const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType }[] = [
+const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: "payroll", label: "Payroll Rules", icon: IndianRupee },
   { id: "bankAccounts", label: "Bank Accounts", icon: CreditCard },
   { id: "locations", label: "Office Locations", icon: Map },
   { id: "roles", label: "Job Roles", icon: Briefcase },
   { id: "schoolGeography", label: "District & Blocks", icon: School },
   { id: "blockedApps", label: "Blocked Apps", icon: Shield },
+  { id: "dataArchive", label: "Data Archive", icon: Archive, adminOnly: true },
 ];
 
 function StatCard({
@@ -165,6 +168,14 @@ export default function ConfigurationPanel() {
   const [editingBankLabel, setEditingBankLabel] = useState("");
   const [editingBankAccountNo, setEditingBankAccountNo] = useState("");
   const [bankAccountToDelete, setBankAccountToDelete] = useState<BulkPayBankAccount | null>(null);
+
+  const visibleSections = useMemo(
+    () =>
+      SECTIONS.filter(
+        (section) => !section.adminOnly || userPermissions.admin?.view,
+      ),
+    [userPermissions.admin?.view],
+  );
 
   const filteredLocations = useMemo(() => {
     const q = locSearch.trim().toLowerCase();
@@ -1125,6 +1136,7 @@ export default function ConfigurationPanel() {
       <div className="flex flex-col lg:flex-row min-h-[520px]">
         <nav className="lg:w-52 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-100 bg-slate-50/60 p-2 lg:p-3 flex lg:flex-col gap-1 overflow-x-auto">
           {SECTIONS.map(({ id, label, icon: Icon }) => {
+            if (!visibleSections.some((section) => section.id === id)) return null;
             const isActive = activeSection === id;
             const showDot = id === "payroll" && configHasUnsavedChanges;
             return (
@@ -1169,6 +1181,9 @@ export default function ConfigurationPanel() {
           )}
           {activeSection === "blockedApps" && (
             <BlockedAppsConfigurationPanel readOnly={!userPermissions.schoolWork?.edit} />
+          )}
+          {activeSection === "dataArchive" && userPermissions.admin?.view && (
+            <DataArchivePanel readOnly={!userPermissions.admin?.edit} />
           )}
         </div>
       </div>

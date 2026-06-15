@@ -5,20 +5,26 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Expose installed-app scanning to the supervisor WebView.
- * Register in MainActivity:
- *   webView.addJavascriptInterface(new FlexHrmAndroidBridge(this), "FlexHrmAndroid");
+ * Native bridge exposed to the supervisor WebView as {@code window.FlexHrmAndroid}.
  */
 public class FlexHrmAndroidBridge {
   private final MainActivity activity;
 
   public FlexHrmAndroidBridge(MainActivity activity) {
     this.activity = activity;
+  }
+
+  @JavascriptInterface
+  public String getDeviceId() {
+    String androidId =
+        Settings.Secure.getString(activity.getContentResolver(), Settings.Secure.ANDROID_ID);
+    return androidId != null ? androidId : "";
   }
 
   @JavascriptInterface

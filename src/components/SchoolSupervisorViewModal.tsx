@@ -44,6 +44,7 @@ export default function SchoolSupervisorViewModal({
   const [activityHistory, setActivityHistory] = useState<SupervisorActivityHistory | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [includeArchivedActivity, setIncludeArchivedActivity] = useState(false);
   const coveredSchools = useMemo(
     () => getSchoolsForSupervisor(supervisor, schools),
     [supervisor, schools],
@@ -76,7 +77,10 @@ export default function SchoolSupervisorViewModal({
       setActivityLoading(true);
       setActivityError(null);
       try {
-        const res = await fetch(apiUrl(`/api/school-supervisors/${supervisor.id}/activity-history`));
+        const query = includeArchivedActivity ? "?includeArchived=true" : "";
+        const res = await fetch(
+          apiUrl(`/api/school-supervisors/${supervisor.id}/activity-history${query}`),
+        );
         if (!res.ok) throw new Error("Could not load activity history.");
         const data = (await res.json()) as SupervisorActivityHistory;
         if (!cancelled) setActivityHistory(data);
@@ -93,7 +97,7 @@ export default function SchoolSupervisorViewModal({
     return () => {
       cancelled = true;
     };
-  }, [supervisor.id]);
+  }, [supervisor.id, includeArchivedActivity]);
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose();
@@ -335,10 +339,21 @@ export default function SchoolSupervisorViewModal({
               </div>
 
               <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">
-                <p className="mb-3 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  <Clock size={11} />
-                  Active Time History
-                </p>
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    <Clock size={11} />
+                    Active Time History
+                  </p>
+                  <label className="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeArchivedActivity}
+                      onChange={(e) => setIncludeArchivedActivity(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    Include archived sessions (6+ months)
+                  </label>
+                </div>
 
                 {activityLoading ? (
                   <div className="flex items-center gap-2 text-xs text-slate-400 py-4">
@@ -395,6 +410,11 @@ export default function SchoolSupervisorViewModal({
                                   : session.endedAt
                                     ? formatActivityTime(session.endedAt)
                                     : formatActivityTime(session.lastActiveAt)}
+                                {session.archived && (
+                                  <span className="ml-1 rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-700">
+                                    archived
+                                  </span>
+                                )}
                               </p>
                             </div>
                             <div className="shrink-0 text-right">

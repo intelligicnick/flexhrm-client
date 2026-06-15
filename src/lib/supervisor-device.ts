@@ -2,6 +2,7 @@ const DEVICE_KEY = "hrms_supervisor_device_id";
 
 type AndroidDeviceBridge = {
   getBuildNumber?: () => string;
+  getDeviceId?: () => string;
 };
 
 function getAndroidBuildNumber(ua: string): string | null {
@@ -33,6 +34,12 @@ function generateId(): string {
 }
 
 export function getSupervisorDeviceId(): string {
+  if (typeof window !== "undefined") {
+    const bridge = (window.FlexHrmAndroid || window.Android) as AndroidDeviceBridge | undefined;
+    const nativeId = String(bridge?.getDeviceId?.() || "").trim();
+    if (nativeId) return nativeId;
+  }
+
   let id = localStorage.getItem(DEVICE_KEY);
   if (!id) {
     id = generateId();

@@ -7,9 +7,8 @@ import {
   Phone,
   Lock,
   Smartphone,
-  Trash2,
-  CheckCircle2,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import PasswordInput from "../../components/PasswordInput";
 import { apiUrl, formatNetworkFetchError } from "../../api";
@@ -23,6 +22,76 @@ import {
 } from "../../lib/supervisor-installed-apps";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
+
+function BlockedAppsDialog({
+  apps,
+  scanning,
+  onUninstall,
+  onRescan,
+}: {
+  apps: DetectedBlockedApp[];
+  scanning: boolean;
+  onUninstall: (packageName: string) => void;
+  onRescan: () => void;
+}) {
+  const { t } = useSupervisorI18n();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div
+        className="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="blocked-apps-dialog-title"
+      >
+        <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+              <AlertTriangle className="text-rose-600" size={20} />
+            </div>
+            <h2 id="blocked-apps-dialog-title" className="text-base font-black text-slate-900">
+              {t("appsCheckDialogTitle")}
+            </h2>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">{t("appsCheckDialogSubtitle")}</p>
+        </div>
+
+        <div className="p-6 space-y-3 max-h-[50vh] overflow-y-auto">
+          {apps.map((app) => (
+            <div
+              key={app.packageName}
+              className="flex items-center justify-between gap-3 p-3 bg-rose-50 border border-rose-100 rounded-xl"
+            >
+              <p className="text-sm font-bold text-slate-900 truncate min-w-0">
+                {app.appName || app.blockedEntry}
+              </p>
+              <button
+                type="button"
+                onClick={() => onUninstall(app.packageName)}
+                className="shrink-0 px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold uppercase tracking-wide"
+              >
+                {t("appsCheckUninstall")}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="px-6 pb-6 space-y-3">
+          <p className="text-[11px] text-slate-500 text-center">{t("appsCheckUninstallHint")}</p>
+          <button
+            type="button"
+            onClick={onRescan}
+            disabled={scanning}
+            className="w-full py-3.5 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {scanning ? <Loader2 size={16} className="animate-spin" /> : <Smartphone size={16} />}
+            {scanning ? t("appsCheckScanning") : t("appsCheckRescan")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function LoginForm() {
   const navigate = useNavigate();
@@ -96,7 +165,28 @@ function LoginForm() {
     void fetchBlockedApps();
   }, [fetchBlockedApps]);
 
-  const loginBlockedByApps = canScanDevice && detectedBlockedApps.length > 0;
+  const mustPassAppsCheck = blockedAppsPolicy.length > 0;
+  const showBlockedDialog = mustPassAppsCheck && canScanDevice && detectedBlockedApps.length > 0;
+  const loginReady = !appsLoading && !showBlockedDialog;
+
+  useEffect(() => {
+    if (!showBlockedDialog) return;
+
+    const rescan = () => {
+      void scanDeviceForBlockedApps(blockedAppsPolicy);
+    };
+
+    window.addEventListener("focus", rescan);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") rescan();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.removeEventListener("focus", rescan);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [showBlockedDialog, blockedAppsPolicy, scanDeviceForBlockedApps]);
 
   useEffect(() => {
     if (searchParams.get("reason") === "device_mismatch") {
@@ -145,103 +235,15 @@ function LoginForm() {
     openAppUninstall(packageName);
   };
 
-  const renderBlockedAppsScan = () => {
-    if (appsLoading || blockedAppsPolicy.length === 0) return null;
-
-    if (appsScanning) {
-      return (
-        <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-xs">
-          <Loader2 size={14} className="animate-spin shrink-0" />
-          <span>{t("appsCheckScanning")}</span>
-        </div>
-      );
-    }
-
-    if (!canScanDevice) {
-      return (
-        <div className="space-y-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
-          <p className="text-xs text-amber-800 leading-relaxed">{t("appsCheckInstallAppHint")}</p>
-          <ul className="space-y-1.5">
-            {blockedAppsPolicy.map((app) => (
-              <li
-                key={app}
-                className="flex items-center gap-2 text-xs font-semibold text-amber-900"
-              >
-                <Trash2 size={12} className="text-amber-600 shrink-0" />
-                <span className="truncate">{app}</span>
-              </li>
-            ))}
-          </ul>
-          {!appInstalled && installPromptEvent && (
-            <button
-              type="button"
-              onClick={() => void handleInstallApp()}
-              disabled={installingApp}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-xs font-bold text-[#ff791a] shadow-sm cursor-pointer disabled:opacity-50"
-            >
-              <Smartphone size={14} />
-              {installingApp ? t("loading") : t("installFieldTeamApp")}
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    if (detectedBlockedApps.length === 0) {
-      return (
-        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-700 text-xs">
-          <CheckCircle2 size={14} className="shrink-0" />
-          <span className="font-semibold">{t("appsCheckClear")}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-3 p-3 bg-rose-50 border border-rose-100 rounded-xl">
-        <p className="text-xs font-semibold text-rose-700">{t("appsCheckFound")}</p>
-        <ul className="space-y-2">
-          {detectedBlockedApps.map((app) => (
-            <li
-              key={app.packageName}
-              className="flex items-center justify-between gap-3 p-2.5 bg-white border border-rose-100 rounded-lg text-sm font-semibold text-rose-900"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <Trash2 size={14} className="text-rose-500 shrink-0" />
-                <div className="min-w-0">
-                  <p className="truncate text-xs">{app.appName || app.blockedEntry}</p>
-                  <p className="text-[10px] font-mono text-rose-600/80 truncate">{app.packageName}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleUninstallApp(app.packageName)}
-                className="shrink-0 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold uppercase tracking-wide"
-              >
-                {t("appsCheckUninstall")}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <p className="text-[11px] text-slate-500">{t("appsCheckUninstallHint")}</p>
-        <button
-          type="button"
-          onClick={handleRescanApps}
-          disabled={appsScanning}
-          className="w-full py-2.5 border border-rose-200 rounded-lg text-[11px] font-bold text-rose-700 hover:bg-rose-100/50 flex items-center justify-center gap-2"
-        >
-          <Smartphone size={12} />
-          {t("appsCheckRescan")}
-        </button>
-      </div>
-    );
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      if (blockedAppsPolicy.length > 0 && canScanInstalledApps()) {
+      if (blockedAppsPolicy.length > 0) {
+        if (!canScanInstalledApps()) {
+          throw new Error(t("appsCheckNativeAppRequired"));
+        }
         const detected = await scanDeviceForBlockedApps(blockedAppsPolicy);
         if (detected.length > 0) {
           throw new Error(t("appsCheckFound"));
@@ -306,7 +308,7 @@ function LoginForm() {
           <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-1">{t("appTitle")}</p>
         </div>
         {children}
-        {!appInstalled && installPromptEvent && step === "login" && (blockedAppsPolicy.length === 0 || canScanDevice) && (
+        {!appInstalled && installPromptEvent && blockedAppsPolicy.length === 0 && (
           <button
             type="button"
             onClick={() => void handleInstallApp()}
@@ -317,118 +319,142 @@ function LoginForm() {
             {installingApp ? t("loading") : t("installFieldTeamApp")}
           </button>
         )}
-        {step === "login" && (
-          <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">
-            {t("adminLoginHint")}
-          </p>
-        )}
+        <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">
+          {t("adminLoginHint")}
+        </p>
       </div>
     </div>
   );
 
-  return shell(
-    <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/80 overflow-hidden">
-      <div className="px-6 pt-5 pb-4 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-black text-slate-900">{t("loginTitle")}</h2>
-          <p className="text-xs text-slate-400 mt-0.5">{t("loginSubtitle")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setLang(lang === "en" ? "hi" : "en")}
-          className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-slate-100"
+  if (appsLoading) {
+    return shell(
+      <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/80 p-10 flex flex-col items-center justify-center gap-3">
+        <Loader2 size={28} className="animate-spin text-[#ff791a]" />
+        <p className="text-sm font-semibold text-slate-500">{t("appsCheckScanning")}</p>
+      </div>,
+    );
+  }
+
+  return (
+    <>
+      {showBlockedDialog && (
+        <BlockedAppsDialog
+          apps={detectedBlockedApps}
+          scanning={appsScanning}
+          onUninstall={handleUninstallApp}
+          onRescan={handleRescanApps}
+        />
+      )}
+      {shell(
+        <div
+          className={`bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-200/80 overflow-hidden transition-opacity ${
+            showBlockedDialog ? "opacity-40 pointer-events-none" : ""
+          }`}
         >
-          <Languages size={12} />
-          {lang === "en" ? "हिंदी" : "English"}
-        </button>
-      </div>
-
-      <form onSubmit={handleSubmit} className="p-6 space-y-4" id="supervisor-login-form">
-        {error && (
-          <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-800 text-xs flex gap-2 items-start">
-            <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px] shrink-0">!</span>
-            <span className="font-semibold">{error}</span>
-          </div>
-        )}
-
-        {needsDeviceOtp && (
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs">
-            <div className="flex items-center gap-2 font-bold mb-1">
-              <ShieldAlert size={14} />
-              {t("deviceMismatch")}
+          <div className="px-6 pt-5 pb-4 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">{t("loginTitle")}</h2>
+              <p className="text-xs text-slate-400 mt-0.5">{t("loginSubtitle")}</p>
             </div>
-            <p>{t("deviceOtpHint")}</p>
+            <button
+              type="button"
+              onClick={() => setLang(lang === "en" ? "hi" : "en")}
+              className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-slate-100"
+            >
+              <Languages size={12} />
+              {lang === "en" ? "हिंदी" : "English"}
+            </button>
           </div>
-        )}
 
-        {renderBlockedAppsScan()}
+          <form onSubmit={handleSubmit} className="p-6 space-y-4" id="supervisor-login-form">
+            {error && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-800 text-xs flex gap-2 items-start">
+                <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px] shrink-0">!</span>
+                <span className="font-semibold">{error}</span>
+              </div>
+            )}
 
-        <div>
-          <label htmlFor="supervisor-login-phone" className="text-xs font-bold text-slate-600 block mb-1.5">
-            {t("mobileNumber")}
-          </label>
-          <div className="relative">
-            <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              id="supervisor-login-phone"
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="10-digit mobile number"
-              className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base bg-slate-50/50"
-              required
-            />
-          </div>
-        </div>
+            {needsDeviceOtp && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs">
+                <div className="flex items-center gap-2 font-bold mb-1">
+                  <ShieldAlert size={14} />
+                  {t("deviceMismatch")}
+                </div>
+                <p>{t("deviceOtpHint")}</p>
+              </div>
+            )}
 
-        <div>
-          <label htmlFor="supervisor-login-password" className="text-xs font-bold text-slate-600 block mb-1.5">
-            {t("password")}
-          </label>
-          <div className="relative">
-            <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 z-10" />
-            <PasswordInput
-              id="supervisor-login-password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base font-mono bg-slate-50/50"
-              required
-            />
-          </div>
-        </div>
+            <div>
+              <label htmlFor="supervisor-login-phone" className="text-xs font-bold text-slate-600 block mb-1.5">
+                {t("mobileNumber")}
+              </label>
+              <div className="relative">
+                <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="supervisor-login-phone"
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="10-digit mobile number"
+                  className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base bg-slate-50/50"
+                  required
+                  disabled={!loginReady}
+                />
+              </div>
+            </div>
 
-        {needsDeviceOtp && (
-          <div>
-            <label htmlFor="supervisor-device-otp" className="text-xs font-bold text-slate-600 block mb-1.5">
-              {t("deviceOtp")}
-            </label>
-            <input
-              id="supervisor-device-otp"
-              type="text"
-              inputMode="numeric"
-              value={deviceOtp}
-              onChange={(e) => setDeviceOtp(e.target.value)}
-              placeholder="6-digit OTP from admin"
-              className="w-full px-4 py-3.5 border border-amber-300 rounded-xl focus:border-[#ff791a] focus:outline-none text-base tracking-widest font-mono bg-amber-50/30"
-              required
-            />
-          </div>
-        )}
+            <div>
+              <label htmlFor="supervisor-login-password" className="text-xs font-bold text-slate-600 block mb-1.5">
+                {t("password")}
+              </label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 z-10" />
+                <PasswordInput
+                  id="supervisor-login-password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base font-mono bg-slate-50/50"
+                  required
+                  disabled={!loginReady}
+                />
+              </div>
+            </div>
 
-        <button
-          type="submit"
-          disabled={loading || appsScanning || loginBlockedByApps}
-          className="w-full py-4 bg-[#ff791a] hover:bg-[#e4640c] text-white font-black rounded-2xl text-sm shadow-lg shadow-orange-200/50 active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-        >
-          <LogIn size={18} />
-          {loading ? t("signingIn") : appsScanning ? t("appsCheckScanning") : needsDeviceOtp ? t("verifyDevice") : t("signIn")}
-        </button>
-      </form>
-    </div>,
+            {needsDeviceOtp && (
+              <div>
+                <label htmlFor="supervisor-device-otp" className="text-xs font-bold text-slate-600 block mb-1.5">
+                  {t("deviceOtp")}
+                </label>
+                <input
+                  id="supervisor-device-otp"
+                  type="text"
+                  inputMode="numeric"
+                  value={deviceOtp}
+                  onChange={(e) => setDeviceOtp(e.target.value)}
+                  placeholder="6-digit OTP from admin"
+                  className="w-full px-4 py-3.5 border border-amber-300 rounded-xl focus:border-[#ff791a] focus:outline-none text-base tracking-widest font-mono bg-amber-50/30"
+                  required
+                  disabled={!loginReady}
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || appsScanning || !loginReady}
+              className="w-full py-4 bg-[#ff791a] hover:bg-[#e4640c] text-white font-black rounded-2xl text-sm shadow-lg shadow-orange-200/50 active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <LogIn size={18} />
+              {loading ? t("signingIn") : needsDeviceOtp ? t("verifyDevice") : t("signIn")}
+            </button>
+          </form>
+        </div>,
+      )}
+    </>
   );
 }
 

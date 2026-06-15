@@ -278,6 +278,7 @@ export interface SupervisorActivitySession {
   lastActiveAt: string;
   durationMinutes: number;
   isOngoing: boolean;
+  archived?: boolean;
 }
 
 export interface SupervisorActivitySummary {

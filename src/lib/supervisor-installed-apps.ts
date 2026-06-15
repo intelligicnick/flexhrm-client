@@ -43,6 +43,18 @@ const KNOWN_APP_PACKAGES: Record<string, string[]> = {
   shareit: ["com.lenovo.anyshare.gps"],
   pubg: ["com.tencent.ig", "com.pubg.imobile"],
   "free fire": ["com.dts.freefireth", "com.dts.freefiremax"],
+  anyto: ["com.imyfone.anytoandroid", "com.tenorshare.ianygo"],
+  "imyfone anyto": ["com.imyfone.anytoandroid"],
+  "tenorshare ianygo": ["com.tenorshare.ianygo"],
+  "unicool tailorgo": ["com.unictool.tailorgo", "com.tailorgo.virtual"],
+  tailorgo: ["com.unictool.tailorgo", "com.tailorgo.virtual"],
+  "fake gps": ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre", "com.blogspot.newapphorizons.fakegps"],
+  "virtual location": ["com.lexa.fakegps", "com.imyfone.anytoandroid"],
+  locationsimulator: ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre"],
+  "dr.fone virtual location": ["com.wondershare.drfonevirtuallocation"],
+  "3utools": ["com.3u.tools"],
+  "easeus mobianygo": ["com.easeus.mobianygo"],
+  "wootechy imovego": ["com.wootechy.imovego"],
 };
 
 function normalizeKey(value: string): string {
@@ -77,6 +89,20 @@ export function parseBlockedAppEntry(entry: string): { label: string; packageNam
   }
 
   return { label: trimmed, packageNames: [] };
+}
+
+function fuzzyMatchByLabel(label: string, installedApps: InstalledApp[]): InstalledApp | undefined {
+  const labelNorm = normalizeKey(label);
+  if (labelNorm.length < 3) return undefined;
+
+  for (const app of installedApps) {
+    if (!app.appName) continue;
+    const appNorm = normalizeKey(app.appName);
+    if (appNorm === labelNorm || appNorm.includes(labelNorm) || labelNorm.includes(appNorm)) {
+      return app;
+    }
+  }
+  return undefined;
 }
 
 function parseInstalledAppsPayload(raw: string): InstalledApp[] {
@@ -158,6 +184,10 @@ export function findInstalledBlockedApps(
 
     if (!match) {
       match = installedByLabel.get(normalizeKey(label));
+    }
+
+    if (!match && packageNames.length === 0) {
+      match = fuzzyMatchByLabel(label, installedApps);
     }
 
     if (!match) continue;
