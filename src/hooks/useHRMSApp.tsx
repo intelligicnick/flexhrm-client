@@ -60,11 +60,12 @@ import {
   Download,
   Eye,
   School,
+  Gavel,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, Renewal, CreateRenewalInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   BULK_EDIT_FIELDS,
   buildCustomFieldsAfterEdit,
@@ -88,11 +89,9 @@ import {
   employeeMatchesSkillFilters,
   prorateSalaryByAttendance,
   isEmployeeEsicCovered,
-  parseLocationPtInput,
   calculatePfAmounts,
   calculateProfessionalTax,
-  resolveLocationPtAmount,
-  DEFAULT_LOCATION_PT_AMOUNT,
+  isPfEsicCompliant,
   quoteCSVValue,
   downloadAxisBulkPayXls,
   downloadSchoolAxisBulkPayXls,
@@ -126,9 +125,14 @@ import {
   formatEmployeeBirthDate,
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
-import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef } from "../lib/permissions";
-import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab } from "../routes";
+import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
+import {
+  countMonthAttendance,
+  getEffectiveAttendanceStatus,
+  isWeeklyOffDay,
+} from "../lib/attendance-helpers";
+import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
@@ -323,7 +327,7 @@ export function useHRMSApp() {
 
 
 
-  const PERMISSION_MODULES = ["employees", "schoolWork", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
+  const PERMISSION_MODULES = ["employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
 
   const applySessionFromAuthMe = (data: {
     username?: string;
@@ -399,6 +403,8 @@ export function useHRMSApp() {
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
     "School Work": false,
+    "Bids": false,
+    "Renewals": false,
   });
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -422,6 +428,8 @@ export function useHRMSApp() {
   const [profileEmailError, setProfileEmailError] = useState<string | null>(null);
   const [profileEmailSuccess, setProfileEmailSuccess] = useState<string | null>(null);
   const [isSavingProfileEmail, setIsSavingProfileEmail] = useState(false);
+  const [myInfoTab, setMyInfoTab] = useState<"account" | "tour">("account");
+  const [roleAccessSection, setRoleAccessSection] = useState<"admins" | "roles" | "audit" | "devices">("admins");
 
   // School Work Registry States
   const [rawSchoolWorks, setRawSchoolWorks] = useState<SchoolWork[]>([]);
@@ -433,6 +441,9 @@ export function useHRMSApp() {
   const [rawSchoolVisits, setRawSchoolVisits] = useState<SchoolVisit[]>([]);
   const [rawSupervisorRequests, setRawSupervisorRequests] = useState<SupervisorRequest[]>([]);
   const [rawCommitmentDiary, setRawCommitmentDiary] = useState<CommitmentDiary[]>([]);
+  const [rawTenders, setRawTenders] = useState<Tender[]>([]);
+  const [rawContracts, setRawContracts] = useState<Contract[]>([]);
+  const [rawRenewals, setRawRenewals] = useState<Renewal[]>([]);
   const [pendingSupervisorRequestCount, setPendingSupervisorRequestCount] = useState(0);
   const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
   const [adminNotificationUnreadCount, setAdminNotificationUnreadCount] = useState(0);
@@ -471,31 +482,10 @@ export function useHRMSApp() {
   const [rawCustomLocations, setRawCustomLocations] = useState<string[]>([]);
   const [registeredLocations, setRegisteredLocations] = useState<string[]>([]);
   const [locationCompliance, setLocationCompliance] = useState<Record<string, boolean>>({});
-  const [locationPtAmounts, setLocationPtAmounts] = useState<Record<string, number>>({});
+  const [locationPtEnabled, setLocationPtEnabled] = useState<Record<string, boolean>>({});
   const [isFetchingLocations, setIsFetchingLocations] = useState(false);
   const [newLocCompliance, setNewLocCompliance] = useState(true);
-  const [newLocPtAmount, setNewLocPtAmount] = useState(String(DEFAULT_LOCATION_PT_AMOUNT));
-
-  const persistLocationPtAmounts = (updated: Record<string, number>) => {
-    setLocationPtAmounts(updated);
-  };
-
-  const updateLocationPtAmount = async (loc: string, rawValue: string) => {
-    const fallback = resolveLocationPtAmount(loc, locationPtAmounts);
-    const amount = parseLocationPtInput(rawValue, fallback);
-    persistLocationPtAmounts({ ...locationPtAmounts, [loc]: amount });
-    try {
-      const res = await fetch(`/api/locations/${encodeURIComponent(loc)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ptAmount: amount }),
-      });
-      if (!res.ok) throw await parseApiError(res, "Failed to update location PT amount.");
-      await fetchLocations();
-    } catch (err: any) {
-      setErrorMessage(err.message || "Failed to update location PT amount.");
-    }
-  };
+  const [newLocPtEnabled, setNewLocPtEnabled] = useState(false);
 
   const updateLocationCompliance = async (loc: string, enabled: boolean) => {
     setLocationCompliance((prev) => ({ ...prev, [loc]: enabled }));
@@ -505,11 +495,27 @@ export function useHRMSApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ complianceEnabled: enabled }),
       });
-      if (!res.ok) throw await parseApiError(res, "Failed to update location compliance.");
+      if (!res.ok) throw await parseApiError(res, "Failed to update location PF/ESIC compliance.");
       await fetchLocations();
-      triggerSuccess(`Compliance calculations ${enabled ? "enabled" : "disabled"} for location "${loc}"`);
+      triggerSuccess(`PF/ESIC compliance ${enabled ? "enabled" : "disabled"} for location "${loc}"`);
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to update location compliance.");
+      setErrorMessage(err.message || "Failed to update location PF/ESIC compliance.");
+    }
+  };
+
+  const updateLocationPtEnabled = async (loc: string, enabled: boolean) => {
+    setLocationPtEnabled((prev) => ({ ...prev, [loc]: enabled }));
+    try {
+      const res = await fetch(`/api/locations/${encodeURIComponent(loc)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ptEnabled: enabled }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to update location PT setting.");
+      await fetchLocations();
+      triggerSuccess(`Professional Tax ${enabled ? "enabled" : "disabled"} for location "${loc}"`);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to update location PT setting.");
     }
   };
 
@@ -559,14 +565,21 @@ export function useHRMSApp() {
       setRawCustomLocations(Array.from(new Set([...apiLocations, ...empLocations])));
 
       const complianceMap: Record<string, boolean> = {};
-      const ptMap: Record<string, number> = {};
+      const ptEnabledMap: Record<string, boolean> = {};
       locationRecords.forEach((loc: any) => {
         if (!loc.name) return;
         complianceMap[loc.name] = !!loc.complianceEnabled;
-        ptMap[loc.name] = Number(loc.ptAmount || 0);
+        ptEnabledMap[loc.name] =
+          loc.ptEnabled !== undefined
+            ? !!loc.ptEnabled
+            : Number(loc.ptAmount || 0) > 0;
       });
       setLocationCompliance(complianceMap);
-      setLocationPtAmounts(ptMap);
+      setLocationPtEnabled(ptEnabledMap);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("hrms_location_compliance", JSON.stringify(complianceMap));
+        localStorage.setItem("hrms_location_pt_enabled", JSON.stringify(ptEnabledMap));
+      }
     } catch (err: any) {
       setErrorMessage(err.message || "Could not load locations.");
     } finally {
@@ -1172,12 +1185,12 @@ export function useHRMSApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn]);
 
-  // Fetch security audit logs when active tab is switched to Audit Logs
+  // Fetch security audit logs when Role & Access → Activity Log is open
   useEffect(() => {
-    if (isLoggedIn && activeSidebarTab === "Audit Logs") {
+    if (isLoggedIn && isAdminModuleTab(activeSidebarTab) && roleAccessSection === "audit") {
       fetchAuditLogs();
     }
-  }, [isLoggedIn, activeSidebarTab]);
+  }, [isLoggedIn, activeSidebarTab, roleAccessSection]);
 
   useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Saved Bulk Pay" && userPermissions.salary?.view) {
@@ -1200,7 +1213,11 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab, userPermissions.schoolWork?.view]);
 
   // Handler to add a new custom location from the configuration tab
-  const handleAddLocationFromConfig = async (locName: string, complianceVal: boolean = true, ptAmount?: number) => {
+  const handleAddLocationFromConfig = async (
+    locName: string,
+    complianceVal: boolean = true,
+    ptEnabledVal: boolean = false,
+  ) => {
     const cleanName = locName.trim();
     if (!cleanName) return;
     
@@ -1209,20 +1226,22 @@ export function useHRMSApp() {
       return;
     }
 
-    const parsedPt = ptAmount !== undefined ? ptAmount : parseFloat(newLocPtAmount);
-    const ptVal = Number.isFinite(parsedPt) && parsedPt >= 0 ? Math.round(parsedPt) : DEFAULT_LOCATION_PT_AMOUNT;
     try {
       setErrorMessage(null);
       const res = await fetch("/api/locations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: cleanName, complianceEnabled: complianceVal, ptAmount: ptVal }),
+        body: JSON.stringify({
+          name: cleanName,
+          complianceEnabled: complianceVal,
+          ptEnabled: ptEnabledVal,
+        }),
       });
       if (!res.ok) throw await parseApiError(res, "Failed to register location.");
       await fetchLocations();
       setNewLocNameInput("");
       setNewLocCompliance(true);
-      setNewLocPtAmount(String(DEFAULT_LOCATION_PT_AMOUNT));
+      setNewLocPtEnabled(false);
       triggerSuccess(`Successfully registered new location: "${cleanName}"`);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to register location.");
@@ -1257,17 +1276,16 @@ export function useHRMSApp() {
       });
 
       const updatedCompliance = { ...locationCompliance };
+      const updatedPtEnabled = { ...locationPtEnabled };
       if (updatedCompliance[cleanOld] !== undefined) {
         updatedCompliance[cleanNew] = updatedCompliance[cleanOld];
         delete updatedCompliance[cleanOld];
         setLocationCompliance(updatedCompliance);
       }
-
-      const updatedPt = { ...locationPtAmounts };
-      if (updatedPt[cleanOld] !== undefined) {
-        updatedPt[cleanNew] = updatedPt[cleanOld];
-        delete updatedPt[cleanOld];
-        persistLocationPtAmounts(updatedPt);
+      if (updatedPtEnabled[cleanOld] !== undefined) {
+        updatedPtEnabled[cleanNew] = updatedPtEnabled[cleanOld];
+        delete updatedPtEnabled[cleanOld];
+        setLocationPtEnabled(updatedPtEnabled);
       }
 
       // Refresh employees from the server to reflect location rename instantly
@@ -1369,6 +1387,8 @@ export function useHRMSApp() {
   const [salaryExitEndFilter, setSalaryExitEndFilter] = useState<string>("");
   const [salaryMinSalaryFilter, setSalaryMinSalaryFilter] = useState<string>("");
   const [salaryMaxSalaryFilter, setSalaryMaxSalaryFilter] = useState<string>("");
+  const [salaryMinDailyWageFilter, setSalaryMinDailyWageFilter] = useState<string>("");
+  const [salaryMaxDailyWageFilter, setSalaryMaxDailyWageFilter] = useState<string>("");
   const [salaryGenderFilter, setSalaryGenderFilter] = useState<string>("All");
   const [salaryMaritalFilter, setSalaryMaritalFilter] = useState<string>("All");
   const [salaryEsicFilter, setSalaryEsicFilter] = useState<string>("All");
@@ -1702,14 +1722,23 @@ export function useHRMSApp() {
     const datesList = Array.from({ length: end - start + 1 }, (_, i) => start + i).join(', ');
 
     const entries = filtered.flatMap((emp) =>
-      Array.from({ length: end - start + 1 }, (_, i) => ({
-        employeeId: emp.id,
-        employeeCode: emp.employeeCode,
-        location: emp.location,
-        monthKey: selectedMonth,
-        day: start + i,
-        status: bulkStatus,
-      }))
+      Array.from({ length: end - start + 1 }, (_, i) => {
+        const day = start + i;
+        if (
+          isEmployeeExitedOnDayStatic(emp, selectedMonth, day) ||
+          isWeeklyOffDay(emp.workingDaysType, selectedMonth, day)
+        ) {
+          return null;
+        }
+        return {
+          employeeId: emp.id,
+          employeeCode: emp.employeeCode,
+          location: emp.location,
+          monthKey: selectedMonth,
+          day,
+          status: bulkStatus,
+        };
+      }).filter((entry): entry is NonNullable<typeof entry> => entry !== null),
     );
 
     try {
@@ -1725,6 +1754,12 @@ export function useHRMSApp() {
         filtered.forEach(emp => {
           const empData = { ...(updatedMonth[emp.id] || {}) };
           for (let d = start; d <= end; d++) {
+            if (
+              isEmployeeExitedOnDayStatic(emp, selectedMonth, d) ||
+              isWeeklyOffDay(emp.workingDaysType, selectedMonth, d)
+            ) {
+              continue;
+            }
             empData[d] = bulkStatus;
           }
           updatedMonth[emp.id] = empData;
@@ -1767,6 +1802,13 @@ export function useHRMSApp() {
         const daysInMonth = getDaysInMonthStatic(monthKey);
         return Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
+          if (
+            emp &&
+            (isEmployeeExitedOnDayStatic(emp, monthKey, day) ||
+              isWeeklyOffDay(emp.workingDaysType, monthKey, day))
+          ) {
+            return null;
+          }
           return {
             employeeId: empId,
             employeeCode: emp?.employeeCode,
@@ -1775,7 +1817,7 @@ export function useHRMSApp() {
             day,
             status: sortedDates.includes(day) ? "P" : "A",
           };
-        });
+        }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       })
     );
 
@@ -1795,8 +1837,16 @@ export function useHRMSApp() {
           const daysInMonth = getDaysInMonthStatic(m);
 
           bulkSelEmployees.forEach(empId => {
+            const emp = employees.find(e => e.id === empId);
             const empData = { ...(monthData[empId] || {}) };
             for (let d = 1; d <= daysInMonth; d++) {
+              if (
+                emp &&
+                (isEmployeeExitedOnDayStatic(emp, m, d) ||
+                  isWeeklyOffDay(emp.workingDaysType, m, d))
+              ) {
+                continue;
+              }
               if (sortedDates.includes(d)) {
                 empData[d] = "P"; // Selected date -> Present
               } else {
@@ -1844,17 +1894,21 @@ export function useHRMSApp() {
     const rows = filtered.map((emp, index) => {
       const monthData = attendanceDb[selectedMonth] || {};
       const empData = monthData[emp.id] || {};
-      
-      let presents = 0;
-      let absents = 0;
+
+      const { presents, absents } = countMonthAttendance(
+        empData,
+        daysInMonth,
+        (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+        { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+      );
+
       const daysCells = Array.from({ length: daysInMonth }, (_, i) => {
         const dayNum = i + 1;
         const isExited = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
         if (isExited) return "—";
         const status = empData[dayNum] || "";
-        if (status === "P") presents++;
-        else if (status === "A") absents++;
-        return status || "—";
+        const display = getEffectiveAttendanceStatus(emp.workingDaysType, selectedMonth, dayNum, status);
+        return display || "—";
       });
 
       return [
@@ -1928,17 +1982,20 @@ export function useHRMSApp() {
       const rows = filtered.map((emp, index) => {
         const monthData = attendanceDb[selectedMonth] || {};
         const empData = monthData[emp.id] || {};
-        
-        let presents = 0;
-        let absents = 0;
+
+        const { presents, absents } = countMonthAttendance(
+          empData,
+          daysInMonth,
+          (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+        );
+
         const daysCells = Array.from({ length: daysInMonth }, (_, i) => {
           const dayNum = i + 1;
           const isExited = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
           if (isExited) return "—";
           const status = empData[dayNum] || "";
-          if (status === "P") presents++;
-          else if (status === "A") absents++;
-          return status || "—";
+          const display = getEffectiveAttendanceStatus(emp.workingDaysType, selectedMonth, dayNum, status);
+          return display || "—";
         });
 
         return [
@@ -2009,6 +2066,7 @@ export function useHRMSApp() {
     "Skill Category",
     "Job Role",
     "Present Days",
+    "Daily Wage",
     "Total Salary",
     "Gross Salary (Monthly)",
     "Basic Salary",
@@ -2189,6 +2247,8 @@ export function useHRMSApp() {
         exitEnd: salaryExitEndFilter,
         minSalary: salaryMinSalaryFilter,
         maxSalary: salaryMaxSalaryFilter,
+        minDailyWage: salaryMinDailyWageFilter,
+        maxDailyWage: salaryMaxDailyWageFilter,
         gender: salaryGenderFilter,
         marital: salaryMaritalFilter,
         esic: salaryEsicFilter,
@@ -2235,6 +2295,8 @@ export function useHRMSApp() {
       if (template.filters.exitEnd !== undefined) setSalaryExitEndFilter(template.filters.exitEnd);
       if (template.filters.minSalary !== undefined) setSalaryMinSalaryFilter(template.filters.minSalary);
       if (template.filters.maxSalary !== undefined) setSalaryMaxSalaryFilter(template.filters.maxSalary);
+      if (template.filters.minDailyWage !== undefined) setSalaryMinDailyWageFilter(template.filters.minDailyWage);
+      if (template.filters.maxDailyWage !== undefined) setSalaryMaxDailyWageFilter(template.filters.maxDailyWage);
       if (template.filters.gender !== undefined) setSalaryGenderFilter(template.filters.gender);
       if (template.filters.marital !== undefined) setSalaryMaritalFilter(template.filters.marital);
       if (template.filters.esic !== undefined) setSalaryEsicFilter(template.filters.esic);
@@ -2323,16 +2385,19 @@ export function useHRMSApp() {
 
       // Update compliance mapping
       const updatedCompliance = { ...locationCompliance };
-      const updatedPt = { ...locationPtAmounts };
+      const updatedPtEnabled = { ...locationPtEnabled };
       locsToDelete.forEach(l => {
         delete updatedCompliance[l];
-        delete updatedPt[l];
-        Object.keys(updatedPt).forEach((key) => {
-          if (key.toLowerCase() === l.toLowerCase()) delete updatedPt[key];
+        delete updatedPtEnabled[l];
+        Object.keys(updatedCompliance).forEach((key) => {
+          if (key.toLowerCase() === l.toLowerCase()) delete updatedCompliance[key];
+        });
+        Object.keys(updatedPtEnabled).forEach((key) => {
+          if (key.toLowerCase() === l.toLowerCase()) delete updatedPtEnabled[key];
         });
       });
       setLocationCompliance(updatedCompliance);
-      persistLocationPtAmounts(updatedPt);
+      setLocationPtEnabled(updatedPtEnabled);
 
       // Clear selection
       setSelectedLocs(prev => prev.filter(l => !locsToDelete.some(dl => dl.toLowerCase() === l.toLowerCase())));
@@ -2957,7 +3022,7 @@ export function useHRMSApp() {
     const totalActive = activeEmployees.length;
     const totalGross = activeEmployees.reduce((acc, emp) => acc + (emp.grossSalary || 0), 0);
     const esicCovered = activeEmployees.filter((emp) => {
-      const isCompliant = locationCompliance[emp.location || ""] !== false;
+      const isCompliant = isPfEsicCompliant(emp, locationCompliance);
       return isEmployeeEsicCovered(
         emp.grossSalary || 0,
         esicEligibilityLimit,
@@ -3118,7 +3183,7 @@ export function useHRMSApp() {
 
       // 7. ESIC Coverage Filter
       if (reportEsicFilter !== "All") {
-        const isCompliant = locationCompliance[emp.location || ""] !== false;
+        const isCompliant = isPfEsicCompliant(emp, locationCompliance);
         const covered = isEmployeeEsicCovered(
           emp.grossSalary || 0,
           esicEligibilityLimit,
@@ -3404,7 +3469,7 @@ export function useHRMSApp() {
 
       // Add actual data
       data.forEach((emp) => {
-        const rowData = cols.map(c => getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts));
+        const rowData = cols.map(c => getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled));
         ws.addRow(rowData);
       });
 
@@ -3468,7 +3533,7 @@ export function useHRMSApp() {
       const tableHeaders = [cols];
       const tableData = data.map((emp) => 
         cols.map(c => {
-          const val = getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts);
+          const val = getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled);
           if (typeof val === "number") return val.toLocaleString("en-IN");
           return String(val);
         })
@@ -3587,6 +3652,36 @@ export function useHRMSApp() {
       else setRawCommitmentDiary([]);
     } catch {
       setRawCommitmentDiary([]);
+    }
+  };
+
+  const fetchTenders = async () => {
+    try {
+      const res = await fetch("/api/tenders");
+      if (res.ok) setRawTenders(await res.json());
+      else setRawTenders([]);
+    } catch {
+      setRawTenders([]);
+    }
+  };
+
+  const fetchContracts = async () => {
+    try {
+      const res = await fetch("/api/contracts");
+      if (res.ok) setRawContracts(await res.json());
+      else setRawContracts([]);
+    } catch {
+      setRawContracts([]);
+    }
+  };
+
+  const fetchRenewals = async () => {
+    try {
+      const res = await fetch("/api/renewals");
+      if (res.ok) setRawRenewals(await res.json());
+      else setRawRenewals([]);
+    } catch {
+      setRawRenewals([]);
     }
   };
 
@@ -4102,6 +4197,19 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
+    if (isLoggedIn && isBidsTab(activeSidebarTab)) {
+      fetchTenders();
+      fetchContracts();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
+    if (isLoggedIn && isRenewalsTab(activeSidebarTab)) {
+      fetchRenewals();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Field Team" && fieldTeamView === "commitments") {
       fetchCommitmentDiary();
     }
@@ -4141,17 +4249,35 @@ export function useHRMSApp() {
   }, [activeSidebarTab]);
 
   useEffect(() => {
+    if (isBidsTab(activeSidebarTab)) {
+      setExpandedSidebarGroups((prev) => ({ ...prev, "Bids": true }));
+    }
+  }, [activeSidebarTab]);
+
+  useEffect(() => {
+    if (isRenewalsTab(activeSidebarTab)) {
+      setExpandedSidebarGroups((prev) => ({ ...prev, "Renewals": true }));
+    }
+  }, [activeSidebarTab]);
+
+  useEffect(() => {
     if (isLoggedIn && sessionUser) {
       fetchAdminProfile();
     }
   }, [isLoggedIn, sessionUser]);
 
   useEffect(() => {
-    if (isLoggedIn && activeSidebarTab === "Admin") {
+    if (isLoggedIn && isAdminModuleTab(activeSidebarTab)) {
       fetchAdmins();
       fetchRoles();
     }
   }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
+    if (location.pathname === "/audit-logs") {
+      setRoleAccessSection("audit");
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Directory") {
@@ -5708,6 +5834,146 @@ export function useHRMSApp() {
     }
   };
 
+  const handleCreateTender = async (payload: CreateTenderInput): Promise<void> => {
+    const res = await fetch("/api/tenders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to create tender.");
+    await fetchTenders();
+    triggerSuccess("Tender added.");
+  };
+
+  const handleUpdateTender = async (
+    id: string,
+    payload: Partial<CreateTenderInput>,
+  ): Promise<void> => {
+    const res = await fetch(`/api/tenders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to update tender.");
+    await fetchTenders();
+    triggerSuccess("Tender updated.");
+  };
+
+  const handleDeleteTender = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/tenders/${id}`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to delete tender.");
+    await fetchTenders();
+    triggerSuccess("Tender deleted.");
+  };
+
+  const handleImportTenders = async (
+    items: CreateTenderInput[],
+  ): Promise<{ created: number; updated: number; skipped: number }> => {
+    const res = await fetch("/api/tenders/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to import tenders.");
+    const data = await res.json();
+    await fetchTenders();
+    triggerSuccess(
+      `Imported ${data.created || 0} new, updated ${data.updated || 0}, skipped ${data.skipped || 0}.`,
+    );
+    return {
+      created: data.created || 0,
+      updated: data.updated || 0,
+      skipped: data.skipped || 0,
+    };
+  };
+
+  const handleCreateContract = async (payload: CreateContractInput): Promise<void> => {
+    const res = await fetch("/api/contracts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to create contract.");
+    await fetchContracts();
+    triggerSuccess("Contract added.");
+  };
+
+  const handleUpdateContract = async (
+    id: string,
+    payload: Partial<CreateContractInput>,
+  ): Promise<void> => {
+    const res = await fetch(`/api/contracts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to update contract.");
+    await fetchContracts();
+    triggerSuccess("Contract updated.");
+  };
+
+  const handleDeleteContract = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/contracts/${id}`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to delete contract.");
+    await fetchContracts();
+    triggerSuccess("Contract deleted.");
+  };
+
+  const handleImportContracts = async (
+    items: CreateContractInput[],
+  ): Promise<{ created: number; updated: number; skipped: number }> => {
+    const res = await fetch("/api/contracts/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to import contracts.");
+    const data = await res.json();
+    await fetchContracts();
+    triggerSuccess(
+      `Imported ${data.created || 0} new, updated ${data.updated || 0}, skipped ${data.skipped || 0}.`,
+    );
+    return {
+      created: data.created || 0,
+      updated: data.updated || 0,
+      skipped: data.skipped || 0,
+    };
+  };
+
+  const handleCreateRenewal = async (payload: CreateRenewalInput): Promise<Renewal> => {
+    const res = await fetch("/api/renewals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to create renewal.");
+    const created = await res.json();
+    await fetchRenewals();
+    triggerSuccess("Renewal added.");
+    return created;
+  };
+
+  const handleUpdateRenewal = async (
+    id: string,
+    payload: Partial<CreateRenewalInput>,
+  ): Promise<void> => {
+    const res = await fetch(`/api/renewals/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to update renewal.");
+    await fetchRenewals();
+    triggerSuccess("Renewal updated.");
+  };
+
+  const handleDeleteRenewal = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/renewals/${id}`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to delete renewal.");
+    await fetchRenewals();
+    triggerSuccess("Renewal deleted.");
+  };
+
   const handleSaveSchoolSupervisor = async (
     data: Partial<SchoolSupervisor> & { password?: string },
   ): Promise<boolean> => {
@@ -5823,7 +6089,7 @@ export function useHRMSApp() {
             esicEligibilityLimit,
             attendanceDb,
             locationCompliance,
-            locationPtAmounts
+            locationPtEnabled,
           )
         ) || 0,
       beneficiaryName: emp.nameAsPerBank || "",
@@ -5892,7 +6158,7 @@ export function useHRMSApp() {
             esicEligibilityLimit,
             attendanceDb,
             locationCompliance,
-            locationPtAmounts
+            locationPtEnabled,
           )
         )
       ),
@@ -6418,6 +6684,21 @@ export function useHRMSApp() {
         }
       }
 
+      // 5b. Daily Wage Filter
+      const dailyWage = resolveEmployeeDailyWage(emp);
+      if (salaryMinDailyWageFilter) {
+        const minW = parseFloat(salaryMinDailyWageFilter);
+        if (!isNaN(minW) && dailyWage < minW) {
+          return false;
+        }
+      }
+      if (salaryMaxDailyWageFilter) {
+        const maxW = parseFloat(salaryMaxDailyWageFilter);
+        if (!isNaN(maxW) && dailyWage > maxW) {
+          return false;
+        }
+      }
+
       // 6. Gender Filter
       if (salaryGenderFilter && salaryGenderFilter !== "All") {
         if ((emp.gender || "").toLowerCase() !== salaryGenderFilter.toLowerCase()) {
@@ -6486,6 +6767,8 @@ export function useHRMSApp() {
     salaryExitEndFilter,
     salaryMinSalaryFilter,
     salaryMaxSalaryFilter,
+    salaryMinDailyWageFilter,
+    salaryMaxDailyWageFilter,
     salaryGenderFilter,
     salaryMaritalFilter,
     salaryEsicFilter,
@@ -6497,8 +6780,7 @@ export function useHRMSApp() {
   // Sidebar navigation options mimicking OrangeHRM layout
   const sidebarItems: SidebarItemDef[] = [
     { name: "Search", icon: Search, badge: "" },
-    { name: "Admin", icon: Shield, badge: "" },
-    { name: "Audit Logs", icon: FileText, badge: "Audit" },
+    { name: "Role & Access", icon: Shield, badge: "" },
     { name: "Employees", icon: Users, badge: "Active" },
     { name: "Salary", icon: Coins, badge: "New" },
     { name: "Saved Bulk Pay", icon: Archive, badge: "" },
@@ -6517,6 +6799,25 @@ export function useHRMSApp() {
         { name: "Saved School Bulk Pay", tab: "Saved School Bulk Pay" },
         { name: "Expenses", tab: "Expenses" },
         { name: "Field Team", tab: "Field Team" },
+      ],
+    },
+    {
+      name: "Bids",
+      icon: Gavel,
+      badge: "New",
+      children: [
+        { name: "Tenders", tab: "Tenders" },
+        { name: "Contracts", tab: "Contracts" },
+      ],
+    },
+    {
+      name: "Renewals",
+      icon: RotateCw,
+      badge: "New",
+      children: [
+        { name: "Car Papers", tab: "Car Papers" },
+        { name: "IT Renewals", tab: "IT Renewals" },
+        { name: "Licenses", tab: "Licenses" },
       ],
     },
   ];
@@ -6639,6 +6940,10 @@ export function useHRMSApp() {
     profileEmailError,
     profileEmailSuccess,
     isSavingProfileEmail,
+    myInfoTab,
+    setMyInfoTab,
+    roleAccessSection,
+    setRoleAccessSection,
     rawEmployees,
     selectedIds,
     isFormOpen,
@@ -6659,10 +6964,10 @@ export function useHRMSApp() {
     setConfigValidationError,
     rawCustomLocations,
     locationCompliance,
-    locationPtAmounts,
+    locationPtEnabled,
     isFetchingLocations,
     newLocCompliance,
-    newLocPtAmount,
+    newLocPtEnabled,
     customRoles,
     isFetchingJobRoles,
     auditLogsList,
@@ -6703,6 +7008,8 @@ export function useHRMSApp() {
     salaryExitEndFilter,
     salaryMinSalaryFilter,
     salaryMaxSalaryFilter,
+    salaryMinDailyWageFilter,
+    salaryMaxDailyWageFilter,
     salaryGenderFilter,
     salaryMaritalFilter,
     salaryEsicFilter,
@@ -6792,9 +7099,8 @@ export function useHRMSApp() {
     selectedReportEmployeeIds,
     applySessionFromAuthMe,
     fetchRoles,
-    persistLocationPtAmounts,
-    updateLocationPtAmount,
     updateLocationCompliance,
+    updateLocationPtEnabled,
     fetchLocations,
     fetchJobRoles,
     fetchBulkPayArchives,
@@ -6980,6 +7286,23 @@ export function useHRMSApp() {
     rawSchoolVisits,
     rawSupervisorRequests,
     rawCommitmentDiary,
+    rawTenders,
+    fetchTenders,
+    handleCreateTender,
+    handleUpdateTender,
+    handleDeleteTender,
+    handleImportTenders,
+    rawContracts,
+    fetchContracts,
+    handleCreateContract,
+    handleUpdateContract,
+    handleDeleteContract,
+    handleImportContracts,
+    rawRenewals,
+    fetchRenewals,
+    handleCreateRenewal,
+    handleUpdateRenewal,
+    handleDeleteRenewal,
     pendingSupervisorRequestCount,
     adminNotifications,
     adminNotificationUnreadCount,
@@ -7094,10 +7417,10 @@ export function useHRMSApp() {
     setCompanyBranch,
     setRawCustomLocations,
     setLocationCompliance,
-    setLocationPtAmounts,
+    setLocationPtEnabled,
     setIsFetchingLocations,
     setNewLocCompliance,
-    setNewLocPtAmount,
+    setNewLocPtEnabled,
     setCustomRoles,
     setIsFetchingJobRoles,
     setAuditLogsList,
@@ -7138,6 +7461,8 @@ export function useHRMSApp() {
     setSalaryExitEndFilter,
     setSalaryMinSalaryFilter,
     setSalaryMaxSalaryFilter,
+    setSalaryMinDailyWageFilter,
+    setSalaryMaxDailyWageFilter,
     setSalaryGenderFilter,
     setSalaryMaritalFilter,
     setSalaryEsicFilter,

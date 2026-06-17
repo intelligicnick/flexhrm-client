@@ -41,6 +41,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.webkit.WebViewAssetLoader;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
+import androidx.core.content.FileProvider;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -50,9 +56,11 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmSupervisor";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.5.1";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.5.9";
   private static final String BUNDLED_LOGIN_URL =
       "https://appassets.androidplatform.net/supervisor/login";
+  private static final String BUNDLED_PORTAL_URL =
+      "https://appassets.androidplatform.net/supervisor";
   private static final String REMOTE_LOGIN_URL =
       "https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login";
 
@@ -69,7 +77,35 @@ public class MainActivity extends AppCompatActivity {
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
   private boolean useBundledFallback;
+  private boolean pendingNativeCameraAfterPermission;
+  private File pendingCaptureFile;
+  private Uri pendingCaptureUri;
+  private enum CaptureTarget {
+    NATIVE_BRIDGE,
+    WEB_FILE_INPUT
+  }
+  private CaptureTarget pendingCaptureTarget = CaptureTarget.NATIVE_BRIDGE;
   private final ExecutorService securityExecutor = Executors.newSingleThreadExecutor();
+
+  private final ActivityResultLauncher<Uri> takePictureLauncher =
+      registerForActivityResult(
+          new ActivityResultContracts.TakePicture(),
+          success -> {
+            if (success && pendingCaptureFile != null && pendingCaptureFile.exists()) {
+              if (pendingCaptureTarget == CaptureTarget.WEB_FILE_INPUT) {
+                deliverCapturedUriToFileCallback(pendingCaptureUri);
+              } else {
+                deliverCapturedPhoto(pendingCaptureFile);
+              }
+            } else if (pendingCaptureTarget == CaptureTarget.WEB_FILE_INPUT) {
+              cancelFileCallback();
+            } else {
+              deliverPhotoErrorToWeb("Camera capture cancelled.");
+            }
+            pendingCaptureFile = null;
+            pendingCaptureUri = null;
+            pendingCaptureTarget = CaptureTarget.NATIVE_BRIDGE;
+          });
 
   private final ActivityResultLauncher<String[]> startupPermissionLauncher =
       registerForActivityResult(
@@ -80,21 +116,6 @@ public class MainActivity extends AppCompatActivity {
       registerForActivityResult(
           new ActivityResultContracts.RequestMultiplePermissions(),
           result -> onWebPermissionsResult());
-
-  private final ActivityResultLauncher<Intent> fileChooserLauncher =
-      registerForActivityResult(
-          new ActivityResultContracts.StartActivityForResult(),
-          result -> {
-            if (filePathCallback == null) return;
-            Uri[] uris = null;
-            Intent data = result.getData();
-            if (result.getResultCode() == RESULT_OK && data != null) {
-              Uri uri = data.getData();
-              if (uri != null) uris = new Uri[] {uri};
-            }
-            filePathCallback.onReceiveValue(uris);
-            filePathCallback = null;
-          });
 
   @SuppressLint("SetJavaScriptEnabled")
   @Override
@@ -121,7 +142,6 @@ public class MainActivity extends AppCompatActivity {
 
     configureWebView();
     requestStartupPermissions();
-    runSecurityCheck();
 
     getOnBackPressedDispatcher()
         .addCallback(
@@ -143,60 +163,76 @@ public class MainActivity extends AppCompatActivity {
   @Override
   protected void onResume() {
     super.onResume();
-    if (blockedAppsDialog != null && blockedAppsDialog.isShowing()) {
-      runSecurityCheck();
-    }
+    runSecurityCheck();
   }
 
   private void runSecurityCheck() {
     if (!isOnline()) {
-      showError(getString(R.string.error_no_internet));
+      List<String> cachedPolicy = BlockedAppsPolicyCache.load(this);
+      if (cachedPolicy.isEmpty()) {
+        showError(getString(R.string.error_no_internet));
+        return;
+      }
+      errorPanel.setVisibility(View.GONE);
+      securityCheckPanel.setVisibility(View.VISIBLE);
+      webView.setVisibility(View.GONE);
+      securityExecutor.execute(() -> runLocalScan(cachedPolicy));
       return;
     }
 
     errorPanel.setVisibility(View.GONE);
     securityCheckPanel.setVisibility(View.VISIBLE);
     webView.setVisibility(View.GONE);
-    portalLoaded = false;
 
     securityExecutor.execute(
         () -> {
           try {
             List<String> policy = PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
-            if (policy.isEmpty()) {
-              runOnUiThread(this::openPortal);
-              return;
+            if (!policy.isEmpty()) {
+              BlockedAppsPolicyCache.save(MainActivity.this, policy);
+            } else {
+              policy = BlockedAppsPolicyCache.load(MainActivity.this);
             }
-
-            List<BlockedAppsScanner.InstalledApp> installed =
-                BlockedAppsScanner.getUserInstalledApps(MainActivity.this);
-            List<DetectedBlockedApp> detected =
-                BlockedAppsScanner.findInstalledBlockedApps(policy, installed);
-            Log.d(
-                TAG,
-                "Blocked app scan: policy="
-                    + policy.size()
-                    + " installed="
-                    + installed.size()
-                    + " detected="
-                    + detected.size());
-
-            runOnUiThread(
-                () -> {
-                  securityCheckPanel.setVisibility(View.GONE);
-                  if (detected.isEmpty()) {
-                    openPortal();
-                  } else {
-                    showBlockedAppsDialog(detected);
-                  }
-                });
+            runLocalScan(policy);
           } catch (Exception error) {
             Log.w(TAG, "Security scan failed", error);
-            runOnUiThread(
-                () -> {
-                  securityCheckPanel.setVisibility(View.GONE);
-                  showError(getString(R.string.error_security_check));
-                });
+            List<String> cachedPolicy = BlockedAppsPolicyCache.load(MainActivity.this);
+            if (!cachedPolicy.isEmpty()) {
+              runLocalScan(cachedPolicy);
+            } else {
+              runOnUiThread(
+                  () -> {
+                    securityCheckPanel.setVisibility(View.GONE);
+                    showError(getString(R.string.error_security_check));
+                  });
+            }
+          }
+        });
+  }
+
+  private void runLocalScan(List<String> blockedPolicy) {
+    List<BlockedAppsScanner.InstalledApp> installed =
+        BlockedAppsScanner.getAllInstalledApps(MainActivity.this);
+    List<DetectedBlockedApp> detected =
+        BlockedAppsScanner.findInstalledBlockedApps(blockedPolicy, installed);
+    Log.d(
+        TAG,
+        "Blocked app scan: policy="
+            + blockedPolicy.size()
+            + " installed="
+            + installed.size()
+            + " detected="
+            + detected.size());
+
+    runOnUiThread(
+        () -> {
+          securityCheckPanel.setVisibility(View.GONE);
+          if (detected.isEmpty()) {
+            openPortal();
+          } else {
+            portalLoaded = false;
+            webView.setVisibility(View.GONE);
+            showBlockedAppsDialog(detected);
           }
         });
   }
@@ -329,6 +365,7 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public void onPageFinished(WebView view, String url) {
             progressBar.setVisibility(View.GONE);
+            restoreWebSessionIfNeeded();
           }
 
           @Override
@@ -370,7 +407,7 @@ public class MainActivity extends AppCompatActivity {
           public void onGeolocationPermissionsShowPrompt(
               String origin, GeolocationPermissions.Callback callback) {
             if (hasLocationPermission()) {
-              callback.invoke(origin, true, false);
+              callback.invoke(origin, true, true);
               return;
             }
             pendingGeoCallback = callback;
@@ -392,6 +429,11 @@ public class MainActivity extends AppCompatActivity {
               MainActivity.this.filePathCallback.onReceiveValue(null);
             }
             MainActivity.this.filePathCallback = filePathCallback;
+
+            if (!acceptsImagesOnly(fileChooserParams)) {
+              cancelFileCallback();
+              return true;
+            }
 
             if (needsCameraPermission()) {
               webPermissionLauncher.launch(new String[] {Manifest.permission.CAMERA});
@@ -453,7 +495,7 @@ public class MainActivity extends AppCompatActivity {
 
     if (pendingGeoCallback != null) {
       boolean granted = hasLocationPermission();
-      pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
+      pendingGeoCallback.invoke(pendingGeoOrigin, granted, granted);
       pendingGeoCallback = null;
       pendingGeoOrigin = null;
     }
@@ -464,10 +506,20 @@ public class MainActivity extends AppCompatActivity {
       filePathCallback.onReceiveValue(null);
       filePathCallback = null;
     }
+
+    if (pendingNativeCameraAfterPermission) {
+      pendingNativeCameraAfterPermission = false;
+      if (hasCameraPermission()) {
+        startNativeCamera();
+      } else {
+        deliverPhotoErrorToWeb("Camera permission denied.");
+      }
+    }
   }
 
   private void onStartupPermissionsResult() {
     Log.d(TAG, "Startup permissions granted");
+    NativeGpsHelper.warmup(this);
   }
 
   private void requestStartupPermissions() {
@@ -480,6 +532,8 @@ public class MainActivity extends AppCompatActivity {
     }
     if (!needed.isEmpty()) {
       startupPermissionLauncher.launch(needed.toArray(new String[0]));
+    } else {
+      NativeGpsHelper.warmup(this);
     }
   }
 
@@ -507,11 +561,129 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void openFileChooser() {
-    Intent captureIntent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
-    Intent chooserIntent =
-        Intent.createChooser(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), null);
-    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] {captureIntent});
-    fileChooserLauncher.launch(chooserIntent);
+    pendingCaptureTarget = CaptureTarget.WEB_FILE_INPUT;
+    startNativeCamera();
+  }
+
+  private boolean acceptsImagesOnly(@Nullable WebChromeClient.FileChooserParams params) {
+    if (params == null) return true;
+    String[] acceptTypes = params.getAcceptTypes();
+    if (acceptTypes == null || acceptTypes.length == 0) return true;
+    for (String acceptType : acceptTypes) {
+      if (acceptType == null || acceptType.trim().isEmpty()) continue;
+      String normalized = acceptType.trim().toLowerCase();
+      if (!normalized.startsWith("image/") && !normalized.equals("image/*")) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public void launchNativeCamera() {
+    pendingCaptureTarget = CaptureTarget.NATIVE_BRIDGE;
+    if (needsCameraPermission()) {
+      pendingNativeCameraAfterPermission = true;
+      webPermissionLauncher.launch(new String[] {Manifest.permission.CAMERA});
+      return;
+    }
+    startNativeCamera();
+  }
+
+  private void startNativeCamera() {
+    try {
+      pendingCaptureFile = new File(getCacheDir(), "visit-" + System.currentTimeMillis() + ".jpg");
+      pendingCaptureUri =
+          FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", pendingCaptureFile);
+      takePictureLauncher.launch(pendingCaptureUri);
+    } catch (Exception error) {
+      Log.w(TAG, "Could not open native camera", error);
+      deliverPhotoErrorToWeb("Could not open camera.");
+    }
+  }
+
+  private void deliverCapturedPhoto(File file) {
+    securityExecutor.execute(
+        () -> {
+          try {
+            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+            if (bitmap == null) {
+              runOnUiThread(() -> deliverPhotoErrorToWeb("Could not read captured photo."));
+              return;
+            }
+
+            int maxDim = 1920;
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+            float scale = Math.min(1f, (float) maxDim / Math.max(width, height));
+            Bitmap scaled = bitmap;
+            if (scale < 1f) {
+              int nextWidth = Math.round(width * scale);
+              int nextHeight = Math.round(height * scale);
+              scaled = Bitmap.createScaledBitmap(bitmap, nextWidth, nextHeight, true);
+              if (scaled != bitmap) {
+                bitmap.recycle();
+              }
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            scaled.compress(Bitmap.CompressFormat.JPEG, 88, out);
+            if (scaled != bitmap) {
+              scaled.recycle();
+            }
+
+            String base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+            String dataUrl = "data:image/jpeg;base64," + base64;
+            runOnUiThread(() -> deliverPhotoDataUrlToWeb(dataUrl));
+          } catch (Exception error) {
+            Log.w(TAG, "Failed to process captured photo", error);
+            runOnUiThread(() -> deliverPhotoErrorToWeb("Failed to process captured photo."));
+          } finally {
+            if (file.exists() && !file.delete()) {
+              Log.w(TAG, "Could not delete temp capture file");
+            }
+          }
+        });
+  }
+
+  private void deliverPhotoDataUrlToWeb(String dataUrl) {
+    if (webView == null) return;
+    String js =
+        "(function(){try{if(window.__flexHrmOnPhotoCaptured){window.__flexHrmOnPhotoCaptured("
+            + JSONObject.quote(dataUrl)
+            + ");}}catch(e){}})();";
+    webView.evaluateJavascript(js, null);
+  }
+
+  private void deliverPhotoErrorToWeb(String message) {
+    if (webView == null) return;
+    String js =
+        "(function(){try{if(window.__flexHrmOnPhotoError){window.__flexHrmOnPhotoError("
+            + JSONObject.quote(message)
+            + ");}}catch(e){}})();";
+    webView.evaluateJavascript(js, null);
+  }
+
+  public void deliverGpsJsonToWeb(String json) {
+    if (webView == null) return;
+    String js =
+        "(function(){try{if(window.__flexHrmOnGpsReady){window.__flexHrmOnGpsReady("
+            + JSONObject.quote(json)
+            + ");}}catch(e){}})();";
+    webView.evaluateJavascript(js, null);
+  }
+
+  private void deliverCapturedUriToFileCallback(@Nullable Uri uri) {
+    if (filePathCallback == null) return;
+    if (uri != null) {
+      filePathCallback.onReceiveValue(new Uri[] {uri});
+    } else {
+      filePathCallback.onReceiveValue(null);
+    }
+    filePathCallback = null;
+  }
+
+  private void cancelFileCallback() {
+    deliverCapturedUriToFileCallback(null);
   }
 
   private void loadPortal() {
@@ -520,7 +692,23 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     errorPanel.setVisibility(View.GONE);
-    webView.loadUrl(useBundledFallback ? BUNDLED_LOGIN_URL : REMOTE_LOGIN_URL);
+    String sessionJson = SupervisorSessionCache.loadJson(this);
+    if (sessionJson != null && !sessionJson.isEmpty()) {
+      webView.loadUrl(BUNDLED_PORTAL_URL);
+    } else {
+      webView.loadUrl(BUNDLED_LOGIN_URL);
+    }
+  }
+
+  private void restoreWebSessionIfNeeded() {
+    if (webView == null) return;
+    String sessionJson = SupervisorSessionCache.loadJson(this);
+    if (sessionJson == null || sessionJson.isEmpty()) return;
+    String js =
+        "(function(){try{var s="
+            + JSONObject.quote(sessionJson)
+            + ";var p=JSON.parse(s);if(p.token){if(!localStorage.getItem('hrms_supervisor_token')){localStorage.setItem('hrms_supervisor_token',p.token);}if(p.name&&!localStorage.getItem('hrms_supervisor_name')){localStorage.setItem('hrms_supervisor_name',p.name);}if(p.supervisorId&&!localStorage.getItem('hrms_supervisor_id')){localStorage.setItem('hrms_supervisor_id',p.supervisorId);}}}catch(e){}})();";
+    webView.evaluateJavascript(js, null);
   }
 
   private void showError(@NonNull String message) {

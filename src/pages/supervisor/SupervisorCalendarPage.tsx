@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Plus, CalendarRange } from "lucide-react";
-import { SchoolWork, PlannedVisit, CommitmentDiary } from "../../types";
+import { SchoolWork, PlannedVisit, CommitmentDiary, SchoolVisit } from "../../types";
 import { parseApiError } from "../../api";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import {
@@ -11,6 +11,10 @@ import {
   isPastDate,
   toIsoDate,
 } from "../../lib/supervisor-dates";
+import {
+  canVisitSchoolAgain,
+  latestVisitDateBySchool,
+} from "../../lib/supervisor-visit-cooldown";
 
 type SelectionMode = "single" | "multi" | "range";
 
@@ -28,6 +32,7 @@ export default function SupervisorCalendarPage() {
   const [rangeEnd, setRangeEnd] = useState<string | null>(null);
   const [planned, setPlanned] = useState<PlannedVisit[]>([]);
   const [commitments, setCommitments] = useState<CommitmentDiary[]>([]);
+  const [recentVisits, setRecentVisits] = useState<SchoolVisit[]>([]);
   const [schools, setSchools] = useState<SchoolWork[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPlanForm, setShowPlanForm] = useState(false);
@@ -42,14 +47,20 @@ export default function SupervisorCalendarPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [planRes, schoolRes, commitRes] = await Promise.all([
+      const lookback = new Date();
+      lookback.setDate(lookback.getDate() - 30);
+      const [planRes, schoolRes, commitRes, visitsRes] = await Promise.all([
         supervisorFetch(`/api/planned-visits/supervisor/mine?monthKey=${monthKey}`),
         supervisorFetch("/api/school-visits/supervisor/schools"),
         supervisorFetch("/api/commitment-diary/supervisor/mine"),
+        supervisorFetch(
+          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(lookback)}&toDate=${toIsoDate(today)}`,
+        ),
       ]);
       if (planRes.ok) setPlanned(await planRes.json());
       if (schoolRes.ok) setSchools(await schoolRes.json());
       if (commitRes.ok) setCommitments(await commitRes.json());
+      if (visitsRes.ok) setRecentVisits(await visitsRes.json());
     } catch {
       setPlanned([]);
       setCommitments([]);
@@ -169,8 +180,20 @@ export default function SupervisorCalendarPage() {
     [selectedDates],
   );
 
-  const getCommittedSchoolIds = (date: string) =>
-    new Set((commitmentByDate.get(date) || []).map((c) => c.schoolWorkId));
+  const cooldownSchoolIds = useMemo(() => {
+    const map = latestVisitDateBySchool(recentVisits);
+    const blocked = new Set<string>();
+    for (const [schoolId, lastVisit] of map) {
+      if (!canVisitSchoolAgain(lastVisit)) blocked.add(schoolId);
+    }
+    return blocked;
+  }, [recentVisits]);
+
+  const getCommittedSchoolIds = (date: string) => {
+    const set = new Set((commitmentByDate.get(date) || []).map((c) => c.schoolWorkId));
+    for (const id of cooldownSchoolIds) set.add(id);
+    return set;
+  };
 
   const getCommittedSchoolIdsForRange = (fromDate: string, toDate: string) => {
     const set = new Set<string>();
@@ -180,6 +203,7 @@ export default function SupervisorCalendarPage() {
         set.add(entry.schoolWorkId);
       }
     }
+    for (const id of cooldownSchoolIds) set.add(id);
     return set;
   };
 
@@ -354,15 +378,14 @@ export default function SupervisorCalendarPage() {
           </button>
           <h2 className="font-black text-slate-900 text-sm">{monthLabel}</h2>
           <p className="text-[10px] text-slate-400 font-bold text-center">
-            {monthCommitmentCount}{" "}
-            {lang === "hi" ? "कमिटमेंट इस महीने" : "commitments this month"}
+            {monthCommitmentCount} {t("commitmentsThisMonth")}
           </p>
           <button type="button" onClick={nextMonth} className="p-2 text-slate-500 cursor-pointer">
             <ChevronRight size={20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="grid grid-cols-2 gap-2 mb-3">
           <button
             type="button"
             onClick={() => {
@@ -371,7 +394,7 @@ export default function SupervisorCalendarPage() {
               setRangeEnd(null);
               setSelectedDates([selectedDate]);
             }}
-            className={`py-1.5 text-[10px] font-bold rounded-lg cursor-pointer ${
+            className={`py-2 text-xs font-bold rounded-lg cursor-pointer ${
               selectionMode === "single"
                 ? "bg-[#ff791a] text-white"
                 : "bg-slate-100 text-slate-600"
@@ -382,30 +405,12 @@ export default function SupervisorCalendarPage() {
           <button
             type="button"
             onClick={() => {
-              setSelectionMode("multi");
-              setRangeStart(null);
-              setRangeEnd(null);
-              if (!selectedDates.includes(selectedDate)) {
-                setSelectedDates([selectedDate]);
-              }
-            }}
-            className={`py-1.5 text-[10px] font-bold rounded-lg cursor-pointer ${
-              selectionMode === "multi"
-                ? "bg-[#ff791a] text-white"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            {t("multiDay")}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
               setSelectionMode("range");
               setRangeStart(selectedDate);
               setRangeEnd(null);
               setSelectedDates([selectedDate]);
             }}
-            className={`py-1.5 text-[10px] font-bold rounded-lg cursor-pointer flex items-center justify-center gap-1 ${
+            className={`py-2 text-xs font-bold rounded-lg cursor-pointer flex items-center justify-center gap-1 ${
               selectionMode === "range"
                 ? "bg-[#ff791a] text-white"
                 : "bg-slate-100 text-slate-600"
@@ -644,6 +649,7 @@ export default function SupervisorCalendarPage() {
             entries={rangeSelectedCommitments}
             lang={lang}
             t={t}
+            cooldownSchoolIds={cooldownSchoolIds}
           />
         ) : null
       ) : selectionMode === "multi" ? (
@@ -657,6 +663,7 @@ export default function SupervisorCalendarPage() {
             lang={lang}
             t={t}
             showDate
+            cooldownSchoolIds={cooldownSchoolIds}
           />
         )
       ) : selectionMode === "single" && selectedCommitments.length === 0 && legacyPlannedVisits.length === 0 ? (
@@ -670,6 +677,7 @@ export default function SupervisorCalendarPage() {
               entries={selectedCommitments}
               lang={lang}
               t={t}
+              cooldownSchoolIds={cooldownSchoolIds}
             />
           )}
           {legacyPlannedVisits.length > 0 && (
@@ -693,7 +701,11 @@ export default function SupervisorCalendarPage() {
                     </div>
                     <Link
                       to={`/supervisor/visit/${plan.schoolWorkId}`}
-                      className="shrink-0 px-3 py-2 bg-[#ff791a] text-white text-[10px] font-bold rounded-xl hover:bg-orange-600 transition"
+                      className={`shrink-0 px-3 py-2 text-[10px] font-bold rounded-xl transition ${
+                        cooldownSchoolIds.has(plan.schoolWorkId)
+                          ? "bg-slate-200 text-slate-500 pointer-events-none"
+                          : "bg-[#ff791a] text-white hover:bg-orange-600"
+                      }`}
                     >
                       {t("completeCommitment")}
                     </Link>
@@ -715,6 +727,7 @@ function CommitmentListSection({
   lang,
   t,
   showDate = false,
+  cooldownSchoolIds = new Set<string>(),
 }: {
   title: string;
   count: number;
@@ -722,6 +735,7 @@ function CommitmentListSection({
   lang: "en" | "hi";
   t: (key: string) => string;
   showDate?: boolean;
+  cooldownSchoolIds?: Set<string>;
 }) {
   const statusLabel: Record<CommitmentDiary["status"], string> = {
     committed: t("statusCommitted"),
@@ -750,14 +764,15 @@ function CommitmentListSection({
       <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
         {entries.map((entry) => {
           const canComplete =
-            entry.status === "committed" || entry.status === "in_progress";
+            (entry.status === "committed" || entry.status === "in_progress") &&
+            !cooldownSchoolIds.has(entry.schoolWorkId);
           return (
             <div
               key={entry.id}
               className="bg-white border border-blue-100 rounded-2xl p-3 flex items-start gap-3"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-bold text-slate-900 text-sm truncate">{entry.schoolName}</p>
+                <p className="font-bold text-slate-900 text-sm break-words">{entry.schoolName}</p>
                 <p className="text-xs text-slate-400">
                   {showDate || entry.fromDate !== entry.toDate
                     ? entry.fromDate === entry.toDate

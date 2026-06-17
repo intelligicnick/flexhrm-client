@@ -14,8 +14,10 @@ export interface SidebarItemDef {
 
 export const getModuleKey = (tabName: string): string => {
   switch (tabName) {
-    case "Admin": return "admin";
-    case "Audit Logs": return "admin";
+    case "Admin":
+    case "Role & Access":
+    case "Audit Logs":
+      return "admin";
     case "Employees": return "employees";
     case "School Work":
     case "Schools":
@@ -24,6 +26,15 @@ export const getModuleKey = (tabName: string): string => {
     case "Field Team":
     case "Saved School Bulk Pay":
       return "schoolWork";
+    case "Bids":
+    case "Tenders":
+    case "Contracts":
+      return "bids";
+    case "Renewals":
+    case "Car Papers":
+    case "IT Renewals":
+    case "Licenses":
+      return "renewals";
     case "Salary": return "salary";
     case "Saved Bulk Pay": return "salary";
     case "Advance & Penalty": return "ledger";
@@ -35,8 +46,11 @@ export const getModuleKey = (tabName: string): string => {
   }
 };
 
+export const isAdminModuleTab = (tabName: string): boolean =>
+  getModuleKey(tabName) === "admin";
+
 export const PERMISSION_MODULES = [
-  "employees", "schoolWork", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin",
+  "employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin",
 ] as const;
 
 export type PermissionModuleKey = (typeof PERMISSION_MODULES)[number];
@@ -59,6 +73,16 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
     key: "schoolWork",
     name: "School Work",
     includes: "School registry, monthly billing, partner bulk pay, expenses, and field team (supervisors & visits)",
+  },
+  {
+    key: "bids",
+    name: "Bids",
+    includes: "Tenders and contracts",
+  },
+  {
+    key: "renewals",
+    name: "Renewals",
+    includes: "Car papers, IT renewals (domains & servers), and licenses",
   },
   {
     key: "attendance",
@@ -92,9 +116,9 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   },
   {
     key: "admin",
-    name: "Administration",
+    name: "Role & Access",
     includes:
-      "Admin panel, invite/configure admins, custom roles, audit logs, approve bulk edit requests",
+      "Admin accounts, custom roles, activity log, device rules, approve bulk edit requests",
   },
 ];
 
@@ -107,6 +131,8 @@ export function createEmptyRolePermissions(): Record<PermissionModuleKey, { view
 export const DEFAULT_NEW_ROLE_PERMISSIONS: Record<PermissionModuleKey, { view: boolean; edit: boolean }> = {
   employees: { view: true, edit: true },
   schoolWork: { view: true, edit: true },
+  bids: { view: true, edit: true },
+  renewals: { view: true, edit: true },
   salary: { view: false, edit: false },
   ledger: { view: false, edit: false },
   attendance: { view: true, edit: true },

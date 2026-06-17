@@ -26,7 +26,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { Employee } from "../types";
-import { normalizeSkillCategory, calculatePfAmounts } from "../utils";
+import { normalizeSkillCategory, calculatePfAmounts, isEmployeePtEnabled, isPfEsicCompliant, isProfessionalTaxApplicable, resolveLocationCompliance, resolveLocationPtEnabled } from "../utils";
 import EmployeePhoto from "./EmployeePhoto";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 import IdCardPanel from "./id-card/IdCardPanel";
@@ -117,8 +117,12 @@ export default function EmployeeViewModal({
     const loc = employee.location || "";
     const saved = typeof window !== "undefined" ? localStorage.getItem("hrms_location_compliance") : null;
     const complianceMap = saved ? JSON.parse(saved) : {};
-    const isLocCompliant = loc ? !!complianceMap[loc] : false;
-    const isCompliant = isLocCompliant && employee.complianceEnabled !== false;
+    const savedPt = typeof window !== "undefined" ? localStorage.getItem("hrms_location_pt_enabled") : null;
+    const ptMap = savedPt ? JSON.parse(savedPt) : {};
+    const isLocCompliant = resolveLocationCompliance(loc, complianceMap);
+    const isLocPt = resolveLocationPtEnabled(loc, ptMap);
+    const isCompliant = isPfEsicCompliant(employee, complianceMap);
+    const isPtEnabled = isProfessionalTaxApplicable(employee, ptMap);
     const gross = Number(employee.grossSalary) || 0;
     const { pfWage, employeePf, employerPf } = calculatePfAmounts(gross, {
       mode: employee.pfCalculationMode,
@@ -128,7 +132,7 @@ export default function EmployeeViewModal({
       employee.pfCalculationMode === "gross"
         ? "PF on gross salary"
         : "PF with ₹15,000 ceiling";
-    return { isLocCompliant, isCompliant, gross, pfWage, employeePf, employerPf, pfModeLabel };
+    return { isLocCompliant, isLocPt, isCompliant, isPtEnabled, gross, pfWage, employeePf, employerPf, pfModeLabel };
   }, [employee]);
 
   useEffect(() => {
@@ -519,21 +523,35 @@ export default function EmployeeViewModal({
                   </span>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Compliance</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">PF/ESIC & PT</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${
                       employee.complianceEnabled !== false
                         ? "border-emerald-200 bg-emerald-100 text-emerald-800"
                         : "border-rose-200 bg-rose-100 text-rose-800"
                     }`}>
-                      Employee: {employee.complianceEnabled !== false ? "On" : "Off"}
+                      Emp PF/ESIC: {employee.complianceEnabled !== false ? "On" : "Off"}
+                    </span>
+                    <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${
+                      isEmployeePtEnabled(employee)
+                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                        : "border-rose-200 bg-rose-100 text-rose-800"
+                    }`}>
+                      Emp PT: {isEmployeePtEnabled(employee) ? "On" : "Off"}
                     </span>
                     <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${
                       pfSummary.isLocCompliant
                         ? "border-emerald-200 bg-emerald-100 text-emerald-800"
                         : "border-rose-200 bg-rose-100 text-rose-800"
                     }`}>
-                      Location: {pfSummary.isLocCompliant ? "On" : "Off"}
+                      Loc PF/ESIC: {pfSummary.isLocCompliant ? "On" : "Off"}
+                    </span>
+                    <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${
+                      pfSummary.isLocPt
+                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                        : "border-rose-200 bg-rose-100 text-rose-800"
+                    }`}>
+                      Loc PT: {pfSummary.isLocPt ? "On" : "Off"}
                     </span>
                   </div>
                 </div>

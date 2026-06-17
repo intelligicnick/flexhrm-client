@@ -29,7 +29,6 @@ import { useHRMS } from "../context/HRMSContext";
 import PercentIcon from "./ui/PercentIcon";
 import TypeToConfirmDialog from "./ui/TypeToConfirmDialog";
 import SchoolConfigurationPanel from "./SchoolConfigurationPanel";
-import BlockedAppsConfigurationPanel from "./BlockedAppsConfigurationPanel";
 import DataArchivePanel from "./DataArchivePanel";
 import { BASIC_SALARY_OPTIONS } from "../lib/hrms-config";
 import {
@@ -42,11 +41,10 @@ import {
   type BulkPayBankAccount,
 } from "../lib/bulk-pay-bank-accounts";
 import {
-  DEFAULT_LOCATION_PT_AMOUNT,
-  resolveLocationPtAmount,
+  PROFESSIONAL_TAX_SLAB_SUMMARY,
 } from "../utils";
 
-type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "blockedApps" | "dataArchive";
+type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "dataArchive";
 
 const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: "payroll", label: "Payroll Rules", icon: IndianRupee },
@@ -54,7 +52,6 @@ const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adm
   { id: "locations", label: "Office Locations", icon: Map },
   { id: "roles", label: "Job Roles", icon: Briefcase },
   { id: "schoolGeography", label: "District & Blocks", icon: School },
-  { id: "blockedApps", label: "Blocked Apps", icon: Shield },
   { id: "dataArchive", label: "Data Archive", icon: Archive, adminOnly: true },
 ];
 
@@ -108,11 +105,11 @@ export default function ConfigurationPanel() {
     isSavingPayrollConfig,
     configSummary,
     locationCompliance,
-    locationPtAmounts,
+    locationPtEnabled,
     isFetchingLocations,
     isFetchingJobRoles,
     newLocCompliance,
-    newLocPtAmount,
+    newLocPtEnabled,
     newLocNameInput,
     newRoleNameInput,
     editingLocIndex,
@@ -125,7 +122,7 @@ export default function ConfigurationPanel() {
     setBasicSalaryPercentage,
     setCompanyBranch,
     setNewLocCompliance,
-    setNewLocPtAmount,
+    setNewLocPtEnabled,
     setNewLocNameInput,
     setNewRoleNameInput,
     setEditingLocIndex,
@@ -142,7 +139,7 @@ export default function ConfigurationPanel() {
     handleEditRoleFromConfig,
     handleDeleteRoles,
     updateLocationCompliance,
-    updateLocationPtAmount,
+    updateLocationPtEnabled,
     handleSavePayrollConfig,
     handleResetPayrollConfig,
     schoolDistricts,
@@ -155,6 +152,8 @@ export default function ConfigurationPanel() {
     handleUpdateSchoolDistrict,
     handleDeleteSchoolDistricts,
     userPermissions,
+    triggerSuccess,
+    setErrorMessage,
   } = useHRMS();
 
   const [activeSection, setActiveSection] = useState<ConfigSection>("payroll");
@@ -197,9 +196,7 @@ export default function ConfigurationPanel() {
   const addLocation = () => {
     const val = newLocNameInput.trim();
     if (!val) return;
-    const parsedPt = parseFloat(newLocPtAmount);
-    const ptVal = Number.isFinite(parsedPt) && parsedPt >= 0 ? Math.round(parsedPt) : DEFAULT_LOCATION_PT_AMOUNT;
-    handleAddLocationFromConfig(val, newLocCompliance, ptVal);
+    handleAddLocationFromConfig(val, newLocCompliance, newLocPtEnabled);
   };
 
   const addRole = () => {
@@ -639,7 +636,7 @@ export default function ConfigurationPanel() {
             <Plus size={14} /> Add Location
           </button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 space-y-3">
           <label htmlFor="new-loc-compliance" className="flex items-start gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -649,23 +646,35 @@ export default function ConfigurationPanel() {
               className="mt-0.5 w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
             />
             <span className="text-xs font-semibold text-slate-700 leading-snug">
-              Enable statutory compliance (PF, ESIC, PT)
+              Enable PF/ESIC compliance (applicable across India)
             </span>
           </label>
-          <div className="flex items-center justify-between gap-3">
-            <label htmlFor="new-loc-pt-amount" className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-              Default PT (₹)
-            </label>
+          <label htmlFor="new-loc-pt-enabled" className="flex items-start gap-2 cursor-pointer select-none">
             <input
-              type="number"
-              id="new-loc-pt-amount"
-              min={0}
-              step={1}
-              value={newLocPtAmount}
-              onChange={(e) => setNewLocPtAmount(e.target.value)}
-              className="w-24 px-2 py-1.5 border border-slate-200 bg-white text-sm text-slate-800 rounded-lg focus:outline-none focus:border-orange-500 text-right font-semibold"
-              title="Professional Tax when monthly gross exceeds ₹10,000"
+              type="checkbox"
+              id="new-loc-pt-enabled"
+              checked={newLocPtEnabled}
+              onChange={(e) => setNewLocPtEnabled(e.target.checked)}
+              className="mt-0.5 w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
             />
+            <span className="text-xs font-semibold text-slate-700 leading-snug">
+              Enable Professional Tax (only where levied by state)
+            </span>
+          </label>
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[10px] text-slate-600 leading-relaxed">
+            <p className="font-bold text-slate-700 uppercase tracking-wide mb-1.5">PT slabs when enabled above</p>
+            <p className="font-semibold text-slate-700 mt-1">Male</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {PROFESSIONAL_TAX_SLAB_SUMMARY.male.map((row) => (
+                <li key={row.range}>{row.range}: {row.amount}</li>
+              ))}
+            </ul>
+            <p className="font-semibold text-slate-700 mt-2">Female</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {PROFESSIONAL_TAX_SLAB_SUMMARY.female.map((row) => (
+                <li key={row.range}>{row.range}: {row.amount}</li>
+              ))}
+            </ul>
           </div>
         </div>
       </div>
@@ -854,20 +863,18 @@ export default function ConfigurationPanel() {
                             className="w-3.5 h-3.5 text-emerald-500 border-slate-300 rounded focus:ring-emerald-500 cursor-pointer"
                           />
                           <Shield size={11} className="text-slate-400" />
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Compliance</span>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">PF/ESIC</span>
                         </label>
-                        <label className="inline-flex items-center gap-1.5 select-none">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PT (₹)</span>
+                        <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
                           <input
                             id={`loc-pt-${loc}`}
                             name={`locPt_${loc}`}
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={resolveLocationPtAmount(loc, locationPtAmounts)}
-                            onChange={(e) => updateLocationPtAmount(loc, e.target.value)}
-                            className="w-16 px-2 py-0.5 border border-slate-200 bg-white text-xs font-semibold text-slate-800 rounded focus:outline-none focus:border-orange-500 text-center"
+                            type="checkbox"
+                            checked={!!locationPtEnabled[loc]}
+                            onChange={(e) => updateLocationPtEnabled(loc, e.target.checked)}
+                            className="w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
                           />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Professional Tax</span>
                         </label>
                       </div>
                     </>
@@ -1179,11 +1186,12 @@ export default function ConfigurationPanel() {
               onDeleteBlocks={handleDeleteSchoolBlocks}
             />
           )}
-          {activeSection === "blockedApps" && (
-            <BlockedAppsConfigurationPanel readOnly={!userPermissions.schoolWork?.edit} />
-          )}
           {activeSection === "dataArchive" && userPermissions.admin?.view && (
-            <DataArchivePanel readOnly={!userPermissions.admin?.edit} />
+            <DataArchivePanel
+              readOnly={!userPermissions.admin?.edit}
+              onSuccess={triggerSuccess}
+              onError={setErrorMessage}
+            />
           )}
         </div>
       </div>

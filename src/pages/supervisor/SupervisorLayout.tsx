@@ -7,7 +7,6 @@ import {
   MessageSquarePlus,
   School,
   User,
-  Languages,
   Bell,
 } from "lucide-react";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
@@ -17,6 +16,12 @@ import {
   clearSupervisorImpersonatedFlag,
   SUPERVISOR_IMPERSONATED_KEY,
 } from "../../lib/supervisor-login";
+import {
+  clearSupervisorSession,
+  getSupervisorToken,
+  persistSupervisorSession,
+  restoreSupervisorSessionFromNative,
+} from "../../lib/supervisor-session";
 import { AppNotification } from "../../types";
 import { useNotificationPoller } from "../../hooks/useNotificationPoller";
 import { requestBrowserNotificationPermission } from "../../lib/notification-alerts";
@@ -40,8 +45,8 @@ function getPageTitle(pathname: string, t: (key: string) => string): string {
 function SupervisorLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { t, lang, setLang } = useSupervisorI18n();
-  const token = localStorage.getItem("hrms_supervisor_token");
+  const { t, setLang } = useSupervisorI18n();
+  const token = getSupervisorToken();
   const name = localStorage.getItem("hrms_supervisor_name") || "Supervisor";
   const [valid, setValid] = useState<boolean | null>(null);
   const [impersonated, setImpersonated] = useState(false);
@@ -53,14 +58,24 @@ function SupervisorLayoutInner() {
   );
 
   const checkSession = useCallback(async () => {
-    const sessionToken = localStorage.getItem("hrms_supervisor_token");
+    restoreSupervisorSessionFromNative();
+    const sessionToken = getSupervisorToken();
     if (!sessionToken) {
       setValid(false);
       return;
     }
     try {
       const res = await supervisorFetch("/api/auth/supervisor/me");
-      if (!res.ok) throw new Error("invalid");
+      if (res.status === 401 || res.status === 403) {
+        clearSupervisorSession();
+        clearSupervisorImpersonatedFlag();
+        setValid(false);
+        return;
+      }
+      if (!res.ok) {
+        setValid((current) => (current === null ? true : current));
+        return;
+      }
       const data = await res.json();
       if (data.defaultLanguage === "en" || data.defaultLanguage === "hi") {
         setLang(data.defaultLanguage);
@@ -68,6 +83,11 @@ function SupervisorLayoutInner() {
       if (data.name) {
         localStorage.setItem("hrms_supervisor_name", data.name);
       }
+      persistSupervisorSession({
+        token: sessionToken,
+        name: data.name || localStorage.getItem("hrms_supervisor_name") || undefined,
+        supervisorId: data.supervisorId || localStorage.getItem("hrms_supervisor_id") || undefined,
+      });
 
       const isImpersonated = !!data.impersonated;
       setImpersonated(isImpersonated);
@@ -79,9 +99,7 @@ function SupervisorLayoutInner() {
 
       const localDeviceId = getSupervisorDeviceId();
       if (!isImpersonated && data.registeredDeviceId && data.registeredDeviceId !== localDeviceId) {
-        localStorage.removeItem("hrms_supervisor_token");
-        localStorage.removeItem("hrms_supervisor_name");
-        localStorage.removeItem("hrms_supervisor_id");
+        clearSupervisorSession();
         clearSupervisorImpersonatedFlag();
         navigate("/supervisor/login?reason=device_mismatch", { replace: true });
         return;
@@ -98,11 +116,7 @@ function SupervisorLayoutInner() {
         setUnreadCount(0);
       }
     } catch {
-      localStorage.removeItem("hrms_supervisor_token");
-      localStorage.removeItem("hrms_supervisor_name");
-      localStorage.removeItem("hrms_supervisor_id");
-      clearSupervisorImpersonatedFlag();
-      setValid(false);
+      setValid((current) => (current === null || current === true ? true : false));
     }
   }, [setLang, navigate]);
 
@@ -162,14 +176,10 @@ function SupervisorLayoutInner() {
     } catch {
       /* ignore */
     }
-    localStorage.removeItem("hrms_supervisor_token");
-    localStorage.removeItem("hrms_supervisor_name");
-    localStorage.removeItem("hrms_supervisor_id");
+    clearSupervisorSession();
     clearSupervisorImpersonatedFlag();
     navigate("/supervisor/login");
   };
-
-  const toggleLang = () => setLang(lang === "en" ? "hi" : "en");
 
   if (valid === null) {
     return (
@@ -224,15 +234,6 @@ function SupervisorLayoutInner() {
                 )}
                 <button
                   type="button"
-                  onClick={toggleLang}
-                  className="p-2 text-white/80 hover:text-white cursor-pointer flex items-center gap-1 text-[10px] font-bold"
-                  title={t("language")}
-                >
-                  <Languages size={18} />
-                  {lang === "en" ? "हि" : "EN"}
-                </button>
-                <button
-                  type="button"
                   onClick={logout}
                   className="p-2 text-white/80 hover:text-white cursor-pointer"
                   title={t("logout")}
@@ -257,10 +258,10 @@ function SupervisorLayoutInner() {
                   <Link
                     key={to}
                     to={to}
-                    className={`flex-1 relative py-2.5 flex flex-col items-center gap-0.5 text-[9px] font-bold transition rounded-xl mx-0.5 my-1 ${
+                    className={`flex-1 relative py-2.5 flex flex-col items-center gap-0.5 text-[10px] font-bold transition rounded-xl mx-0.5 my-1 ${
                       active
                         ? "text-[#ff791a] bg-orange-50"
-                        : "text-slate-400 hover:text-slate-600"
+                        : "text-slate-500 hover:text-slate-700"
                     }`}
                   >
                     <Icon size={20} strokeWidth={active ? 2.5 : 2} />

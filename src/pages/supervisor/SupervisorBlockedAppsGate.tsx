@@ -13,54 +13,69 @@ import { useSupervisorI18n } from "./SupervisorI18nContext";
 
 type GatePhase = "scanning" | "blocked" | "clear" | "native_required";
 
+const BLOCKED_APPS_CACHE_KEY = "hrms_supervisor_blocked_apps_cache";
+
+function loadCachedBlockedApps(): string[] {
+  try {
+    const raw = localStorage.getItem(BLOCKED_APPS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedBlockedApps(apps: string[]): void {
+  try {
+    localStorage.setItem(BLOCKED_APPS_CACHE_KEY, JSON.stringify(apps));
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function SupervisorBlockedAppsGate({ children }: { children: React.ReactNode }) {
   const { t } = useSupervisorI18n();
   const [phase, setPhase] = useState<GatePhase>("scanning");
   const [detected, setDetected] = useState<DetectedBlockedApp[]>([]);
+  const nativeApp = isFlexHrmNativeApp();
 
   const runScan = useCallback(async () => {
     setPhase("scanning");
     try {
-      const res = await fetch(apiUrl("/api/auth/supervisor/portal-policy"));
-      if (!res.ok) throw new Error("policy fetch failed");
-      const data = await res.json();
-      const blocked: string[] = Array.isArray(data.blockedAppsToUninstall)
-        ? data.blockedAppsToUninstall
-        : [];
+      let blocked: string[] = [];
+      try {
+        const res = await fetch(apiUrl("/api/auth/supervisor/portal-policy"));
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.blockedAppsToUninstall)) {
+            blocked = data.blockedAppsToUninstall;
+            if (blocked.length > 0) {
+              saveCachedBlockedApps(blocked);
+            }
+          }
+        }
+      } catch {
+        blocked = loadCachedBlockedApps();
+      }
 
       if (blocked.length === 0) {
-        setDetected([]);
-        setPhase("clear");
-        return;
+        blocked = loadCachedBlockedApps();
       }
 
       if (!canScanInstalledApps()) {
-        setPhase(isFlexHrmNativeApp() ? "clear" : "native_required");
+        if (nativeApp) {
+          setDetected([]);
+          setPhase("clear");
+          return;
+        }
+        setPhase("native_required");
         return;
       }
 
       const installed = await getInstalledApps();
       const found = findInstalledBlockedApps(blocked, installed);
-      // #region agent log
-      fetch("http://127.0.0.1:7244/ingest/bcae18f5-5314-4ad9-8289-d7be847351ed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "f3d188" },
-        body: JSON.stringify({
-          sessionId: "f3d188",
-          runId: "blocked-apps-scan",
-          hypothesisId: "A",
-          location: "SupervisorBlockedAppsGate.tsx:runScan",
-          message: "Blocked app scan result",
-          data: {
-            blockedCount: blocked.length,
-            installedCount: installed.length,
-            detectedCount: found.length,
-            detectedPackages: found.map((app) => app.packageName),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (found.length > 0) {
         setDetected(found);
         setPhase("blocked");
@@ -69,16 +84,20 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
         setPhase("clear");
       }
     } catch {
-      setPhase(isFlexHrmNativeApp() ? "clear" : "native_required");
+      if (nativeApp) {
+        setDetected([]);
+        setPhase("clear");
+        return;
+      }
+      setPhase("native_required");
     }
-  }, []);
+  }, [nativeApp]);
 
   useEffect(() => {
     void runScan();
   }, [runScan]);
 
   useEffect(() => {
-    if (phase !== "blocked") return;
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
         void runScan();
@@ -86,7 +105,7 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [phase, runScan]);
+  }, [runScan]);
 
   if (phase === "scanning") {
     return (

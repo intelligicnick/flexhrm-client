@@ -17,15 +17,13 @@ interface SupervisorDateFilterProps {
   visitCount?: number;
 }
 
-type FilterTab = "quick" | "month" | "custom" | "range";
+type FilterTab = "quick" | "range";
 
 const QUICK_MODES: SupervisorHistoryFilterMode[] = ["day", "week", "month"];
 
 function getActiveTab(mode: SupervisorHistoryFilterMode): FilterTab {
-  if (QUICK_MODES.includes(mode)) return "quick";
-  if (mode === "selectMonth") return "month";
-  if (mode === "customDate") return "custom";
-  return "range";
+  if (mode === "dateRange") return "range";
+  return "quick";
 }
 
 export default function SupervisorDateFilter({ filter, onChange, visitCount }: SupervisorDateFilterProps) {
@@ -41,8 +39,6 @@ export default function SupervisorDateFilter({ filter, onChange, visitCount }: S
 
   const tabs: { key: FilterTab; label: string; icon: React.ReactNode }[] = [
     { key: "quick", label: t("quickFilter"), icon: <CalendarDays size={14} /> },
-    { key: "month", label: t("pickMonth"), icon: <CalendarDays size={14} /> },
-    { key: "custom", label: t("customDate"), icon: <CalendarDays size={14} /> },
     { key: "range", label: t("dateRange"), icon: <CalendarRange size={14} /> },
   ];
 
@@ -71,13 +67,13 @@ export default function SupervisorDateFilter({ filter, onChange, visitCount }: S
         )}
       </div>
 
-      <div className="grid grid-cols-4 border-b border-slate-100">
+      <div className="grid grid-cols-2 border-b border-slate-100">
         {tabs.map(({ key, label, icon }) => (
           <button
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`flex flex-col items-center gap-1 py-2.5 px-1 text-[9px] font-bold transition cursor-pointer border-b-2 ${
+            className={`flex flex-col items-center gap-1 py-2.5 px-1 text-[10px] font-bold transition cursor-pointer border-b-2 ${
               tab === key
                 ? "border-[#ff791a] text-[#ff791a] bg-orange-50/60"
                 : "border-transparent text-slate-400 hover:text-slate-600"
@@ -91,61 +87,58 @@ export default function SupervisorDateFilter({ filter, onChange, visitCount }: S
 
       <div className="p-4">
         {tab === "quick" && (
-          <div className="flex gap-2">
-            {QUICK_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onChange({ ...filter, mode })}
-                className={`flex-1 py-3 rounded-xl text-xs font-black transition cursor-pointer ${
-                  filter.mode === mode
-                    ? "bg-[#ff791a] text-white shadow-md shadow-orange-200"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
-              >
-                {t(mode)}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {tab === "month" && (
-          <div className="relative">
-            <ChevronDown
-              size={16}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-            />
-            <select
-              value={filter.mode === "selectMonth" ? filter.monthKey : ""}
-              onChange={(e) => {
-                const monthKey = e.target.value;
-                if (!monthKey) return;
-                onChange({ ...filter, mode: "selectMonth", monthKey });
-              }}
-              className="w-full appearance-none px-4 py-3.5 pr-10 border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-800 bg-slate-50 cursor-pointer focus:border-[#ff791a] focus:outline-none"
-            >
-              <option value="">{t("selectMonth")}</option>
-              {monthOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              {QUICK_MODES.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onChange({ ...filter, mode })}
+                  className={`flex-1 py-3 rounded-xl text-xs font-black transition cursor-pointer ${
+                    filter.mode === mode
+                      ? "bg-[#ff791a] text-white shadow-md shadow-orange-200"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {t(mode)}
+                </button>
               ))}
-            </select>
+            </div>
+            <div className="relative">
+              <ChevronDown
+                size={16}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              />
+              <select
+                value={filter.mode === "selectMonth" ? filter.monthKey : ""}
+                onChange={(e) => {
+                  const monthKey = e.target.value;
+                  if (!monthKey) return;
+                  onChange({ ...filter, mode: "selectMonth", monthKey });
+                }}
+                className="w-full appearance-none px-4 py-3 pr-10 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-slate-50 cursor-pointer focus:border-[#ff791a] focus:outline-none"
+              >
+                <option value="">{t("selectMonth")}</option>
+                {monthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <input
+              type="date"
+              value={filter.mode === "customDate" ? filter.customDate : ""}
+              max={today}
+              onChange={(e) => {
+                const customDate = e.target.value;
+                if (!customDate) return;
+                onChange({ ...filter, mode: "customDate", customDate });
+              }}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 bg-slate-50 focus:border-[#ff791a] focus:outline-none"
+              aria-label={t("customDate")}
+            />
           </div>
-        )}
-
-        {tab === "custom" && (
-          <input
-            type="date"
-            value={filter.mode === "customDate" ? filter.customDate : ""}
-            max={today}
-            onChange={(e) => {
-              const customDate = e.target.value;
-              if (!customDate) return;
-              onChange({ ...filter, mode: "customDate", customDate });
-            }}
-            className="w-full px-4 py-3.5 border-2 border-slate-200 rounded-xl text-sm font-bold text-slate-800 bg-slate-50 focus:border-[#ff791a] focus:outline-none"
-          />
         )}
 
         {tab === "range" && (

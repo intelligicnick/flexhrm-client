@@ -60,12 +60,18 @@ import {
   DownloadCloud,
   Eye,
   School,
+  Gavel,
+  Compass,
+  Smartphone,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Employee, EXCEL_ROW_HEADERS, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import PasswordInput from "../components/PasswordInput";
+import SystemTourSection from "../components/SystemTourSection";
+import BlockedAppsConfigurationPanel from "../components/BlockedAppsConfigurationPanel";
+import { ROLE_ACCESS_SECTIONS } from "../lib/system-tour";
 import {
   generateCSV,
   getEmployeeHeaderValue,
@@ -73,11 +79,10 @@ import {
   employeeMatchesSkillFilters,
   prorateSalaryByAttendance,
   isEmployeeEsicCovered,
-  parseLocationPtInput,
   calculatePfAmounts,
   calculateProfessionalTax,
-  resolveLocationPtAmount,
-  DEFAULT_LOCATION_PT_AMOUNT,
+  isPfEsicCompliant,
+  isProfessionalTaxApplicable,
   quoteCSVValue,
   downloadAxisBulkPayXls,
   saveAxisBulkPayArchive,
@@ -96,10 +101,14 @@ import SchoolWorkTable from "../components/SchoolWorkTable";
 import MonthlyInvoiceTab from "../components/MonthlyInvoiceTab";
 import SchoolExpensesPanel from "../components/SchoolExpensesPanel";
 import FieldTeamPanel from "../components/FieldTeamPanel";
+import TendersPanel from "../components/TendersPanel";
+import ContractsPanel from "../components/ContractsPanel";
+import RenewalsPanel from "../components/RenewalsPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
-import { isSchoolWorkTab } from "../routes";
+import { isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
+import { RENEWAL_TAB_TO_CATEGORY } from "../lib/renewals";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
@@ -107,8 +116,15 @@ import {
   formatEmployeeBirthDate,
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
-import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, PERMISSION_MODULES, ROLE_PERMISSION_MODULE_ROWS, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef } from "../lib/permissions";
+import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
+import {
+  countMonthAttendance,
+  getSalaryProrationDays,
+  isWeeklyOffDay,
+  getBulkAttendanceDisabledDays,
+  filterSelectableBulkDays,
+} from "../lib/attendance-helpers";
+import { getModuleKey, PERMISSION_MODULES, ROLE_PERMISSION_MODULE_ROWS, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -117,6 +133,7 @@ import { formatPhoneDisplay, phoneToDialString } from "../lib/phone-helpers";
 import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
+import BulkAttendanceDateCalendar from "../components/BulkAttendanceDateCalendar";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
 export default function ModuleContent() {
@@ -177,6 +194,10 @@ export default function ModuleContent() {
     profileEmailError,
     profileEmailSuccess,
     isSavingProfileEmail,
+    myInfoTab,
+    setMyInfoTab,
+    roleAccessSection,
+    setRoleAccessSection,
     rawEmployees,
     selectedIds,
     isFormOpen,
@@ -189,10 +210,10 @@ export default function ModuleContent() {
     companyBranch,
     rawCustomLocations,
     locationCompliance,
-    locationPtAmounts,
+    locationPtEnabled,
     isFetchingLocations,
     newLocCompliance,
-    newLocPtAmount,
+    newLocPtEnabled,
     customRoles,
     isFetchingJobRoles,
     auditLogsList,
@@ -233,6 +254,8 @@ export default function ModuleContent() {
     salaryExitEndFilter,
     salaryMinSalaryFilter,
     salaryMaxSalaryFilter,
+    salaryMinDailyWageFilter,
+    salaryMaxDailyWageFilter,
     salaryGenderFilter,
     salaryMaritalFilter,
     salaryEsicFilter,
@@ -317,9 +340,8 @@ export default function ModuleContent() {
     selectedReportEmployeeIds,
     applySessionFromAuthMe,
     fetchRoles,
-    persistLocationPtAmounts,
-    updateLocationPtAmount,
     updateLocationCompliance,
+    updateLocationPtEnabled,
     fetchLocations,
     fetchJobRoles,
     fetchBulkPayArchives,
@@ -454,6 +476,23 @@ export default function ModuleContent() {
     rawSchoolVisits,
     rawSupervisorRequests,
     rawCommitmentDiary,
+    rawTenders,
+    fetchTenders,
+    handleCreateTender,
+    handleUpdateTender,
+    handleDeleteTender,
+    handleImportTenders,
+    rawContracts,
+    fetchContracts,
+    handleCreateContract,
+    handleUpdateContract,
+    handleDeleteContract,
+    handleImportContracts,
+    rawRenewals,
+    fetchRenewals,
+    handleCreateRenewal,
+    handleUpdateRenewal,
+    handleDeleteRenewal,
     pendingSupervisorRequestCount,
     fieldTeamView,
     setFieldTeamView,
@@ -572,10 +611,10 @@ export default function ModuleContent() {
     setCompanyBranch,
     setRawCustomLocations,
     setLocationCompliance,
-    setLocationPtAmounts,
+    setLocationPtEnabled,
     setIsFetchingLocations,
     setNewLocCompliance,
-    setNewLocPtAmount,
+    setNewLocPtEnabled,
     setCustomRoles,
     setIsFetchingJobRoles,
     setAuditLogsList,
@@ -622,6 +661,8 @@ export default function ModuleContent() {
     setSalaryExitEndFilter,
     setSalaryMinSalaryFilter,
     setSalaryMaxSalaryFilter,
+    setSalaryMinDailyWageFilter,
+    setSalaryMaxDailyWageFilter,
     setSalaryGenderFilter,
     setSalaryMaritalFilter,
     setSalaryEsicFilter,
@@ -708,6 +749,33 @@ export default function ModuleContent() {
     location,
     confirmAction,
   } = useHRMS();
+
+  const bulkCalendarMonthKey = bulkCalendarMonth || selectedMonth;
+  const bulkWizardSelectedEmployees = useMemo(
+    () => employees.filter((employee) => bulkSelEmployees.includes(employee.id)),
+    [employees, bulkSelEmployees],
+  );
+  const bulkAttendanceDayMeta = useMemo(() => {
+    const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonthKey);
+    return getBulkAttendanceDisabledDays(
+      bulkWizardSelectedEmployees,
+      bulkCalendarMonthKey,
+      daysInMonth,
+    );
+  }, [bulkWizardSelectedEmployees, bulkCalendarMonthKey, getDaysInSelectedMonth]);
+
+  const pickSelectableBulkDates = useCallback(
+    (days: number[]) => filterSelectableBulkDays(days, bulkAttendanceDayMeta.disabledDays),
+    [bulkAttendanceDayMeta.disabledDays],
+  );
+
+  useEffect(() => {
+    if (bulkWizardStep !== "dates") return;
+    setBulkSelDates((previous) =>
+      previous.filter((day) => !bulkAttendanceDayMeta.disabledDays.has(day)),
+    );
+  }, [bulkWizardStep, bulkAttendanceDayMeta.disabledDays, bulkCalendarMonthKey, bulkSelEmployees, setBulkSelDates]);
+
   return (
                     <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin" id="viewport-scroll-shell">
                       {errorMessage && (
@@ -795,7 +863,36 @@ export default function ModuleContent() {
                               </div>
                             </div>
 
-                            {adminProfileInfo && !isFetchingProfile && !profileLoadingError && (
+                            {/* Profile tabs */}
+                            <div className="flex gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+                              <button
+                                type="button"
+                                onClick={() => setMyInfoTab("account")}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                  myInfoTab === "account"
+                                    ? "bg-white text-slate-800 shadow-sm"
+                                    : "text-slate-500 hover:text-slate-700"
+                                }`}
+                              >
+                                My Account
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMyInfoTab("tour")}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                                  myInfoTab === "tour"
+                                    ? "bg-white text-slate-800 shadow-sm"
+                                    : "text-slate-500 hover:text-slate-700"
+                                }`}
+                              >
+                                <Compass size={14} className="text-[#ff791a]" />
+                                System Tour
+                              </button>
+                            </div>
+
+                            {myInfoTab === "tour" ? (
+                              <SystemTourSection />
+                            ) : adminProfileInfo && !isFetchingProfile && !profileLoadingError ? (
                               <>
                                 {/* Quick stats */}
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -932,19 +1029,19 @@ export default function ModuleContent() {
                                   </p>
                                 </div>
                               </>
-                            )}
+                            ) : null}
                           </div>
-                        ) : activeSidebarTab === "Admin" ? (
+                        ) : isAdminModuleTab(activeSidebarTab) ? (
                           <div className="max-w-6xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
                             {/* Page header */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                               <div>
                                 <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                                   <Shield size={22} className="text-[#ff791a]" />
-                                  Administration
+                                  Role & Access
                                 </h2>
                                 <p className="text-sm text-slate-500 mt-1">
-                                  Manage administrator accounts, roles, and access permissions
+                                  Manage who can log in, what they can do, and supervisor device rules
                                 </p>
                               </div>
                               <div className="flex items-center gap-3">
@@ -959,7 +1056,30 @@ export default function ModuleContent() {
                               </div>
                             </div>
 
-                            {/* Administrator accounts */}
+                            {/* Section tabs */}
+                            <div className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl">
+                              {ROLE_ACCESS_SECTIONS.map((section) => {
+                                const TabIcon = section.icon;
+                                const isActive = roleAccessSection === section.id;
+                                return (
+                                  <button
+                                    key={section.id}
+                                    type="button"
+                                    onClick={() => setRoleAccessSection(section.id)}
+                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                      isActive
+                                        ? "bg-white text-slate-800 shadow-sm"
+                                        : "text-slate-500 hover:text-slate-700"
+                                    }`}
+                                  >
+                                    <TabIcon size={14} className={isActive ? "text-[#ff791a]" : ""} />
+                                    {section.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {roleAccessSection === "admins" && (
                             <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
                               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
                                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
@@ -1242,16 +1362,17 @@ export default function ModuleContent() {
                                 </div>
                               </div>
                             </div>
+                            )}
 
-                            {/* Roles & permissions */}
+                            {roleAccessSection === "roles" && (
                             <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden text-left">
                               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
                                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
                                   <Shield size={16} className="text-[#ff791a]" />
-                                  Custom Roles & Permissions
+                                  Roles & Permissions
                                 </h3>
                                 <p className="text-xs text-slate-400 mt-0.5">
-                                  Define view and edit access for different admin ranks. Employee documents are view-only in the profile viewer.
+                                  Choose what each role can view and edit. View shows the menu tab; Edit allows saving changes.
                                 </p>
                               </div>
 
@@ -1438,19 +1559,19 @@ export default function ModuleContent() {
                                 </div>
                               </div>
                             </div>
-                          </div>
-                         ) : activeSidebarTab === "Audit Logs" ? (
-                            /* --- ENTERPRISE SECURITY AUDIT TRAIL & EVENT LOGS --- */
+                            )}
+
+                            {roleAccessSection === "audit" && (
                             <div className="max-w-7xl mx-auto space-y-6 animate-fade-in text-left" id="audit-trail-viewport">
                           
                               {/* 1. Page Header & Clear Button */}
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
                                 <div>
                                   <h3 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                                    <FileText size={20} className="text-[#ff791a]" /> Enterprise Security Audit Trail
+                                    <FileText size={20} className="text-[#ff791a]" /> Activity Log
                                   </h3>
                                   <p className="text-xs text-slate-400 mt-1">
-                                    Persistent database-backed records of administrative operations, security breaches, logins, status locks, and system telemetry.
+                                    See who changed what — logins, employee updates, role changes, and exports.
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1758,6 +1879,12 @@ export default function ModuleContent() {
                               </div>
           
                             </div>
+                            )}
+
+                            {roleAccessSection === "devices" && (
+                              <BlockedAppsConfigurationPanel readOnly={!userPermissions.admin?.edit} />
+                            )}
+                          </div>
                           ) : activeSidebarTab === "Salary" ? (
                             /* --- SALARY CALCULATION SHEET & PERK ALLOCATION --- */
                             <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="salary-calculations-module-view">
@@ -1900,6 +2027,27 @@ export default function ModuleContent() {
                                         placeholder="Max"
                                         value={salaryMaxSalaryFilter}
                                         onChange={(e) => setSalaryMaxSalaryFilter(e.target.value)}
+                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Daily Wage Range */}
+                                  <div className="space-y-1.5">
+                                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Daily Wage (Rs.)</label>
+                                    <div className="grid grid-cols-2 gap-1 items-center">
+                                      <input id="salary-min-daily-wage-filter" name="salaryMinDailyWageFilter"
+                                        type="number"
+                                        placeholder="Min"
+                                        value={salaryMinDailyWageFilter}
+                                        onChange={(e) => setSalaryMinDailyWageFilter(e.target.value)}
+                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      />
+                                      <input id="salary-max-daily-wage-filter" name="salaryMaxDailyWageFilter"
+                                        type="number"
+                                        placeholder="Max"
+                                        value={salaryMaxDailyWageFilter}
+                                        onChange={(e) => setSalaryMaxDailyWageFilter(e.target.value)}
                                         className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
                                       />
                                     </div>
@@ -2104,7 +2252,7 @@ export default function ModuleContent() {
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Gross Payroll</span>
                                     <span className="text-sm font-extrabold text-slate-800 block truncate mt-0.5">
-                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Gross Salary (Monthly)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
+                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Gross Salary (Monthly)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
                                 </div>
@@ -2116,7 +2264,7 @@ export default function ModuleContent() {
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Net Payable</span>
                                     <span className="text-sm font-extrabold text-emerald-700 block truncate mt-0.5">
-                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Net Payable", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
+                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Net Payable", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
                                 </div>
@@ -2128,7 +2276,7 @@ export default function ModuleContent() {
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Deductions ({selectedMonth})</span>
                                     <span className="text-sm font-extrabold text-rose-700 block truncate mt-0.5">
-                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Total Deductions", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0), 0).toLocaleString("en-IN")}
+                                      ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Total Deductions", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
                                 </div>
@@ -2141,8 +2289,8 @@ export default function ModuleContent() {
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Employer Liability</span>
                                     <span className="text-sm font-extrabold text-indigo-700 block truncate mt-0.5">
                                       ₹{filteredSalaryEmployees.reduce((sum, e) => {
-                                        const erPf = Number(getSalaryColumnValue(e, "Employer PF (13%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0;
-                                        const erEsic = Number(getSalaryColumnValue(e, "Employer ESIC (3.25%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtAmounts)) || 0;
+                                        const erPf = Number(getSalaryColumnValue(e, "Employer PF (13%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0;
+                                        const erEsic = Number(getSalaryColumnValue(e, "Employer ESIC (3.25%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0;
                                         return sum + erPf + erEsic;
                                       }, 0).toLocaleString("en-IN")}
                                     </span>
@@ -2235,22 +2383,21 @@ export default function ModuleContent() {
                                           const monthData = attendanceDb[selectedMonth] || {};
                                           const empData = monthData[e.id] || {};
                                           const daysInMonth = getDaysInSelectedMonth(selectedMonth);
-                                          let presents = 0;
-                                          for (let i = 1; i <= daysInMonth; i++) {
-                                            if (isEmployeeExitedOnDayStatic(e, selectedMonth, i)) {
-                                              continue;
-                                            }
-                                            if (empData[i] === "P") presents++;
-                                          }
-          
+                                          const presents = countMonthAttendance(
+                                            empData,
+                                            daysInMonth,
+                                            (day) => isEmployeeExitedOnDayStatic(e, selectedMonth, day),
+                                            { workingDaysType: e.workingDaysType, monthStr: selectedMonth },
+                                          ).presents;
+                                          const workingDaysInCycle = getSalaryProrationDays(e.workingDaysType);
+
                                           const rawGross = safeNumber(e.grossSalary);
                                           const rawBasic = safeNumber(e.basicSalary);
-                                          const gross = prorateSalaryByAttendance(rawGross, daysInMonth, presents, empData);
-                                          const basic = prorateSalaryByAttendance(rawBasic, daysInMonth, presents, empData);
+                                          const gross = prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empData);
+                                          const basic = prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empData);
           
-                                          const isLocCompliant = e.location ? !!locationCompliance[e.location] : false;
-                                          const isEmpCompliant = e.complianceEnabled !== false;
-                                          const isCompliant = isLocCompliant && isEmpCompliant;
+                                          const isCompliant = isPfEsicCompliant(e, locationCompliance);
+                                          const isPtEnabled = isProfessionalTaxApplicable(e, locationPtEnabled);
           
                                           const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
                                             mode: e.pfCalculationMode,
@@ -2260,8 +2407,9 @@ export default function ModuleContent() {
                                           const erEsic = isEsicCovered ? (gross * 0.0325) : 0;
                                           const empEsic = isEsicCovered ? (gross * 0.0075) : 0;
                                           const pt = calculateProfessionalTax(gross, {
-                                            isCompliant,
-                                            locationPtAmount: resolveLocationPtAmount(e.location, locationPtAmounts),
+                                            isPtEnabled,
+                                            gender: e.gender,
+                                            month: selectedMonth,
                                           });
                                       
                                           const ledger = e.monthlyLedger?.[selectedMonth];
@@ -2285,7 +2433,7 @@ export default function ModuleContent() {
                                             isCompliant ? Math.round(erEsic) : "",
                                             isCompliant ? Math.round(empPf) : "",
                                             isCompliant ? Math.round(empEsic) : "",
-                                            isCompliant ? pt : "",
+                                            isPtEnabled ? pt : "",
                                             adv,
                                             uniform,
                                             pen,
@@ -2488,7 +2636,7 @@ export default function ModuleContent() {
                                       {
                                         name: "Gross Pay",
                                         color: "bg-slate-100/75 text-slate-750 border-slate-200",
-                                        headers: ["Total Salary", "Gross Salary (Monthly)", "Basic Salary"]
+                                        headers: ["Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary"]
                                       },
                                       {
                                         name: "Employer Liability",
@@ -2568,6 +2716,7 @@ export default function ModuleContent() {
                                               if (header === "Skill Category") displayName = "Skill Cat.";
                                               else if (header === "Job Role") displayName = "Role";
                                               else if (header === "Total Salary") displayName = "Total Sal";
+                                              else if (header === "Daily Wage") displayName = "Daily Wage";
                                               else if (header === "Gross Salary (Monthly)") displayName = "Gross";
                                               else if (header === "Basic Salary") displayName = "Basic";
                                               else if (header === "Employer PF (13%)") displayName = "PF (13%)";
@@ -2618,6 +2767,9 @@ export default function ModuleContent() {
                                       )}
                                       {selectedSalaryColumns.includes("Present Days") && (
                                         <col className="w-[85px]" />
+                                      )}
+                                      {selectedSalaryColumns.includes("Daily Wage") && (
+                                        <col className="w-[100px]" />
                                       )}
                                       {selectedSalaryColumns.includes("Total Salary") && (
                                         <col className="w-[125px]" />
@@ -2705,6 +2857,9 @@ export default function ModuleContent() {
                                         {selectedSalaryColumns.includes("Present Days") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Days</th>
                                         )}
+                                        {selectedSalaryColumns.includes("Daily Wage") && (
+                                          <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Daily Wage</th>
+                                        )}
                                         {selectedSalaryColumns.includes("Total Salary") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Total Salary</th>
                                         )}
@@ -2757,6 +2912,9 @@ export default function ModuleContent() {
                                         )}
                                         {selectedSalaryColumns.includes("Present Days") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Present Days</th>
+                                        )}
+                                        {selectedSalaryColumns.includes("Daily Wage") && (
+                                          <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Daily Wage</th>
                                         )}
                                         {selectedSalaryColumns.includes("Total Salary") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Total Salary (Full Month)</th>
@@ -2823,7 +2981,7 @@ export default function ModuleContent() {
                                             colSpan={
                                               1 +
                                               ((selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) ? 1 : 0) +
-                                              ["Skill Category", "Job Role", "Present Days", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => selectedSalaryColumns.includes(c)).length
+                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => selectedSalaryColumns.includes(c)).length
                                             } 
                                             className="p-8 text-center text-xs text-slate-400 font-medium"
                                           >
@@ -2835,23 +2993,22 @@ export default function ModuleContent() {
                                           const monthData = attendanceDb[selectedMonth] || {};
                                           const empData = monthData[emp.id] || {};
                                           const daysInMonth = getDaysInSelectedMonth(selectedMonth);
-                                          let presents = 0;
-                                          for (let i = 1; i <= daysInMonth; i++) {
-                                            if (isEmployeeExitedOnDayStatic(emp, selectedMonth, i)) {
-                                              continue;
-                                            }
-                                            if (empData[i] === "P") presents++;
-                                          }
-          
+                                          const presents = countMonthAttendance(
+                                            empData,
+                                            daysInMonth,
+                                            (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+                                            { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+                                          ).presents;
+                                          const workingDaysInCycle = getSalaryProrationDays(emp.workingDaysType);
+
                                            const rawGross = safeNumber(emp.grossSalary);
                                            const rawBasic = safeNumber(emp.basicSalary);
+
+                                           const gross = prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empData);
+                                           const basic = prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empData);
           
-                                           const gross = prorateSalaryByAttendance(rawGross, daysInMonth, presents, empData);
-                                           const basic = prorateSalaryByAttendance(rawBasic, daysInMonth, presents, empData);
-          
-                                           const isLocCompliant = emp.location ? !!locationCompliance[emp.location] : false;
-                                           const isEmpCompliant = emp.complianceEnabled !== false;
-                                           const isCompliant = isLocCompliant && isEmpCompliant;
+                                           const isCompliant = isPfEsicCompliant(emp, locationCompliance);
+                                           const isPtEnabled = isProfessionalTaxApplicable(emp, locationPtEnabled);
           
                                            const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
                                              mode: emp.pfCalculationMode,
@@ -2870,8 +3027,9 @@ export default function ModuleContent() {
                                        
                                            const empEsic = isEsicCovered ? (gross * 0.0075) : 0;
                                            const pt = calculateProfessionalTax(gross, {
-                                             isCompliant,
-                                             locationPtAmount: resolveLocationPtAmount(emp.location, locationPtAmounts),
+                                             isPtEnabled,
+                                             gender: emp.gender,
+                                             month: selectedMonth,
                                            });
                                        
                                            const netSalaryValue = safeNumber(gross) - safeNumber(empPf) - safeNumber(empEsic) - safeNumber(pt);
@@ -2928,6 +3086,12 @@ export default function ModuleContent() {
                                                   {presents}
                                                 </td>
                                               )}
+
+                                              {selectedSalaryColumns.includes("Daily Wage") && (
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">
+                                                  ₹{resolveEmployeeDailyWage(emp).toLocaleString("en-IN")}
+                                                </td>
+                                              )}
                                           
                                               {selectedSalaryColumns.includes("Total Salary") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{rawGross.toLocaleString("en-IN")}</td>
@@ -2954,7 +3118,7 @@ export default function ModuleContent() {
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empEsic).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                               {selectedSalaryColumns.includes("Professional Tax (PT)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-medium">{isCompliant ? `₹${pt}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-medium">{isPtEnabled ? `₹${pt}` : ""}</td>
                                               )}
                                               {selectedSalaryColumns.includes("Advance Balance") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
@@ -4608,7 +4772,7 @@ export default function ModuleContent() {
                                                   onClick={() => {
                                                     const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
                                                     const allDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-                                                    setBulkSelDates(allDays);
+                                                    setBulkSelDates(pickSelectableBulkDates(allDays));
                                                   }}
                                                   className="w-full py-1.5 bg-orange-50 hover:bg-orange-100 text-[#e4640c] border border-orange-100 font-extrabold text-[10.5px] uppercase tracking-wider rounded-lg transition cursor-pointer"
                                                 >
@@ -4634,7 +4798,9 @@ export default function ModuleContent() {
                                                     onClick={() => {
                                                       const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
                                                       const matching = Array.from({ length: Math.min(15, daysInMonth) }, (_, i) => i + 1);
-                                                      setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
+                                                      setBulkSelDates((previous) =>
+                                                        pickSelectableBulkDates([...new Set([...previous, ...matching])].sort((a, b) => a - b)),
+                                                      );
                                                     }}
                                                     className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
                                                   >
@@ -4645,7 +4811,9 @@ export default function ModuleContent() {
                                                     onClick={() => {
                                                       const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
                                                       const matching = Array.from({ length: daysInMonth - 15 }, (_, i) => i + 16);
-                                                      setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
+                                                      setBulkSelDates((previous) =>
+                                                        pickSelectableBulkDates([...new Set([...previous, ...matching])].sort((a, b) => a - b)),
+                                                      );
                                                     }}
                                                     className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
                                                   >
@@ -4656,7 +4824,9 @@ export default function ModuleContent() {
                                                     onClick={() => {
                                                       const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
                                                       const matching = Array.from({ length: Math.min(7, daysInMonth) }, (_, i) => i + 1);
-                                                      setBulkSelDates(prev => [...new Set([...prev, ...matching])].sort((a,b)=>a-b));
+                                                      setBulkSelDates((previous) =>
+                                                        pickSelectableBulkDates([...new Set([...previous, ...matching])].sort((a, b) => a - b)),
+                                                      );
                                                     }}
                                                     className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
                                                   >
@@ -4666,8 +4836,8 @@ export default function ModuleContent() {
                                                     type="button"
                                                     onClick={() => {
                                                       const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                      const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => d % 2 !== 0);
-                                                      setBulkSelDates(matching);
+                                                      const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter((day) => day % 2 !== 0);
+                                                      setBulkSelDates(pickSelectableBulkDates(matching));
                                                     }}
                                                     className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center"
                                                   >
@@ -4677,8 +4847,8 @@ export default function ModuleContent() {
                                                     type="button"
                                                     onClick={() => {
                                                       const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                      const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => d % 2 === 0);
-                                                      setBulkSelDates(matching);
+                                                      const matching = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter((day) => day % 2 === 0);
+                                                      setBulkSelDates(pickSelectableBulkDates(matching));
                                                     }}
                                                     className="py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition cursor-pointer text-center col-span-2"
                                                   >
@@ -4688,135 +4858,15 @@ export default function ModuleContent() {
                                               </div>
                                             </div>
           
-                                            {/* Interactive Calendar for Date Selection */}
-                                            <div className="md:col-span-2 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5">
-                                              <div className="flex justify-between items-center pb-1.5 border-b border-slate-200">
-                                                <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                                  📅 Calendar Date Picker
-                                                </span>
-                                                {/* Sync month picker for calendar display */}
-                                                <select id="bulk-calendar-month" name="bulkCalendarMonth"
-                                                  value={bulkCalendarMonth}
-                                                  onChange={(e) => setBulkCalendarMonth(e.target.value)}
-                                                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs cursor-pointer focus:outline-none"
-                                                >
-                                                  {bulkSelMonths.map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                  ))}
-                                                </select>
-                                              </div>
-          
-                                              {/* Calendar grid of numbers */}
-                                              <div>
-                                                <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-1 mb-2 text-left">
-                                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Click dates below to select/deselect them:</p>
-                                                  <span className="text-orange-500 font-extrabold text-[9px]">⚡ Click C1-C7 (Columns) or W1-W5 (Weeks) to bulk toggle</span>
-                                                </div>
-                                            
-                                                {/* Main grid with week togglers on the left and column togglers on top */}
-                                                <div className="grid grid-cols-[auto_1fr] gap-x-2.5 gap-y-1.5 items-center">
-                                                  {/* Empty corner space */}
-                                                  <div className="w-8"></div>
-                                              
-                                                  {/* Column Toggles */}
-                                                  <div className="grid grid-cols-7 gap-1.5">
-                                                    {Array.from({ length: 7 }, (_, colIdx) => {
-                                                      const colNum = colIdx + 1;
-                                                      const handleColumnToggle = () => {
-                                                        const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                        const colDays: number[] = [];
-                                                        for (let d = colNum; d <= daysInMonth; d += 7) {
-                                                          colDays.push(d);
-                                                        }
-                                                        const allSelected = colDays.every(d => bulkSelDates.includes(d));
-                                                        if (allSelected) {
-                                                          setBulkSelDates(prev => prev.filter(d => !colDays.includes(d)));
-                                                        } else {
-                                                          setBulkSelDates(prev => [...new Set([...prev, ...colDays])].sort((a,b)=>a-b));
-                                                        }
-                                                      };
-                                                      return (
-                                                        <button
-                                                          key={colIdx}
-                                                          type="button"
-                                                          onClick={handleColumnToggle}
-                                                          className="h-6 w-full text-[9px] font-black bg-slate-200 hover:bg-slate-350 text-slate-600 rounded-md transition cursor-pointer select-none"
-                                                          title={`Toggle all days in Column ${colNum}`}
-                                                        >
-                                                          C{colNum}
-                                                        </button>
-                                                      );
-                                                    })}
-                                                  </div>
-          
-                                                  {/* Calendar rows and row-wise / week-wise toggles */}
-                                                  {(() => {
-                                                    const daysInMonth = getDaysInSelectedMonth(bulkCalendarMonth || selectedMonth);
-                                                    const weeks: number[][] = [];
-                                                    let currentWeek: number[] = [];
-                                                    for (let d = 1; d <= daysInMonth; d++) {
-                                                      currentWeek.push(d);
-                                                      if (currentWeek.length === 7 || d === daysInMonth) {
-                                                        weeks.push(currentWeek);
-                                                        currentWeek = [];
-                                                      }
-                                                    }
-          
-                                                    return weeks.map((weekDays, weekIdx) => {
-                                                      const weekNum = weekIdx + 1;
-                                                      const handleWeekToggle = () => {
-                                                        const allSelected = weekDays.every(d => bulkSelDates.includes(d));
-                                                        if (allSelected) {
-                                                          setBulkSelDates(prev => prev.filter(d => !weekDays.includes(d)));
-                                                        } else {
-                                                          setBulkSelDates(prev => [...new Set([...prev, ...weekDays])].sort((a,b)=>a-b));
-                                                        }
-                                                      };
-          
-                                                      return (
-                                                        <React.Fragment key={weekIdx}>
-                                                          <button
-                                                            type="button"
-                                                            onClick={handleWeekToggle}
-                                                            className="h-9 w-8 text-[9px] font-black bg-orange-100/60 hover:bg-orange-100 text-[#e4640c] rounded-lg transition cursor-pointer select-none"
-                                                            title={`Toggle all days in Week ${weekNum}`}
-                                                          >
-                                                            W{weekNum}
-                                                          </button>
-                                                      
-                                                          <div className="grid grid-cols-7 gap-1.5">
-                                                            {weekDays.map(dayNum => {
-                                                              const isSel = bulkSelDates.includes(dayNum);
-                                                              const toggle = () => {
-                                                                if (isSel) setBulkSelDates(prev => prev.filter(x => x !== dayNum));
-                                                                else setBulkSelDates(prev => [...prev, dayNum]);
-                                                              };
-                                                              return (
-                                                                <button
-                                                                  key={dayNum}
-                                                                  type="button"
-                                                                  onClick={toggle}
-                                                                  className={`h-9 w-full flex items-center justify-center font-bold text-xs rounded-lg border transition cursor-pointer select-none ${
-                                                                    isSel 
-                                                                      ? "bg-[#ff791a] border-orange-500 text-white shadow-xs" 
-                                                                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                                                                  }`}
-                                                                >
-                                                                  {dayNum}
-                                                                </button>
-                                                              );
-                                                            })}
-                                                            {weekDays.length < 7 && Array.from({ length: 7 - weekDays.length }).map((_, i) => (
-                                                              <div key={`empty-${i}`} className="h-9 w-full"></div>
-                                                            ))}
-                                                          </div>
-                                                        </React.Fragment>
-                                                      );
-                                                    });
-                                                  })()}
-                                                </div>
-                                              </div>
-                                            </div>
+                                            <BulkAttendanceDateCalendar
+                                              selectedDates={bulkSelDates}
+                                              onSelectedDatesChange={setBulkSelDates}
+                                              calendarMonth={bulkCalendarMonth || selectedMonth}
+                                              onCalendarMonthChange={setBulkCalendarMonth}
+                                              availableMonths={bulkSelMonths}
+                                              getDaysInMonth={getDaysInSelectedMonth}
+                                              disabledDates={bulkAttendanceDayMeta.disabledDays}
+                                            />
           
                                           </div>
           
@@ -4879,6 +4929,9 @@ export default function ModuleContent() {
                                                     <span key={d} className="w-5 h-5 flex items-center justify-center bg-slate-200 border border-slate-300 text-slate-700 rounded font-bold text-[10px]">{d}</span>
                                                   ))}
                                                 </div>
+                                                <p className="text-[10px] text-slate-500 mt-1.5">
+                                                  Weekly off days (Sun for 26-day, Sat/Sun for 22-day) are skipped automatically per employee.
+                                                </p>
                                               </div>
                                             </div>
                                           </div>
@@ -5141,18 +5194,14 @@ export default function ModuleContent() {
                                           const monthData = attendanceDb[selectedMonth] || {};
                                           const empData = monthData[emp.id] || {};
                                           const daysCount = getDaysInSelectedMonth(selectedMonth);
-          
-                                          let presents = 0;
-                                          let absents = 0;
-                                          for (let d = 1; d <= daysCount; d++) {
-                                            if (isEmployeeExitedOnDayStatic(emp, selectedMonth, d)) {
-                                              continue;
-                                            }
-                                            const status = empData[d] || "";
-                                            if (status === "P") presents++;
-                                            else if (status === "A") absents++;
-                                          }
-          
+
+                                          const { presents, absents } = countMonthAttendance(
+                                            empData,
+                                            daysCount,
+                                            (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+                                            { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+                                          );
+
                                           return (
                                             <tr key={emp.id} className="hover:bg-slate-50/50">
                                               <td className="px-3 py-2 text-center text-slate-400 font-bold">{index + 1}</td>
@@ -5165,6 +5214,7 @@ export default function ModuleContent() {
                                                 const dayNum = i + 1;
                                                 const currentStatus = empData[dayNum] || "";
                                                 const isExitedToday = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
+                                                const isWeeklyOff = isWeeklyOffDay(emp.workingDaysType, selectedMonth, dayNum);
                                                 return (
                                                   <td key={i} className="px-0.5 py-1 text-center">
                                                     {isExitedToday ? (
@@ -5173,6 +5223,13 @@ export default function ModuleContent() {
                                                         title="Exited / Inactive"
                                                       >
                                                         —
+                                                      </span>
+                                                    ) : isWeeklyOff ? (
+                                                      <span
+                                                        className="text-[9px] font-black text-center bg-violet-100 text-violet-800 rounded px-1 py-0.5 select-none"
+                                                        title="Weekly Off"
+                                                      >
+                                                        WO
                                                       </span>
                                                     ) : (
                                                       <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
@@ -5592,6 +5649,52 @@ export default function ModuleContent() {
                                   </div>
                                 </div>
                               )}
+                            </>
+                          ) : isBidsTab(activeSidebarTab) ? (
+                            <>
+                              {activeSidebarTab === "Tenders" && (
+                                <TendersPanel
+                                  tenders={rawTenders}
+                                  readOnly={!userPermissions.bids?.edit}
+                                  onRefresh={fetchTenders}
+                                  onCreate={handleCreateTender}
+                                  onUpdate={handleUpdateTender}
+                                  onDelete={handleDeleteTender}
+                                  onImport={handleImportTenders}
+                                />
+                              )}
+
+                              {activeSidebarTab === "Contracts" && (
+                                <ContractsPanel
+                                  contracts={rawContracts}
+                                  tenders={rawTenders}
+                                  readOnly={!userPermissions.bids?.edit}
+                                  onRefresh={fetchContracts}
+                                  onCreate={handleCreateContract}
+                                  onUpdate={handleUpdateContract}
+                                  onDelete={handleDeleteContract}
+                                  onImport={handleImportContracts}
+                                />
+                              )}
+                            </>
+                          ) : isRenewalsTab(activeSidebarTab) ? (
+                            <>
+                              {(() => {
+                                const category = RENEWAL_TAB_TO_CATEGORY[activeSidebarTab];
+                                const categoryRenewals = rawRenewals.filter((r) => r.category === category);
+                                return (
+                                  <RenewalsPanel
+                                    category={category}
+                                    tabLabel={activeSidebarTab}
+                                    renewals={categoryRenewals}
+                                    readOnly={!userPermissions.renewals?.edit}
+                                    onRefresh={fetchRenewals}
+                                    onCreate={handleCreateRenewal}
+                                    onUpdate={handleUpdateRenewal}
+                                    onDelete={handleDeleteRenewal}
+                                  />
+                                );
+                              })()}
                             </>
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */

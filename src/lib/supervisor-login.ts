@@ -1,4 +1,5 @@
 import { apiUrl, parseApiError } from "../api";
+import { persistSupervisorSession } from "./supervisor-session";
 
 export const SUPERVISOR_IMPERSONATED_KEY = "hrms_supervisor_impersonated";
 
@@ -14,9 +15,11 @@ export async function loginAsSupervisor(supervisorId: string): Promise<void> {
     });
     if (!res.ok) throw await parseApiError(res, "Could not open supervisor portal.");
     const data = await res.json();
-    localStorage.setItem("hrms_supervisor_token", data.token);
-    localStorage.setItem("hrms_supervisor_name", data.name || "");
-    localStorage.setItem("hrms_supervisor_id", data.supervisorId || supervisorId);
+    persistSupervisorSession({
+      token: data.token,
+      name: data.name || "",
+      supervisorId: data.supervisorId || supervisorId,
+    });
     localStorage.setItem(SUPERVISOR_IMPERSONATED_KEY, "1");
 
     const target = `${window.location.origin}/supervisor`;

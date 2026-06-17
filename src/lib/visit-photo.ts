@@ -1,3 +1,10 @@
+import {
+  readNativeGpsCoordinates,
+  requestFreshNativeGpsCoordinates,
+  warmupNativeGps,
+} from "./native-android-bridge";
+import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
+
 export interface VisitGpsCoords {
   lat: number;
   lng: number;
@@ -14,6 +21,19 @@ export interface StampedVisitPhoto {
   lat: number;
   lng: number;
   locationLabel: string;
+}
+
+type PlaceNameResolver = (lat: number, lng: number) => Promise<string>;
+
+let gpsWatchId: number | null = null;
+let cachedCoords: { lat: number; lng: number; at: number } | null = null;
+
+const GPS_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+const GPS_RETRY_ATTEMPTS = 4;
+const PLACE_NAME_RETRY_ATTEMPTS = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function formatVisitTimestamp(date: Date): { dateLine: string; timeLine: string; iso: string } {
@@ -38,6 +58,10 @@ function formatCoords(lat: number, lng: number): string {
   const latDir = lat >= 0 ? "N" : "S";
   const lngDir = lng >= 0 ? "E" : "W";
   return `${Math.abs(lat).toFixed(5)}° ${latDir}, ${Math.abs(lng).toFixed(5)}° ${lngDir}`;
+}
+
+function isValidCoords(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 }
 
 function buildPlaceName(address: Record<string, string> | undefined): string {
@@ -72,6 +96,7 @@ async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string
       headers: {
         Accept: "application/json",
         "Accept-Language": "en",
+        "User-Agent": "FlexHRM-Supervisor/1.5",
       },
     });
     if (!res.ok) return "";
@@ -96,41 +121,177 @@ function buildLocationLabel(lat: number, lng: number, placeName: string): string
   return placeName ? `${placeName} (${coords})` : coords;
 }
 
-export async function getGpsLocation(
-  resolvePlaceName?: (lat: number, lng: number) => Promise<string>,
-): Promise<VisitGpsCoords> {
-  const coords = await new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+function cachePosition(lat: number, lng: number) {
+  cachedCoords = { lat, lng, at: Date.now() };
+}
+
+function readCachedPosition(maxAgeMs = GPS_CACHE_MAX_AGE_MS): { lat: number; lng: number } | null {
+  if (!cachedCoords) return null;
+  if (Date.now() - cachedCoords.at > maxAgeMs) return null;
+  return { lat: cachedCoords.lat, lng: cachedCoords.lng };
+}
+
+function getCurrentPositionOnce(options: PositionOptions): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error("GPS is not available on this device. Enable location services to capture visit photos."));
+      reject(new Error("GPS is not available on this device."));
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      (err) => {
-        const message =
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied. Allow GPS access to stamp photos with place coordinates."
-            : "Could not read GPS location. Move outdoors and try again.";
-        reject(new Error(message));
-      },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-    );
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
+}
 
-  const placeName = resolvePlaceName
-    ? await resolvePlaceName(coords.lat, coords.lng)
-    : await reverseGeocodePlaceName(coords.lat, coords.lng);
+async function tryWebGeolocation(): Promise<{ lat: number; lng: number } | null> {
+  const attempts: PositionOptions[] = [
+    { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
+    { enableHighAccuracy: true, timeout: 20_000, maximumAge: 15_000 },
+    { enableHighAccuracy: false, timeout: 12_000, maximumAge: GPS_CACHE_MAX_AGE_MS },
+  ];
+
+  for (const options of attempts) {
+    try {
+      const pos = await getCurrentPositionOnce(options);
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      if (!isValidCoords(lat, lng)) continue;
+      cachePosition(lat, lng);
+      return { lat, lng };
+    } catch {
+      /* try next */
+    }
+  }
+
+  return null;
+}
+
+async function readNativeCoordsFresh(): Promise<{ lat: number; lng: number } | null> {
+  const immediate = readNativeGpsCoordinates();
+  if (immediate) {
+    cachePosition(immediate.lat, immediate.lng);
+    return { lat: immediate.lat, lng: immediate.lng };
+  }
+
+  const fresh = await requestFreshNativeGpsCoordinates(22_000);
+  if (!fresh) return null;
+
+  cachePosition(fresh.lat, fresh.lng);
+  return { lat: fresh.lat, lng: fresh.lng };
+}
+
+async function resolveCoordsMandatory(): Promise<{ lat: number; lng: number }> {
+  for (let attempt = 0; attempt < GPS_RETRY_ATTEMPTS; attempt++) {
+    warmupNativeGps();
+
+    if (isFlexHrmNativeApp()) {
+      const nativeCoords = await readNativeCoordsFresh();
+      if (nativeCoords) return nativeCoords;
+    }
+
+    const cached = readCachedPosition();
+    if (cached) return cached;
+
+    const webCoords = await tryWebGeolocation();
+    if (webCoords) return webCoords;
+
+    if (attempt < GPS_RETRY_ATTEMPTS - 1) {
+      await sleep(1500);
+    }
+  }
+
+  throw new Error(
+    "GPS coordinates are required. Enable location services, allow location permission, step outdoors, and tap Retry GPS.",
+  );
+}
+
+async function resolvePlaceNameMandatory(
+  lat: number,
+  lng: number,
+  resolvePlaceName?: PlaceNameResolver,
+): Promise<string> {
+  for (let attempt = 0; attempt < PLACE_NAME_RETRY_ATTEMPTS; attempt++) {
+    if (resolvePlaceName) {
+      try {
+        const fromApi = await resolvePlaceName(lat, lng);
+        if (fromApi.trim()) return fromApi.trim();
+      } catch {
+        /* try fallback */
+      }
+    }
+
+    const fromNominatim = await reverseGeocodePlaceName(lat, lng);
+    if (fromNominatim.trim()) return fromNominatim.trim();
+
+    if (attempt < PLACE_NAME_RETRY_ATTEMPTS - 1) {
+      await sleep(1200);
+    }
+  }
+
+  throw new Error(
+    "Place name could not be resolved from GPS. Check internet connection and tap Retry GPS before taking a photo.",
+  );
+}
+
+async function buildMandatoryVisitLocation(
+  resolvePlaceName?: PlaceNameResolver,
+): Promise<VisitGpsCoords> {
+  const { lat, lng } = await resolveCoordsMandatory();
+  const placeName = await resolvePlaceNameMandatory(lat, lng, resolvePlaceName);
   return {
-    lat: coords.lat,
-    lng: coords.lng,
+    lat,
+    lng,
     placeName,
-    locationLabel: buildLocationLabel(coords.lat, coords.lng, placeName),
+    locationLabel: buildLocationLabel(lat, lng, placeName),
   };
+}
+
+export function startGpsWarmup(): () => void {
+  warmupNativeGps();
+
+  if (!navigator.geolocation || gpsWatchId !== null) {
+    return () => undefined;
+  }
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      cachePosition(pos.coords.latitude, pos.coords.longitude);
+    },
+    () => {
+      /* keep trying in background */
+    },
+    { enableHighAccuracy: true, maximumAge: 10_000, timeout: 25_000 },
+  );
+
+  return () => {
+    if (gpsWatchId !== null) {
+      navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = null;
+    }
+  };
+}
+
+export function hasValidVisitGps(location: VisitGpsCoords): boolean {
+  return isValidCoords(location.lat, location.lng) && Boolean(location.placeName.trim());
+}
+
+/** GPS coordinates + place name are both required before stamping a visit photo. */
+export async function requireGpsLocationForStamp(
+  resolvePlaceName?: PlaceNameResolver,
+): Promise<VisitGpsCoords> {
+  const location = await buildMandatoryVisitLocation(resolvePlaceName);
+  if (!hasValidVisitGps(location)) {
+    throw new Error("GPS location and place name are required before stamping a photo.");
+  }
+  return location;
+}
+
+export async function probeGpsLocation(resolvePlaceName?: PlaceNameResolver): Promise<VisitGpsCoords> {
+  return requireGpsLocationForStamp(resolvePlaceName);
+}
+
+export async function getGpsLocation(
+  resolvePlaceName?: PlaceNameResolver,
+): Promise<VisitGpsCoords> {
+  return requireGpsLocationForStamp(resolvePlaceName);
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -155,6 +316,10 @@ export async function stampVisitPhoto(
   location: VisitGpsCoords,
   options?: { schoolName?: string; index?: number },
 ): Promise<StampedVisitPhoto> {
+  if (!hasValidVisitGps(location)) {
+    throw new Error("Photo must include valid GPS coordinates and place name.");
+  }
+
   const takenAt = new Date();
   const { dateLine, timeLine, iso } = formatVisitTimestamp(takenAt);
   const schoolName = options?.schoolName?.trim() || "";
@@ -190,9 +355,9 @@ export async function stampVisitPhoto(
   const lines = [
     `Date: ${dateLine}`,
     `Time: ${timeLine}`,
-    location.placeName ? `Place: ${location.placeName}` : null,
+    `Place: ${location.placeName}`,
     `Location: ${formatCoords(location.lat, location.lng)}`,
-  ].filter((line): line is string => Boolean(line));
+  ];
   if (schoolName) lines.unshift(`School: ${schoolName}`);
 
   const wrappedLines = lines.flatMap((line) => wrapText(ctx, line, canvas.width - padding * 2));

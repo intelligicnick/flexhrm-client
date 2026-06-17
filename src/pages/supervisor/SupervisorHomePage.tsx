@@ -11,9 +11,15 @@ import {
 } from "lucide-react";
 import { useOutletContext } from "react-router-dom";
 import { SchoolWork, CommitmentDiary, SchoolVisit } from "../../types";
-import { parseApiError } from "../../api";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import { toIsoDate } from "../../lib/supervisor-dates";
+import { computeGamificationStats } from "../../lib/supervisor-gamification";
+import {
+  canVisitSchoolAgain,
+  daysUntilSchoolVisitAllowed,
+  latestVisitDateBySchool,
+} from "../../lib/supervisor-visit-cooldown";
+import SupervisorGamificationCard from "./SupervisorGamificationCard";
 import {
   SupervisorChip,
   SupervisorEmptyState,
@@ -36,6 +42,13 @@ function getWeekBounds(): { fromDate: string; toDate: string } {
   return { fromDate: toIsoDate(monday), toDate: toIsoDate(sunday) };
 }
 
+function getStreakLookbackBounds(): { fromDate: string; toDate: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 45);
+  return { fromDate: toIsoDate(from), toDate: toIsoDate(to) };
+}
+
 function isTodayInRange(fromDate: string, toDate: string, today: string): boolean {
   return fromDate <= today && toDate >= today;
 }
@@ -47,6 +60,8 @@ export default function SupervisorHomePage() {
   const [schools, setSchools] = useState<SchoolWork[]>([]);
   const [commitments, setCommitments] = useState<CommitmentDiary[]>([]);
   const [weekVisits, setWeekVisits] = useState<SchoolVisit[]>([]);
+  const [streakVisits, setStreakVisits] = useState<SchoolVisit[]>([]);
+  const [recentVisits, setRecentVisits] = useState<SchoolVisit[]>([]);
   const [search, setSearch] = useState("");
   const [blockFilter, setBlockFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
@@ -57,19 +72,32 @@ export default function SupervisorHomePage() {
     (async () => {
       setLoading(true);
       const { fromDate, toDate } = getWeekBounds();
+      const streakBounds = getStreakLookbackBounds();
+      const cooldownFrom = new Date();
+      cooldownFrom.setDate(cooldownFrom.getDate() - 30);
       try {
-        const [schoolsRes, commitRes, visitsRes] = await Promise.all([
+        const [schoolsRes, commitRes, visitsRes, streakRes, recentRes] = await Promise.all([
           supervisorFetch("/api/school-visits/supervisor/schools"),
           supervisorFetch("/api/commitment-diary/supervisor/mine"),
           supervisorFetch(`/api/school-visits/supervisor/mine?fromDate=${fromDate}&toDate=${toDate}`),
+          supervisorFetch(
+            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${streakBounds.toDate}`,
+          ),
+          supervisorFetch(
+            `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(cooldownFrom)}&toDate=${toDate}`,
+          ),
         ]);
         if (schoolsRes.ok) setSchools(await schoolsRes.json());
         if (commitRes.ok) setCommitments(await commitRes.json());
         if (visitsRes.ok) setWeekVisits(await visitsRes.json());
+        if (streakRes.ok) setStreakVisits(await streakRes.json());
+        if (recentRes.ok) setRecentVisits(await recentRes.json());
       } catch {
         setSchools([]);
         setCommitments([]);
         setWeekVisits([]);
+        setStreakVisits([]);
+        setRecentVisits([]);
       } finally {
         setLoading(false);
       }
@@ -100,6 +128,21 @@ export default function SupervisorHomePage() {
   const visitedSchoolIds = useMemo(
     () => new Set(weekVisits.map((v) => v.schoolWorkId)),
     [weekVisits],
+  );
+
+  const lastVisitBySchool = useMemo(
+    () => latestVisitDateBySchool(recentVisits),
+    [recentVisits],
+  );
+
+  const gamification = useMemo(
+    () =>
+      computeGamificationStats({
+        weekVisits,
+        streakVisits,
+        totalSchools: schools.length,
+      }),
+    [weekVisits, streakVisits, schools.length],
   );
 
   const filtered = useMemo(() => {
@@ -139,6 +182,8 @@ export default function SupervisorHomePage() {
         })}
       />
 
+      <SupervisorGamificationCard stats={gamification} />
+
       <SupervisorStatGrid>
         <SupervisorStatCard icon={Building2} label={t("schools")} value={schools.length} accent="orange" />
         <SupervisorStatCard
@@ -150,8 +195,14 @@ export default function SupervisorHomePage() {
         <SupervisorStatCard
           icon={History}
           label={t("thisWeek")}
-          value={weekVisits.length}
+          value={gamification.weeklyVisits}
           accent="emerald"
+        />
+        <SupervisorStatCard
+          icon={History}
+          label={t("streakDays")}
+          value={gamification.streakDays}
+          accent="slate"
         />
       </SupervisorStatGrid>
 
@@ -188,15 +239,15 @@ export default function SupervisorHomePage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-bold text-slate-900 text-sm truncate">{entry.schoolName}</p>
-                  <p className="text-[11px] text-slate-400">{entry.block}</p>
+                  <p className="text-[11px] text-slate-500">{entry.block}</p>
                 </div>
-                <span className="text-[10px] font-bold text-[#ff791a] shrink-0 group-hover:underline">
+                <span className="text-[11px] font-bold text-[#ff791a] shrink-0 group-hover:underline">
                   {t("logVisit")} →
                 </span>
               </Link>
             ))}
             {todayCommitments.length > 5 && (
-              <p className="text-[10px] text-center text-slate-400 font-medium pt-1">
+              <p className="text-[11px] text-center text-slate-500 font-medium pt-1">
                 +{todayCommitments.length - 5} {t("more")}
               </p>
             )}
@@ -221,7 +272,7 @@ export default function SupervisorHomePage() {
         scrollable
         title={t("mySchools")}
         action={
-          <span className="text-[10px] font-bold text-slate-400">
+          <span className="text-[11px] font-bold text-slate-500">
             {filtered.length} / {schools.length}
           </span>
         }
@@ -266,15 +317,42 @@ export default function SupervisorHomePage() {
               {filtered.map((school) => {
                 const visitedThisWeek = visitedSchoolIds.has(school.id);
                 const hasTodayCommit = todayCommitments.some((c) => c.schoolWorkId === school.id);
+                const lastVisit = lastVisitBySchool.get(school.id);
+                const onCooldown = !canVisitSchoolAgain(lastVisit);
+                const daysLeft = lastVisit ? daysUntilSchoolVisitAllowed(lastVisit) : 0;
+                const cardClass = hasTodayCommit
+                  ? "bg-orange-50 border-orange-200 shadow-sm"
+                  : onCooldown
+                    ? "bg-slate-100 border-slate-200 opacity-90"
+                    : "bg-white border-slate-100 hover:border-orange-200";
+
+                if (onCooldown) {
+                  return (
+                    <div
+                      key={school.id}
+                      className={`block rounded-xl border p-3.5 ${cardClass}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-sm font-bold bg-slate-200 text-slate-500">
+                          {school.schoolName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-slate-900 text-sm break-words">{school.schoolName}</p>
+                          <p className="text-xs text-amber-700 font-medium mt-0.5">
+                            {t("visitCooldownHint").replace("{days}", String(daysLeft))}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{school.block}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <Link
                     key={school.id}
                     to={`/supervisor/visit/${school.id}`}
-                    className={`block rounded-xl border p-3.5 transition active:scale-[0.99] ${
-                      hasTodayCommit
-                        ? "bg-orange-50 border-orange-200 shadow-sm"
-                        : "bg-slate-50/80 border-slate-100 hover:border-orange-200 hover:bg-white"
-                    }`}
+                    className={`block rounded-xl border p-3.5 transition active:scale-[0.99] ${cardClass}`}
                   >
                     <div className="flex items-center gap-3">
                       <div
@@ -283,33 +361,33 @@ export default function SupervisorHomePage() {
                             ? "bg-[#ff791a] text-white"
                             : visitedThisWeek
                               ? "bg-emerald-100 text-emerald-700"
-                              : "bg-white border border-slate-200 text-slate-400"
+                              : "bg-white border border-slate-200 text-slate-500"
                         }`}
                       >
                         {school.schoolName.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-bold text-slate-900 text-sm truncate">{school.schoolName}</p>
+                          <p className="font-bold text-slate-900 text-sm break-words">{school.schoolName}</p>
                           {hasTodayCommit && (
-                            <span className="shrink-0 text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-[#ff791a] text-white">
+                            <span className="shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-[#ff791a] text-white">
                               {t("today")}
                             </span>
                           )}
                           {!hasTodayCommit && visitedThisWeek && (
-                            <span className="shrink-0 text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                            <span className="shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                               {t("visited")}
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+                        <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
                           <MapPin size={10} className="shrink-0" />
                           {school.block}
                           {school.noOfToilets > 0 && ` · ${school.noOfToilets} ${t("toilets")}`}
                         </p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">UDISE {school.udise}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">UDISE {school.udise}</p>
                       </div>
-                      <ChevronRight className="text-slate-300 shrink-0" size={18} />
+                      <ChevronRight className="text-slate-400 shrink-0" size={18} />
                     </div>
                   </Link>
                 );

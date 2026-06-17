@@ -1,4 +1,14 @@
+import { canUseNativeCamera, captureNativePhotoFile } from "./native-android-bridge";
+import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
+
 export async function captureLivePhoto(): Promise<File> {
+  if (isFlexHrmNativeApp()) {
+    if (!canUseNativeCamera()) {
+      throw new Error("Native camera is not available.");
+    }
+    return captureNativePhotoFile();
+  }
+
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Camera is not available on this device.");
   }

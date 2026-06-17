@@ -361,7 +361,7 @@ export default function SupervisorRequestsPage() {
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`flex-1 relative py-2 px-1 rounded-lg text-[10px] font-bold flex flex-col items-center gap-0.5 transition cursor-pointer ${
+            className={`flex-1 relative py-2 px-1 rounded-lg text-[11px] font-bold flex flex-col items-center gap-0.5 transition cursor-pointer ${
               tab === id ? "bg-[#ff791a] text-white" : "text-slate-500"
             }`}
           >
@@ -709,7 +709,7 @@ export default function SupervisorRequestsPage() {
                   type="button"
                   onClick={() => void handleNotificationNavigate(notif)}
                   className={`w-full text-left bg-white border rounded-2xl p-4 space-y-2 cursor-pointer transition ${
-                    unread ? "border-[#ff791a] shadow-sm" : "border-slate-200 opacity-80"
+                    unread ? "border-[#ff791a] shadow-sm" : "border-slate-200"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -739,7 +739,7 @@ export default function SupervisorRequestsPage() {
               }}
               className={`text-[10px] font-bold cursor-pointer ${soundOn ? "text-[#ff791a]" : "text-slate-400"}`}
             >
-              {soundOn ? "Sound on" : "Sound off"}
+              {soundOn ? t("soundOn") : t("soundOff")}
             </button>
             <button
               type="button"
@@ -751,7 +751,7 @@ export default function SupervisorRequestsPage() {
               }}
               className={`text-[10px] font-bold cursor-pointer ${pushOn ? "text-[#ff791a]" : "text-slate-400"}`}
             >
-              {pushOn ? "Browser alerts on" : "Browser alerts off"}
+              {pushOn ? t("browserAlertsOn") : t("browserAlertsOff")}
             </button>
           </div>
         </div>

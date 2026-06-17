@@ -11,7 +11,14 @@ import {
 import PasswordInput from "../../components/PasswordInput";
 import { apiUrl, formatNetworkFetchError } from "../../api";
 import { getSupervisorDeviceId, getSupervisorDeviceName } from "../../lib/supervisor-device";
+import { supervisorFetch } from "../../lib/supervisor-fetch";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
+import {
+  clearSupervisorSession,
+  getSupervisorToken,
+  persistSupervisorSession,
+  restoreSupervisorSessionFromNative,
+} from "../../lib/supervisor-session";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorBlockedAppsGate from "./SupervisorBlockedAppsGate";
 
@@ -24,6 +31,7 @@ function LoginForm() {
   const [deviceOtp, setDeviceOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(true);
   const [needsDeviceOtp, setNeedsDeviceOtp] = useState(
     () => searchParams.get("reason") === "device_mismatch",
   );
@@ -42,6 +50,38 @@ function LoginForm() {
       setError(t("deviceMismatch"));
     }
   }, [searchParams, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      restoreSupervisorSessionFromNative();
+      const token = getSupervisorToken();
+      if (!token) {
+        if (!cancelled) setRestoringSession(false);
+        return;
+      }
+      try {
+        const res = await supervisorFetch("/api/auth/supervisor/me");
+        if (cancelled) return;
+        if (res.ok) {
+          navigate("/supervisor", { replace: true });
+          return;
+        }
+        if (res.status === 401 || res.status === 403) {
+          clearSupervisorSession();
+        }
+      } catch {
+        if (!cancelled && getSupervisorToken()) {
+          navigate("/supervisor", { replace: true });
+        }
+      } finally {
+        if (!cancelled) setRestoringSession(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   useEffect(() => {
     const onBeforeInstallPrompt = (event: Event) => {
@@ -112,9 +152,11 @@ function LoginForm() {
       }
       const data = await res.json();
       clearSupervisorImpersonatedFlag();
-      localStorage.setItem("hrms_supervisor_token", data.token);
-      localStorage.setItem("hrms_supervisor_name", data.name || phone);
-      localStorage.setItem("hrms_supervisor_id", data.supervisorId || "");
+      persistSupervisorSession({
+        token: data.token,
+        name: data.name || phone,
+        supervisorId: data.supervisorId || "",
+      });
       navigate("/supervisor");
     } catch (err: unknown) {
       setError(formatNetworkFetchError(err, "Login failed.").message);
@@ -128,6 +170,12 @@ function LoginForm() {
       className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col items-center justify-center p-4 font-sans"
       id="supervisor-login-layout"
     >
+      {restoringSession ? (
+        <div className="flex flex-col items-center gap-3 text-slate-400">
+          <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+          <p className="text-sm font-medium">{t("loading")}</p>
+        </div>
+      ) : (
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff791a] to-[#ff981a] text-white font-black text-2xl shadow-lg shadow-orange-200/50 mb-4">
@@ -256,6 +304,7 @@ function LoginForm() {
           {t("adminLoginHint")}
         </p>
       </div>
+      )}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { allSignificantTokensMatch } from "./supervisor-blocked-apps-defaults";
+
 export type InstalledApp = {
   packageName: string;
   appName?: string;
@@ -26,6 +28,9 @@ declare global {
   }
 }
 
+const OWN_PACKAGE = "com.flexhrm.supervisor";
+const MIN_PARTIAL_LABEL_LENGTH = 3;
+
 const KNOWN_APP_PACKAGES: Record<string, string[]> = {
   whatsapp: ["com.whatsapp", "com.whatsapp.w4b"],
   "whatsapp business": ["com.whatsapp.w4b"],
@@ -51,7 +56,15 @@ const KNOWN_APP_PACKAGES: Record<string, string[]> = {
   "tenorshare ianygo": ["com.tenorshare.ianygo"],
   "unicool tailorgo": ["com.unictool.tailorgo", "com.tailorgo.virtual"],
   tailorgo: ["com.unictool.tailorgo", "com.tailorgo.virtual"],
-  "fake gps": ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre", "com.blogspot.newapphorizons.fakegps"],
+  "fake gps": [
+    "com.lexa.fakegps",
+    "com.incorporateapps.fakegps.fre",
+    "com.blogspot.newapphorizons.fakegps",
+    "com.mobile.fakelocation",
+  ],
+  "fake gps location": ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre", "com.mobile.fakelocation"],
+  locaedit: ["com.mobile.fakelocation"],
+  "fake gps location-locaedit": ["com.mobile.fakelocation"],
   "virtual location": ["com.lexa.fakegps", "com.imyfone.anytoandroid"],
   locationsimulator: ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre"],
   "dr.fone virtual location": ["com.wondershare.drfonevirtuallocation"],
@@ -94,14 +107,37 @@ export function parseBlockedAppEntry(entry: string): { label: string; packageNam
   return { label: trimmed, packageNames: [] };
 }
 
-function exactLabelMatch(label: string, installedApps: InstalledApp[]): InstalledApp | undefined {
-  const labelNorm = normalizeKey(label);
-  for (const app of installedApps) {
-    if (app.appName && normalizeKey(app.appName) === labelNorm) {
-      return app;
+function installedAppMatchesBlockedEntry(installed: InstalledApp, entry: string): boolean {
+  const { label, packageNames } = parseBlockedAppEntry(entry);
+  if (!label) return false;
+
+  const packageNorm = normalizeKey(installed.packageName);
+  const appLabelNorm = installed.appName ? normalizeKey(installed.appName) : "";
+  const blockedLabelNorm = normalizeKey(label);
+
+  for (const blockedPackage of packageNames) {
+    if (packageNorm === normalizeKey(blockedPackage)) return true;
+  }
+
+  if (looksLikePackageName(label) && packageNorm === blockedLabelNorm) {
+    return true;
+  }
+
+  if (appLabelNorm && appLabelNorm === blockedLabelNorm) {
+    return true;
+  }
+
+  if (appLabelNorm && blockedLabelNorm.length >= MIN_PARTIAL_LABEL_LENGTH) {
+    if (appLabelNorm.includes(blockedLabelNorm) || blockedLabelNorm.includes(appLabelNorm)) {
+      return true;
     }
   }
-  return undefined;
+
+  if (appLabelNorm && allSignificantTokensMatch(blockedLabelNorm, appLabelNorm, packageNorm)) {
+    return true;
+  }
+
+  return false;
 }
 
 function parseInstalledAppsPayload(raw: string): InstalledApp[] {
@@ -161,44 +197,39 @@ export async function getInstalledApps(): Promise<InstalledApp[]> {
   }
 }
 
+/** Scans every installed app against the configured blocked list from admin settings. */
 export function findInstalledBlockedApps(
   blockedEntries: string[],
   installedApps: InstalledApp[],
 ): DetectedBlockedApp[] {
-  const installedByPackage = new Map<string, InstalledApp>();
-
-  for (const app of installedApps) {
-    installedByPackage.set(normalizeKey(app.packageName), app);
-  }
+  const configuredEntries = blockedEntries
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!configuredEntries.length) return [];
 
   const detected: DetectedBlockedApp[] = [];
   const seen = new Set<string>();
+  const ownPackageNorm = normalizeKey(OWN_PACKAGE);
 
-  for (const entry of blockedEntries) {
-    const { label, packageNames } = parseBlockedAppEntry(entry);
-    if (!label) continue;
+  for (const installed of installedApps) {
+    const packageNorm = normalizeKey(installed.packageName);
+    if (packageNorm === ownPackageNorm) continue;
 
-    let match: InstalledApp | undefined;
-
-    for (const packageName of packageNames) {
-      match = installedByPackage.get(normalizeKey(packageName));
-      if (match) break;
+    let matchedEntry: string | undefined;
+    for (const entry of configuredEntries) {
+      if (installedAppMatchesBlockedEntry(installed, entry)) {
+        matchedEntry = entry;
+        break;
+      }
     }
 
-    if (!match) {
-      match = exactLabelMatch(label, installedApps);
-    }
-
-    if (!match) continue;
-
-    const dedupeKey = normalizeKey(match.packageName);
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
+    if (!matchedEntry || seen.has(packageNorm)) continue;
+    seen.add(packageNorm);
 
     detected.push({
-      blockedEntry: entry,
-      packageName: match.packageName,
-      appName: match.appName || label,
+      blockedEntry: matchedEntry,
+      packageName: installed.packageName,
+      appName: installed.appName || installed.packageName,
     });
   }
 

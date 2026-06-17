@@ -63,12 +63,14 @@ export default function NotificationsBell({
   const [soundOn, setSoundOn] = useState(isNotificationSoundEnabled);
   const [pushOn, setPushOn] = useState(isBrowserPushEnabled);
   const panelRef = useRef<HTMLDivElement>(null);
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
 
   useEffect(() => {
     if (!open) return;
     void requestBrowserNotificationPermission();
-    void onRefresh();
-  }, [open, onRefresh]);
+    void onRefreshRef.current();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -118,7 +120,7 @@ export default function NotificationsBell({
           </div>
 
           <div className="overflow-y-auto max-h-[20rem]">
-            {loading ? (
+            {loading && notifications.length === 0 ? (
               <div className="flex justify-center py-8 text-slate-400">
                 <Loader2 className="animate-spin" size={20} />
               </div>

@@ -51,7 +51,7 @@ function MultiSelectDropdown({
         : `${selected.length} selected`;
 
   return (
-    <div className="space-y-1.5 relative">
+    <div className={`space-y-1.5 relative ${isOpen ? "z-50" : ""}`}>
       <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">{label}</label>
       <button
         type="button"
@@ -62,7 +62,7 @@ function MultiSelectDropdown({
         <ChevronDown size={14} className={`text-slate-400 shrink-0 transition ${isOpen ? "rotate-180" : ""}`} />
       </button>
       {isOpen && (
-        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-56 overflow-y-auto">
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 space-y-1 max-h-56 overflow-y-auto">
           <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
             <span className="text-[10px] text-slate-400 font-bold uppercase">{label}</span>
             <button
@@ -176,6 +176,8 @@ export default function ReportsPanel() {
 
   const canExport = filteredReportEmployees.length > 0 && selectedReportColumns.length > 0;
   const previewRows = filteredReportEmployees.slice(0, 50);
+  const isAnyReportDropdownOpen =
+    isReportLocDropdownOpen || isSkillDropdownOpen || isRoleDropdownOpen;
 
   const toggleColumnGroup = (groupHeaders: readonly string[], isAllChecked: boolean) => {
     if (isAllChecked) {
@@ -256,7 +258,12 @@ export default function ReportsPanel() {
 
         <div className="p-6 space-y-5">
           {/* Filters — always visible */}
-          <section className="rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden">
+          <section
+            className={[
+              "rounded-xl border border-slate-200 bg-slate-50/60 relative",
+              isAnyReportDropdownOpen ? "z-30 overflow-visible" : "overflow-hidden",
+            ].join(" ")}
+          >
             <div className="px-4 py-3 border-b border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <Filter size={15} className="text-[#ff791a] shrink-0" />

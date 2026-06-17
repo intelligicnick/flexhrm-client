@@ -1,13 +1,10 @@
+import { toIsoDate } from "./date-helpers";
+
 export function isPastDate(iso: string, refDate = new Date()): boolean {
   return iso < toIsoDate(refDate);
 }
 
-export function toIsoDate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+export { toIsoDate };
 
 /** Today's date in Asia/Kolkata (YYYY-MM-DD). */
 export function todayIsoInKolkata(date = new Date()): string {

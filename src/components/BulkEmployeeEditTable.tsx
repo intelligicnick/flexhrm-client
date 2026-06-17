@@ -46,6 +46,15 @@ function isDropdownField(field: BulkEditFieldDef): boolean {
   return field.type === "select" || field.type === "boolean" || !!field.dynamicOptions;
 }
 
+function isTextInputColumn(
+  columnId: ColumnId,
+  field: BulkEditFieldDef | undefined,
+): boolean {
+  if (typeof columnId === "string" && columnId.startsWith("custom:")) return true;
+  if (!field) return false;
+  return field.type === "text" || field.type === "number";
+}
+
 function resolveColumnFillOptions(
   field: BulkEditFieldDef | undefined,
   availableLocations: string[],
@@ -257,6 +266,7 @@ export default function BulkEmployeeEditTable({
   const [showReviewDialog, setShowReviewDialog] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [columnSelection, setColumnSelection] = useState<ColumnSelection | null>(null);
+  const [bulkFillText, setBulkFillText] = useState("");
   const columnSelectionRef = useRef<ColumnSelection | null>(null);
   const selectedEmployeeIdsRef = useRef<string[]>([]);
 
@@ -341,6 +351,19 @@ export default function BulkEmployeeEditTable({
     if (columnSelection.columnId.startsWith("custom:")) return undefined;
     return BULK_EDIT_FIELDS.find((f) => f.key === columnSelection.columnId);
   }, [columnSelection]);
+
+  const selectedCustomFieldName = useMemo(() => {
+    if (!columnSelection || typeof columnSelection.columnId !== "string") return undefined;
+    if (!columnSelection.columnId.startsWith("custom:")) return undefined;
+    return columnSelection.columnId.slice("custom:".length);
+  }, [columnSelection]);
+
+  const selectedColumnLabel = selectedFieldDef?.label ?? selectedCustomFieldName;
+
+  const isTextBulkFillColumn = useMemo(() => {
+    if (!columnSelection || selectedEmployeeIds.length <= 1) return false;
+    return isTextInputColumn(columnSelection.columnId, selectedFieldDef);
+  }, [columnSelection, selectedEmployeeIds.length, selectedFieldDef]);
 
   const selectedColumnFillOptions = useMemo(
     () =>
@@ -599,6 +622,15 @@ export default function BulkEmployeeEditTable({
     [applyFieldValue, columnSelection, selectedEmployeeIds],
   );
 
+  const handleBulkFillTextApply = useCallback(() => {
+    if (!columnSelection || selectedEmployeeIds.length === 0) return;
+    applyFieldValue(selectedEmployeeIds, columnSelection.columnId, bulkFillText);
+  }, [applyFieldValue, bulkFillText, columnSelection, selectedEmployeeIds]);
+
+  useEffect(() => {
+    setBulkFillText("");
+  }, [columnSelection]);
+
   useEffect(() => {
     clearColumnSelection();
   }, [locationFilter, roleFilter, skillFilter, searchTerm, clearColumnSelection]);
@@ -738,7 +770,7 @@ export default function BulkEmployeeEditTable({
             <span>
               <strong>{selectedEmployeeIds.length}</strong> row
               {selectedEmployeeIds.length !== 1 ? "s" : ""} selected
-              {selectedFieldDef ? ` in ${selectedFieldDef.label}` : ""}
+              {selectedColumnLabel ? ` in ${selectedColumnLabel}` : ""}
             </span>
           </div>
           {selectedEmployeeIds.length > 1 && selectedFieldDef && isDropdownField(selectedFieldDef) && (
@@ -767,6 +799,37 @@ export default function BulkEmployeeEditTable({
               </select>
             </div>
           )}
+          {isTextBulkFillColumn && (
+            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-xl">
+              <label
+                htmlFor="bulk-fill-text-input"
+                className="text-[11px] font-semibold text-blue-900 whitespace-nowrap"
+              >
+                Fill all selected:
+              </label>
+              <input
+                id="bulk-fill-text-input"
+                type={selectedFieldDef?.type === "number" ? "number" : "text"}
+                value={bulkFillText}
+                onChange={(e) => setBulkFillText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleBulkFillTextApply();
+                  }
+                }}
+                placeholder={`Type ${selectedColumnLabel ?? "value"}…`}
+                className="flex-1 min-w-0 text-xs border border-blue-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                type="button"
+                onClick={handleBulkFillTextApply}
+                className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-1.5 cursor-pointer whitespace-nowrap"
+              >
+                Apply
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={clearColumnSelection}
@@ -780,7 +843,7 @@ export default function BulkEmployeeEditTable({
       <div className="px-4 py-1.5 border-b border-slate-100 bg-white text-[10px] text-slate-500">
         Select rows: click a cell · <strong>Shift+click</strong> to extend · <strong>Shift+↑/↓</strong> with
         keyboard · column header = select all · for dropdown columns, use <strong>Fill all selected</strong> or
-        change any selected cell’s dropdown
+        change any selected cell’s dropdown · for text/number columns, type once in <strong>Fill all selected</strong> and press Apply
       </div>
 
       <div className="overflow-auto max-h-[620px]">

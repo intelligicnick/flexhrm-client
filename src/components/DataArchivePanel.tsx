@@ -120,8 +120,22 @@ export default function DataArchivePanel({
     return Object.entries(summary.labels) as Array<[ArchivableSource, string]>;
   }, [summary]);
 
+  const totalEligibleToArchive = useMemo(() => {
+    if (!summary?.hotEligibleCounts) return null;
+    return Object.values(summary.hotEligibleCounts).reduce((sum, count) => sum + count, 0);
+  }, [summary]);
+
+  const noDataMessage = useMemo(() => {
+    const months = summary?.retentionMonths ?? 6;
+    return `No data to archive older than ${months} months.`;
+  }, [summary?.retentionMonths]);
+
   const handleRunArchive = async () => {
     if (readOnly) return;
+    if (totalEligibleToArchive === 0) {
+      onSuccess?.(noDataMessage);
+      return;
+    }
     setRunningArchive(true);
     try {
       const res = await fetch(apiUrl("/api/data-archive/run"), {
@@ -131,7 +145,12 @@ export default function DataArchivePanel({
       });
       if (!res.ok) throw await parseApiError(res, "Archive job failed.");
       const run = await res.json();
-      onSuccess?.(`Archive completed — ${run.totalArchived ?? 0} record(s) moved to cold storage.`);
+      const archived = run.totalArchived ?? 0;
+      onSuccess?.(
+        archived === 0
+          ? noDataMessage
+          : `Archive completed — ${archived} record(s) moved to cold storage.`,
+      );
       await loadSummary();
       await loadRecords();
     } catch (err) {

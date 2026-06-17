@@ -390,33 +390,34 @@ export function employeeMatchesSkillFilters(emp: Employee, filters: string[]): b
   return filters.some((f) => empSkill === f.toLowerCase());
 }
 
-/** Prorate monthly salary only when at least one attendance day is recorded for the month. */
+/**
+ * Prorate monthly salary by present days using the employee's working-days cycle
+ * (e.g. 26 / 22 / 30), not calendar days in the month.
+ * Example: ₹10,000 gross, 26-day cycle, 10 presents → (10000 / 26) * 10.
+ */
 export function prorateSalaryByAttendance(
   rawAmount: number,
-  daysInMonth: number,
+  workingDaysInCycle: number,
   presents: number,
   empMonthAttendance: Record<string | number, string>
 ): number {
-  if (daysInMonth <= 0) return rawAmount;
+  if (workingDaysInCycle <= 0) return rawAmount;
   const hasRecordedAttendance = Object.values(empMonthAttendance).some(
     (v) => v !== undefined && v !== null && String(v).trim() !== ""
   );
   if (!hasRecordedAttendance) return rawAmount;
-  return Math.round((rawAmount / daysInMonth) * presents);
+  return Math.round((rawAmount / workingDaysInCycle) * presents);
 }
 
-/** ESIC applies when compliant and (gross ≤ ceiling OR employee ESIC flag is Yes). */
+/** ESIC applies only when compliant and the employee ESIC flag is explicitly Yes. */
 export function isEmployeeEsicCovered(
   gross: number,
-  esicEligibilityLimit: number,
+  _esicEligibilityLimit: number,
   isCompliant: boolean,
   esicFlag?: string
 ): boolean {
   if (!isCompliant) return false;
-  return (
-    gross > 0 &&
-    (gross <= esicEligibilityLimit || (esicFlag || "").toLowerCase() === "yes")
-  );
+  return gross > 0 && (esicFlag || "").toLowerCase() === "yes";
 }
 
 // Generate the CSV file download string matching EXCEL_ROW_HEADERS order exactly
@@ -510,8 +511,8 @@ export function calculatePfAmounts(
   };
 }
 
+/** @deprecated Legacy location PT amount storage; slab-based PT no longer uses per-location amounts. */
 export const DEFAULT_LOCATION_PT_AMOUNT = 200;
-export const DEFAULT_PT_GROSS_THRESHOLD = 10000;
 
 export function readLocationPtAmountsFromStorage(): Record<string, number> {
   if (typeof window === "undefined") return {};
@@ -523,6 +524,7 @@ export function readLocationPtAmountsFromStorage(): Record<string, number> {
   }
 }
 
+/** @deprecated Slab-based PT no longer uses per-location fixed amounts. */
 export function parseLocationPtInput(
   raw: string,
   fallback = DEFAULT_LOCATION_PT_AMOUNT
@@ -531,6 +533,7 @@ export function parseLocationPtInput(
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : fallback;
 }
 
+/** @deprecated Slab-based PT no longer uses per-location fixed amounts. */
 export function resolveLocationPtAmount(
   location: string | undefined,
   locationPtMap: Record<string, number>,
@@ -546,27 +549,110 @@ export function resolveLocationPtAmount(
   return defaultAmount;
 }
 
-/** Professional tax for the month using location-specific PT amount when gross exceeds threshold. */
+export function isFebruaryPayrollMonth(month?: string): boolean {
+  if (!month?.trim()) return false;
+  return month.trim().toLowerCase().startsWith("february");
+}
+
+export function isFemaleGender(gender?: string): boolean {
+  const normalized = (gender || "").trim().toLowerCase();
+  return normalized === "female" || normalized === "f";
+}
+
+/** Gender-based professional tax slab amount for a monthly gross (before compliance gating). */
+export function calculateProfessionalTaxSlabAmount(
+  monthlyGross: number,
+  gender?: string,
+  month?: string
+): number {
+  const gross = Number(monthlyGross);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+
+  const isFebruary = isFebruaryPayrollMonth(month);
+
+  if (isFemaleGender(gender)) {
+    if (gross <= 25000) return 0;
+    return isFebruary ? 300 : 200;
+  }
+
+  if (gross <= 7500) return 0;
+  if (gross <= 10000) return 175;
+  return isFebruary ? 300 : 200;
+}
+
+/** Professional tax for the month when PT is enabled at employee and location level. */
 export function calculateProfessionalTax(
   monthlyGross: number,
   options: {
-    isCompliant?: boolean;
-    locationPtAmount?: number;
-    grossThreshold?: number;
+    isPtEnabled?: boolean;
+    gender?: string;
+    month?: string;
   } = {}
 ): number {
-  const {
-    isCompliant = true,
-    locationPtAmount = DEFAULT_LOCATION_PT_AMOUNT,
-    grossThreshold = DEFAULT_PT_GROSS_THRESHOLD,
-  } = options;
-
-  if (!isCompliant) return 0;
-  const gross = Number(monthlyGross);
-  if (!Number.isFinite(gross) || gross <= grossThreshold) return 0;
-  const amount = Number(locationPtAmount);
-  return Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0;
+  const { isPtEnabled = false, gender, month } = options;
+  if (!isPtEnabled) return 0;
+  return calculateProfessionalTaxSlabAmount(monthlyGross, gender, month);
 }
+
+export function isEmployeePtEnabled(employee: {
+  complianceEnabled?: boolean;
+  ptEnabled?: boolean;
+}): boolean {
+  if (employee.ptEnabled !== undefined) return employee.ptEnabled !== false;
+  return employee.complianceEnabled !== false;
+}
+
+export function resolveLocationCompliance(
+  location: string | undefined,
+  locationComplianceMap: Record<string, boolean>
+): boolean {
+  if (!location?.trim()) return false;
+  const locLower = location.trim().toLowerCase();
+  const matchedKey = Object.keys(locationComplianceMap).find((k) => k.toLowerCase() === locLower);
+  return matchedKey !== undefined ? !!locationComplianceMap[matchedKey] : false;
+}
+
+export function resolveLocationPtEnabled(
+  location: string | undefined,
+  locationPtMap: Record<string, boolean>
+): boolean {
+  if (!location?.trim()) return false;
+  const locLower = location.trim().toLowerCase();
+  const matchedKey = Object.keys(locationPtMap).find((k) => k.toLowerCase() === locLower);
+  return matchedKey !== undefined ? !!locationPtMap[matchedKey] : false;
+}
+
+/** PF/ESIC applies when enabled on the employee record or at the office location. */
+export function isPfEsicCompliant(
+  employee: { location?: string; complianceEnabled?: boolean },
+  locationComplianceMap: Record<string, boolean>
+): boolean {
+  const isLocCompliant = resolveLocationCompliance(employee.location, locationComplianceMap);
+  const isEmpCompliant = employee.complianceEnabled !== false;
+  return isLocCompliant || isEmpCompliant;
+}
+
+/** PT applies when enabled on the employee record or at the office location (state-specific). */
+export function isProfessionalTaxApplicable(
+  employee: { location?: string; complianceEnabled?: boolean; ptEnabled?: boolean },
+  locationPtMap: Record<string, boolean>
+): boolean {
+  const isLocPt = resolveLocationPtEnabled(employee.location, locationPtMap);
+  const isEmpPt = isEmployeePtEnabled(employee);
+  return isLocPt || isEmpPt;
+}
+
+export const PROFESSIONAL_TAX_SLAB_SUMMARY = {
+  male: [
+    { range: "Up to ₹7,500 / month", amount: "Nil" },
+    { range: "₹7,501 to ₹10,000 / month", amount: "₹175 / month" },
+    { range: "Above ₹10,000 / month", amount: "₹200 / month (₹300 in February)" },
+  ],
+  female: [
+    { range: "Up to ₹25,000 / month", amount: "Nil" },
+    { range: "Above ₹25,000 / month", amount: "₹200 / month (₹300 in February)" },
+  ],
+} as const;
 
 // Calculation for standard Indian salary onboarding
 export function calculateSalaryDetails(

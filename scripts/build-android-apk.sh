@@ -8,7 +8,7 @@ ASSETS_DIR="${ANDROID_DIR}/app/src/main/assets/www"
 
 echo "==> Building production frontend bundle..."
 cd "$ROOT"
-npm run build
+VITE_DISABLE_PWA=true npm run build
 
 echo "==> Syncing dist/ into Android assets..."
 rm -rf "$ASSETS_DIR"
@@ -17,6 +17,13 @@ cp -R dist/. "$ASSETS_DIR/"
 
 echo "==> Building Android APK..."
 cd "$ANDROID_DIR"
+
+if [ -z "${JAVA_HOME:-}" ]; then
+  if [ -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]; then
+    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+  fi
+fi
+
 ./gradlew assembleDebug
 
 APK_PATH="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"

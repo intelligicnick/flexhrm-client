@@ -5,10 +5,21 @@ import {
   isEmployeeEsicCovered,
   calculatePfAmounts,
   calculateProfessionalTax,
-  resolveLocationPtAmount,
+  isPfEsicCompliant,
+  isProfessionalTaxApplicable,
 } from "../utils";
 import { safeNumber, getDaysInMonthStatic } from "./date-helpers";
 import { isEmployeeExitedOnDayStatic } from "./employee-helpers";
+import { countMonthAttendance, getSalaryProrationDays } from "./attendance-helpers";
+
+export function resolveEmployeeDailyWage(emp: Employee): number {
+  const stored = safeNumber(emp.dailyWage);
+  if (stored > 0) return stored;
+  const gross = safeNumber(emp.grossSalary);
+  if (gross <= 0) return 0;
+  const days = getSalaryProrationDays(emp.workingDaysType);
+  return days > 0 ? parseFloat((gross / days).toFixed(2)) : 0;
+}
 
 export const getSalaryColumnValue = (
   emp: Employee,
@@ -17,23 +28,21 @@ export const getSalaryColumnValue = (
   esicEligibilityLimit: number,
   attendanceDb?: any,
   locationComplianceMap: Record<string, boolean> = {},
-  locationPtMap: Record<string, number> = {}
+  locationPtEnabledMap: Record<string, boolean> = {},
 ) => {
   let presents = 0;
-  let daysInMonth = 30;
-  
+  const workingDaysInCycle = getSalaryProrationDays(emp.workingDaysType);
+
   if (attendanceDb && month) {
-    daysInMonth = getDaysInMonthStatic(month);
+    const daysInMonth = getDaysInMonthStatic(month);
     const monthData = attendanceDb[month] || {};
     const empData = monthData[emp.id] || {};
-    for (let i = 1; i <= daysInMonth; i++) {
-      if (isEmployeeExitedOnDayStatic(emp, month, i)) {
-        continue;
-      }
-      if (empData[i] === "P") {
-        presents++;
-      }
-    }
+    presents = countMonthAttendance(
+      empData,
+      daysInMonth,
+      (day) => isEmployeeExitedOnDayStatic(emp, month, day),
+      { workingDaysType: emp.workingDaysType, monthStr: month },
+    ).presents;
   }
 
   const rawGross = safeNumber(emp.grossSalary);
@@ -41,15 +50,14 @@ export const getSalaryColumnValue = (
   const empMonthAttendance = attendanceDb && month ? (attendanceDb[month]?.[emp.id] || {}) : {};
 
   const gross = attendanceDb
-    ? prorateSalaryByAttendance(rawGross, daysInMonth, presents, empMonthAttendance)
+    ? prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empMonthAttendance)
     : rawGross;
   const basic = attendanceDb
-    ? prorateSalaryByAttendance(rawBasic, daysInMonth, presents, empMonthAttendance)
+    ? prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empMonthAttendance)
     : rawBasic;
 
-  const isLocCompliant = emp.location ? !!locationComplianceMap[emp.location] : false;
-  const isEmpCompliant = emp.complianceEnabled !== false;
-  const isCompliant = isLocCompliant && isEmpCompliant;
+  const isCompliant = isPfEsicCompliant(emp, locationComplianceMap);
+  const isPtEnabled = isProfessionalTaxApplicable(emp, locationPtEnabledMap);
 
   const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
     mode: emp.pfCalculationMode,
@@ -59,8 +67,9 @@ export const getSalaryColumnValue = (
   const erEsic = isEsicCovered ? (gross * 0.0325) : 0;
   const empEsic = isEsicCovered ? (gross * 0.0075) : 0;
   const pt = calculateProfessionalTax(gross, {
-    isCompliant,
-    locationPtAmount: resolveLocationPtAmount(emp.location, locationPtMap),
+    isPtEnabled,
+    gender: emp.gender,
+    month,
   });
   
   const ledger = emp.monthlyLedger?.[month];
@@ -86,6 +95,8 @@ export const getSalaryColumnValue = (
       return emp.role || "";
     case "Present Days":
       return attendanceDb ? presents : 0;
+    case "Daily Wage":
+      return resolveEmployeeDailyWage(emp);
     case "Total Salary":
       return rawGross;
     case "Gross Salary (Monthly)":
@@ -101,7 +112,7 @@ export const getSalaryColumnValue = (
     case "Employee ESIC (0.75%)":
       return isCompliant ? Math.round(empEsic) : "";
     case "Professional Tax (PT)":
-      return isCompliant ? pt : "";
+      return isPtEnabled ? pt : "";
     case "Advance Balance":
       return adv;
     case "Uniform Deductions":

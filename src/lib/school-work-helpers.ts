@@ -24,7 +24,7 @@ export function countSchoolsWithoutSupervisorCoverage(
 ): number {
   return schools.filter((school) => getSupervisorsForBlock(supervisors, school.block || "").length === 0).length;
 }
-import { MONTH_NAME_LIST } from "./date-helpers";
+import { MONTH_NAME_LIST, formatAppDate } from "./date-helpers";
 import { findHeaderIndex } from "../utils";
 
 export type ExpenseRecordType = "Material" | "Trek" | "Miscellaneous";
@@ -130,13 +130,7 @@ export function buildAllExpenseRecords(schools: SchoolWork[]): ExpenseRecordRow[
 
 export function formatExpenseDate(dateStr: string): string {
   if (!dateStr) return "—";
-  const parsed = new Date(`${dateStr}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return dateStr;
-  return parsed.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatAppDate(`${dateStr}T12:00:00`);
 }
 
 export const SCHOOL_HEADER_ALIASES: Record<string, string[]> = {

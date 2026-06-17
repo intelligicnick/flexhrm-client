@@ -10,8 +10,8 @@ android {
         applicationId 'com.flexhrm.supervisor'
         minSdk 24
         targetSdk 35
-        versionCode 7
-        versionName '1.5.1'
+        versionCode 14
+        versionName '1.5.9'
 
         buildConfigField 'String', 'SUPERVISOR_URL',
                 '"https://appassets.androidplatform.net/supervisor/login"'
@@ -51,4 +51,5 @@ dependencies {
     implementation 'androidx.core:core:1.15.0'
     implementation 'androidx.activity:activity:1.9.3'
     implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'com.google.android.gms:play-services-location:21.3.0'
 }

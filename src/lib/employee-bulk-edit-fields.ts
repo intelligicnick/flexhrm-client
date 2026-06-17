@@ -56,7 +56,8 @@ export const BULK_EDIT_FIELDS: BulkEditFieldDef[] = [
   { key: "basicSalary", label: "Basic Salary", type: "number", minWidth: "100px", group: "Corporate" },
   { key: "dailyWage", label: "Daily Wage", type: "number", minWidth: "100px", group: "Corporate" },
   { key: "esic", label: "ESIC", type: "select", options: ESIC_OPTIONS, minWidth: "80px", group: "Corporate" },
-  { key: "complianceEnabled", label: "Statutory Compliance", type: "boolean", minWidth: "100px", group: "Corporate" },
+  { key: "complianceEnabled", label: "PF/ESIC Compliance", type: "boolean", minWidth: "100px", group: "Corporate" },
+  { key: "ptEnabled", label: "Professional Tax", type: "boolean", minWidth: "100px", group: "Corporate" },
   { key: "pfCalculationMode", label: "PF Calculation Mode", type: "select", options: PF_CALCULATION_OPTIONS, minWidth: "130px", group: "Corporate" },
   { key: "uan", label: "UAN", type: "text", minWidth: "130px", group: "Corporate" },
   { key: "pfJoiningDate", label: "PF Join Date", type: "text", minWidth: "110px", group: "Corporate" },
@@ -127,6 +128,10 @@ export function getEmployeeFieldValue(emp: Employee, key: keyof Employee): strin
   if (key === "complianceEnabled") {
     return emp.complianceEnabled === false ? "No" : "Yes";
   }
+  if (key === "ptEnabled") {
+    if (emp.ptEnabled !== undefined) return emp.ptEnabled === false ? "No" : "Yes";
+    return emp.complianceEnabled === false ? "No" : "Yes";
+  }
   const val = emp[key];
   if (val === undefined || val === null) return "";
   if (typeof val === "number") return String(val);
@@ -183,6 +188,11 @@ export function buildMergedEmployee(
     merged.complianceEnabled =
       draft.complianceEnabled === true ||
       String(draft.complianceEnabled) === "Yes";
+  }
+  if (draft.ptEnabled !== undefined) {
+    merged.ptEnabled =
+      draft.ptEnabled === true ||
+      String(draft.ptEnabled) === "Yes";
   }
   if (draft.customFields) {
     merged.customFields = draft.customFields;

@@ -135,7 +135,12 @@ export function applySalaryFieldChange(
       esicLimit,
     );
     return {
-      values: { ...current, workingDaysType: cycle, ...derived },
+      values: {
+        ...current,
+        workingDaysType: cycle,
+        ...derived,
+        esic: current.esic,
+      },
       anchor: resolvedAnchor,
     };
   }
@@ -166,7 +171,7 @@ export function applySalaryFieldChange(
       esicLimit,
     );
     return {
-      values: { ...current, ...derived },
+      values: { ...current, ...derived, esic: current.esic },
       anchor,
     };
   }
@@ -174,7 +179,6 @@ export function applySalaryFieldChange(
   const updated = { ...current };
   if (field === "grossSalary") {
     updated.grossSalary = numValue;
-    updated.esic = computeEsic(numValue, esicLimit);
   } else if (field === "dailyWage") {
     updated.dailyWage = numValue;
   } else {

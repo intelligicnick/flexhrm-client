@@ -25,7 +25,8 @@ export interface Employee {
   pfJoiningDate: string; // PF JOINING DATE
   exitDate?: string; // EXIT/LEAVING DATE
   exitReason?: string; // REASON FOR EXIT / SEPARATION
-  complianceEnabled?: boolean; // ENABLE STATUTORY COMPLIANCE
+  complianceEnabled?: boolean; // ENABLE PF/ESIC COMPLIANCE
+  ptEnabled?: boolean; // ENABLE PROFESSIONAL TAX (where applicable by state/location)
   /** PF wage basis: full monthly gross, or gross capped at ₹15,000 when gross ≥ ceiling */
   pfCalculationMode?: "gross" | "ceiling_15000";
   dateOfBirth: string; // DATE OF BIRTH
@@ -321,6 +322,153 @@ export interface CommitmentDiary {
   updatedAt?: string;
 }
 
+export type TenderType = "manpower" | "travel";
+
+export type TenderStatus =
+  | "not_filed"
+  | "not_evaluated"
+  | "filed"
+  | "technical_qualified"
+  | "qualified"
+  | "disqualified"
+  | "technical_not_open"
+  | "cancelled"
+  | "representation_asked"
+  | "challenged_representation"
+  | "financial"
+  | "won_bid";
+
+/** @deprecated Use TenderStatus */
+export type PreBidStatus = TenderStatus;
+
+export interface Tender {
+  id: string;
+  bidNo: string;
+  category: string;
+  department: string;
+  officerName: string;
+  address: string;
+  tenderType: TenderType;
+  quantity: number;
+  rate: string;
+  endDate: string;
+  filedDate: string;
+  preBidAt: string;
+  preBidVenue: string;
+  noPreBid: boolean;
+  status: TenderStatus;
+  outcome: string;
+  notes: string;
+  description: string;
+  entryDate: string;
+  gemDocUrl: string;
+  gemCurrentStage: string;
+  /** ISO timestamp when soft-deleted; empty when active */
+  deletedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreateTenderInput = Omit<Tender, "id" | "createdAt" | "updatedAt">;
+
+export type ContractType = "manpower" | "travel";
+
+export type ContractStatus =
+  | "active"
+  | "upcoming"
+  | "expired"
+  | "extended"
+  | "terminated";
+
+export interface Contract {
+  id: string;
+  contractNo: string;
+  officerName: string;
+  officeName: string;
+  correspondingOffice: string;
+  fromDate: string;
+  toDate: string;
+  companyName: string;
+  category: string;
+  contractType: ContractType;
+  hasExtension: boolean;
+  extensionEndDate: string;
+  bgApplicable: boolean;
+  bgNumber: string;
+  bgAmount: string;
+  bgIssuingBank: string;
+  bgExpiryDate: string;
+  bgDetails: string;
+  ddoName: string;
+  ddoIssuingDetails: string;
+  tenderBidNo: string;
+  contractValue: string;
+  status: ContractStatus;
+  notes: string;
+  entryDate: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreateContractInput = Omit<Contract, "id" | "createdAt" | "updatedAt">;
+
+export type RenewalCategory = "car_papers" | "it_renewals" | "licenses";
+
+export type CarPaperSubtype =
+  | "rc_book"
+  | "insurance"
+  | "road_tax"
+  | "permit"
+  | "puc";
+
+export type ItRenewalSubtype = "domain" | "server";
+
+export type LicenseSubtype =
+  | "travel_plus"
+  | "intelligic_solutions"
+  | "rent_agreements"
+  | "travel_plus_huf"
+  | "intelligic_huf"
+  | "intelligic_solutions_pvt_ltd";
+
+export type RenewalOwnerType = "mine" | "client";
+
+export interface Renewal {
+  id: string;
+  category: RenewalCategory;
+  subType: string;
+  title: string;
+  clientName: string;
+  ownerType: RenewalOwnerType;
+  amount: string;
+  hasExpiry: boolean;
+  issuedOn: string;
+  expiresOn: string;
+  /** @deprecated Use issuedOn */
+  renewalDate: string;
+  /** @deprecated Use expiresOn */
+  expiryDate: string;
+  notes: string;
+  entryDate: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreateRenewalInput = Omit<Renewal, "id" | "createdAt" | "updatedAt">;
+
+export interface RenewalDocument {
+  id: string;
+  renewalId: string;
+  label: string;
+  mimeType: string;
+  filename: string;
+  originalSizeBytes: number;
+  storedSizeBytes: number;
+  quality?: number;
+  uploadedBy: string;
+  createdAt: string;
+}
+
 export interface SchoolBillingLineItem {
   schoolWorkId: string;
   udise: string;
@@ -500,6 +648,8 @@ export interface CustomRole {
   permissions: {
     employees: RolePermission;
     schoolWork: RolePermission;
+    bids: RolePermission;
+    renewals: RolePermission;
     salary: RolePermission;
     ledger: RolePermission;
     attendance: RolePermission;

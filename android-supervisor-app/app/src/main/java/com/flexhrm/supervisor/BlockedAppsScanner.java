@@ -12,17 +12,24 @@ import java.util.Map;
 import java.util.Set;
 
 public final class BlockedAppsScanner {
+  private static final String OWN_PACKAGE = "com.flexhrm.supervisor";
+  private static final int MIN_PARTIAL_LABEL_LENGTH = 3;
+
   private static final Map<String, String[]> KNOWN_APP_PACKAGES = new HashMap<>();
 
   static {
     KNOWN_APP_PACKAGES.put("anyto", new String[] {"com.imyfone.anytoandroid", "com.tenorshare.ianygo"});
     KNOWN_APP_PACKAGES.put("fake gps", new String[] {
         "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
-        "com.blogspot.newapphorizons.fakegps", "com.fakegps.mock"
+        "com.blogspot.newapphorizons.fakegps", "com.fakegps.mock",
+        "com.mobile.fakelocation"
     });
     KNOWN_APP_PACKAGES.put("fake gps location", new String[] {
-        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre"
+        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
+        "com.mobile.fakelocation"
     });
+    KNOWN_APP_PACKAGES.put("locaedit", new String[] {"com.mobile.fakelocation"});
+    KNOWN_APP_PACKAGES.put("fake gps location-locaedit", new String[] {"com.mobile.fakelocation"});
     KNOWN_APP_PACKAGES.put("gps emulator", new String[] {"com.rosteam.gpsemulator"});
     KNOWN_APP_PACKAGES.put("lexa fake gps", new String[] {"com.lexa.fakegps"});
     KNOWN_APP_PACKAGES.put("mock locations", new String[] {"com.lexa.fakegps"});
@@ -61,66 +68,129 @@ public final class BlockedAppsScanner {
 
   private BlockedAppsScanner() {}
 
-  public static List<InstalledApp> getUserInstalledApps(Context context) {
+  /** Returns every installed app visible on the device (user + updated system apps). */
+  public static List<InstalledApp> getAllInstalledApps(Context context) {
     PackageManager pm = context.getPackageManager();
     List<InstalledApp> apps = new ArrayList<>();
 
     for (ApplicationInfo info : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
-      if ((info.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+      boolean isUpdatedSystem =
+          (info.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0;
+      boolean isSystem = (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+      if (isSystem && !isUpdatedSystem) {
         continue;
       }
+
       CharSequence label = pm.getApplicationLabel(info);
-      apps.add(new InstalledApp(
-          info.packageName,
-          label != null ? label.toString() : info.packageName));
+      apps.add(
+          new InstalledApp(
+              info.packageName,
+              label != null ? label.toString() : info.packageName));
     }
     return apps;
   }
 
+  /**
+   * Scans every installed app and returns those that match any entry in the configured blocked list.
+   */
   public static List<DetectedBlockedApp> findInstalledBlockedApps(
       List<String> blockedEntries, List<InstalledApp> installedApps) {
-    Map<String, InstalledApp> installedByPackage = new HashMap<>();
-
-    for (InstalledApp app : installedApps) {
-      installedByPackage.put(normalize(app.packageName), app);
-    }
-
     List<DetectedBlockedApp> detected = new ArrayList<>();
-    Set<String> seen = new HashSet<>();
-
-    for (String entry : blockedEntries) {
-      ParsedEntry parsed = parseBlockedAppEntry(entry);
-      if (parsed.label.isEmpty()) continue;
-
-      InstalledApp match = null;
-      for (String packageName : parsed.packageNames) {
-        match = installedByPackage.get(normalize(packageName));
-        if (match != null) break;
-      }
-      if (match == null) {
-        match = exactLabelMatch(parsed.label, installedApps);
-      }
-      if (match == null) continue;
-
-      String dedupeKey = normalize(match.packageName);
-      if (seen.contains(dedupeKey)) continue;
-      seen.add(dedupeKey);
-
-      String displayName = match.appName != null && !match.appName.isEmpty()
-          ? match.appName : parsed.label;
-      detected.add(new DetectedBlockedApp(entry, match.packageName, displayName));
+    if (blockedEntries == null || blockedEntries.isEmpty()) {
+      return detected;
     }
+
+    Set<String> seen = new HashSet<>();
+    String ownPackageNorm = normalize(OWN_PACKAGE);
+
+    for (InstalledApp installed : installedApps) {
+      String packageNorm = normalize(installed.packageName);
+      if (packageNorm.equals(ownPackageNorm)) {
+        continue;
+      }
+
+      String matchedEntry = null;
+      for (String entry : blockedEntries) {
+        if (entry == null || entry.trim().isEmpty()) {
+          continue;
+        }
+        if (installedAppMatchesBlockedEntry(installed, entry.trim())) {
+          matchedEntry = entry.trim();
+          break;
+        }
+      }
+
+      if (matchedEntry == null) {
+        continue;
+      }
+
+      if (seen.contains(packageNorm)) {
+        continue;
+      }
+      seen.add(packageNorm);
+
+      String displayName =
+          installed.appName != null && !installed.appName.isEmpty()
+              ? installed.appName
+              : installed.packageName;
+      detected.add(new DetectedBlockedApp(matchedEntry, installed.packageName, displayName));
+    }
+
     return detected;
   }
 
-  private static InstalledApp exactLabelMatch(String label, List<InstalledApp> installedApps) {
-    String labelNorm = normalize(label);
-    for (InstalledApp app : installedApps) {
-      if (app.appName != null && normalize(app.appName).equals(labelNorm)) {
-        return app;
+  private static boolean installedAppMatchesBlockedEntry(InstalledApp installed, String entry) {
+    ParsedEntry parsed = parseBlockedAppEntry(entry);
+    if (parsed.label.isEmpty()) {
+      return false;
+    }
+
+    String packageNorm = normalize(installed.packageName);
+    String appLabelNorm = installed.appName != null ? normalize(installed.appName) : "";
+    String blockedLabelNorm = normalize(parsed.label);
+
+    for (String blockedPackage : parsed.packageNames) {
+      if (packageNorm.equals(normalize(blockedPackage))) {
+        return true;
       }
     }
-    return null;
+
+    if (looksLikePackageName(parsed.label) && packageNorm.equals(blockedLabelNorm)) {
+      return true;
+    }
+
+    if (!appLabelNorm.isEmpty() && appLabelNorm.equals(blockedLabelNorm)) {
+      return true;
+    }
+
+    if (!appLabelNorm.isEmpty() && blockedLabelNorm.length() >= MIN_PARTIAL_LABEL_LENGTH) {
+      if (appLabelNorm.contains(blockedLabelNorm) || blockedLabelNorm.contains(appLabelNorm)) {
+        return true;
+      }
+    }
+
+    if (!appLabelNorm.isEmpty() && allSignificantTokensMatch(blockedLabelNorm, appLabelNorm, packageNorm)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private static boolean allSignificantTokensMatch(
+      String blockedLabelNorm, String appLabelNorm, String packageNorm) {
+    String[] tokens = blockedLabelNorm.split("[^a-z0-9]+");
+    int significant = 0;
+    int matched = 0;
+    for (String token : tokens) {
+      if (token.length() < MIN_PARTIAL_LABEL_LENGTH) {
+        continue;
+      }
+      significant++;
+      if (appLabelNorm.contains(token) || packageNorm.contains(token)) {
+        matched++;
+      }
+    }
+    return significant > 0 && matched == significant;
   }
 
   private static ParsedEntry parseBlockedAppEntry(String entry) {

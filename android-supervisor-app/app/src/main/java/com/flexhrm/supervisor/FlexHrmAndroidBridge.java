@@ -44,7 +44,7 @@ public class FlexHrmAndroidBridge {
   @JavascriptInterface
   public String getInstalledApps() {
     List<BlockedAppsScanner.InstalledApp> apps =
-        BlockedAppsScanner.getUserInstalledApps(activity);
+        BlockedAppsScanner.getAllInstalledApps(activity);
     JSONArray array = new JSONArray();
     for (BlockedAppsScanner.InstalledApp app : apps) {
       JSONObject item = new JSONObject();
@@ -65,5 +65,42 @@ public class FlexHrmAndroidBridge {
     Intent intent = new Intent(Intent.ACTION_DELETE);
     intent.setData(Uri.parse("package:" + packageName.trim()));
     activity.startActivity(intent);
+  }
+
+  @JavascriptInterface
+  public String getGpsCoordinates() {
+    return NativeGpsHelper.getCoordinatesJson(activity);
+  }
+
+  @JavascriptInterface
+  public void warmupGps() {
+    NativeGpsHelper.warmup(activity);
+  }
+
+  @JavascriptInterface
+  public void capturePhoto() {
+    activity.runOnUiThread(() -> activity.launchNativeCamera());
+  }
+
+  @JavascriptInterface
+  public void requestFreshGps() {
+    NativeGpsHelper.requestFreshCoordinates(
+        activity,
+        json -> activity.runOnUiThread(() -> activity.deliverGpsJsonToWeb(json)));
+  }
+
+  @JavascriptInterface
+  public void saveSupervisorSession(String json) {
+    SupervisorSessionCache.saveFromJson(activity, json);
+  }
+
+  @JavascriptInterface
+  public String getSupervisorSession() {
+    return SupervisorSessionCache.loadJson(activity);
+  }
+
+  @JavascriptInterface
+  public void clearSupervisorSession() {
+    SupervisorSessionCache.clear(activity);
   }
 }

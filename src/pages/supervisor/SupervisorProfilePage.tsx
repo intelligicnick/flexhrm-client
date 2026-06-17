@@ -11,11 +11,15 @@ import {
   User,
   Shield,
 } from "lucide-react";
+import { SchoolVisit } from "../../types";
 import { parseApiError } from "../../api";
 import { captureLivePhotoDataUrl } from "../../lib/live-camera";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
 import { SupervisorLang } from "../../lib/supervisor-i18n";
+import { computeGamificationStats } from "../../lib/supervisor-gamification";
+import { toIsoDate } from "../../lib/supervisor-dates";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
+import SupervisorGamificationCard from "./SupervisorGamificationCard";
 interface SupervisorProfile {
   supervisorId: string;
   name: string;
@@ -82,6 +86,9 @@ export default function SupervisorProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [photoSuccess, setPhotoSuccess] = useState(false);
   const [langSuccess, setLangSuccess] = useState(false);
+  const [gamificationStats, setGamificationStats] = useState<ReturnType<typeof computeGamificationStats> | null>(
+    null,
+  );
 
   const localDeviceId = getSupervisorDeviceId();
   const deviceMatches = profile?.registeredDeviceId
@@ -109,6 +116,36 @@ export default function SupervisorProfilePage() {
         setProfile(loaded);
         setPreferredLang(loaded.defaultLanguage);
       }
+
+      const now = new Date();
+      const day = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - ((day + 6) % 7));
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const from = new Date();
+      from.setDate(from.getDate() - 45);
+
+      const [schoolsRes, weekRes, streakRes] = await Promise.all([
+        supervisorFetch("/api/school-visits/supervisor/schools"),
+        supervisorFetch(
+          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(monday)}&toDate=${toIsoDate(sunday)}`,
+        ),
+        supervisorFetch(
+          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(from)}&toDate=${toIsoDate(now)}`,
+        ),
+      ]);
+
+      const schools = schoolsRes.ok ? await schoolsRes.json() : [];
+      const weekVisits: SchoolVisit[] = weekRes.ok ? await weekRes.json() : [];
+      const streakVisits: SchoolVisit[] = streakRes.ok ? await streakRes.json() : [];
+      setGamificationStats(
+        computeGamificationStats({
+          weekVisits,
+          streakVisits,
+          totalSchools: Array.isArray(schools) ? schools.length : 0,
+        }),
+      );
     })();
   }, [supervisorFetch]);
 
@@ -224,6 +261,8 @@ export default function SupervisorProfilePage() {
           </p>
         )}
       </div>
+
+      {gamificationStats && <SupervisorGamificationCard stats={gamificationStats} />}
 
       {error && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-700">

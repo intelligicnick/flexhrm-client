@@ -58,6 +58,7 @@ import {
   Download,
   Eye,
   School,
+  Compass,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
@@ -71,11 +72,8 @@ import {
   employeeMatchesSkillFilters,
   prorateSalaryByAttendance,
   isEmployeeEsicCovered,
-  parseLocationPtInput,
   calculatePfAmounts,
   calculateProfessionalTax,
-  resolveLocationPtAmount,
-  DEFAULT_LOCATION_PT_AMOUNT,
   quoteCSVValue,
   downloadAxisBulkPayXls,
   saveAxisBulkPayArchive,
@@ -112,8 +110,13 @@ import BirthdaysTab from "../components/BirthdaysTab";
 import { useHRMS } from "../context/HRMSContext";
 import ModuleContent from "../pages/ModuleContent";
 import NotificationsBell from "../components/NotificationsBell";
+import {
+  ExtensionIntegrationModal,
+  ExtensionProfileMenuItem,
+} from "../components/ExtensionIntegration";
 
 export default function DashboardLayout() {
+  const [isExtensionModalOpen, setIsExtensionModalOpen] = useState(false);
   const {
     isLoggedIn,
     sessionUser,
@@ -177,10 +180,10 @@ export default function DashboardLayout() {
     companyBranch,
     rawCustomLocations,
     locationCompliance,
-    locationPtAmounts,
+    locationPtEnabled,
     isFetchingLocations,
     newLocCompliance,
-    newLocPtAmount,
+    newLocPtEnabled,
     customRoles,
     isFetchingJobRoles,
     auditLogsList,
@@ -305,9 +308,8 @@ export default function DashboardLayout() {
     selectedReportEmployeeIds,
     applySessionFromAuthMe,
     fetchRoles,
-    persistLocationPtAmounts,
-    updateLocationPtAmount,
     updateLocationCompliance,
+    updateLocationPtEnabled,
     fetchLocations,
     fetchJobRoles,
     fetchBulkPayArchives,
@@ -378,6 +380,7 @@ export default function DashboardLayout() {
     handleExportSelected,
     handlePimSubTabClick,
     navigateToTab,
+    setMyInfoTab,
     toggleSidebarGroup,
     expandedSidebarGroups,
     isSchoolFormOpen,
@@ -514,10 +517,10 @@ export default function DashboardLayout() {
     setCompanyBranch,
     setRawCustomLocations,
     setLocationCompliance,
-    setLocationPtAmounts,
+    setLocationPtEnabled,
     setIsFetchingLocations,
     setNewLocCompliance,
-    setNewLocPtAmount,
+    setNewLocPtEnabled,
     setCustomRoles,
     setIsFetchingJobRoles,
     setAuditLogsList,
@@ -890,6 +893,7 @@ export default function DashboardLayout() {
                               <button
                                 onClick={() => {
                                   setIsMobileProfileOpen(false);
+                                  setMyInfoTab("account");
                                   navigateToTab("My Info");
                                   triggerSuccess("Opened administrator account profile.");
                                   setIsSidebarCollapsed(true);
@@ -913,6 +917,25 @@ export default function DashboardLayout() {
                                 Portal Settings
                               </button>
                               <div className="border-t border-slate-100 my-1"></div>
+                              <button
+                                onClick={() => {
+                                  setIsMobileProfileOpen(false);
+                                  setMyInfoTab("tour");
+                                  navigateToTab("My Info");
+                                  triggerSuccess("Opened system tour guide.");
+                                  setIsSidebarCollapsed(true);
+                                }}
+                                className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
+                              >
+                                <Compass size={14} className="text-[#ff791a]" />
+                                System Tour
+                              </button>
+                              <ExtensionProfileMenuItem
+                                onClick={() => {
+                                  setIsMobileProfileOpen(false);
+                                  setIsExtensionModalOpen(true);
+                                }}
+                              />
                               <button
                                 onClick={handleLogout}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 font-bold transition"
@@ -980,9 +1003,7 @@ export default function DashboardLayout() {
                               unreadCount={adminNotificationUnreadCount}
                               notifications={adminNotifications}
                               loading={isFetchingAdminNotifications}
-                              onRefresh={async () => {
-                                await fetchAdminNotifications();
-                              }}
+                              onRefresh={fetchAdminNotifications}
                               onMarkRead={handleMarkAdminNotificationRead}
                               onMarkAllRead={handleMarkAllAdminNotificationsRead}
                               onNavigate={handleAdminNotificationNavigate}
@@ -1012,6 +1033,7 @@ export default function DashboardLayout() {
                               <button
                                 onClick={() => {
                                   setIsProfileOpen(false);
+                                  setMyInfoTab("account");
                                   navigateToTab("My Info");
                                   triggerSuccess("Opened administrator account profile.");
                                   if (window.innerWidth < 768) {
@@ -1039,6 +1061,27 @@ export default function DashboardLayout() {
                                 Portal Settings
                               </button>
                               <div className="border-t border-slate-100 my-1"></div>
+                              <button
+                                onClick={() => {
+                                  setIsProfileOpen(false);
+                                  setMyInfoTab("tour");
+                                  navigateToTab("My Info");
+                                  triggerSuccess("Opened system tour guide.");
+                                  if (window.innerWidth < 768) {
+                                    setIsSidebarCollapsed(true);
+                                  }
+                                }}
+                                className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-slate-50 text-left text-xs text-slate-700 transition"
+                              >
+                                <Compass size={14} className="text-[#ff791a]" />
+                                System Tour
+                              </button>
+                              <ExtensionProfileMenuItem
+                                onClick={() => {
+                                  setIsProfileOpen(false);
+                                  setIsExtensionModalOpen(true);
+                                }}
+                              />
                               <button
                                 onClick={handleLogout}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 transition font-bold"
@@ -1416,6 +1459,12 @@ export default function DashboardLayout() {
         
                   {/* Confetti Celebration Overlay */}
                   {showConfetti && <ConfettiRain />}
+
+                  <ExtensionIntegrationModal
+                    open={isExtensionModalOpen}
+                    onClose={() => setIsExtensionModalOpen(false)}
+                    onCopied={triggerSuccess}
+                  />
                 </div>
   );
 }

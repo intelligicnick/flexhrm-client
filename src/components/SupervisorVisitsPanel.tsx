@@ -7,6 +7,7 @@ import {
   type SupervisorHistoryFilter,
 } from "../lib/supervisor-dates";
 import { SchoolVisit } from "../types";
+import { DateInput } from "./ui/DateInput";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
@@ -177,21 +178,17 @@ export default function SupervisorVisitsPanel({
 
         {datePreset === "range" && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input
-              type="date"
+            <DateInput
               value={fromDate}
               max={toDate || toIsoDate(new Date())}
               onChange={(e) => setFromDate(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-xs cursor-pointer"
               aria-label="From date"
             />
-            <input
-              type="date"
+            <DateInput
               value={toDate}
               min={fromDate}
               max={toIsoDate(new Date())}
               onChange={(e) => setToDate(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-xs cursor-pointer"
               aria-label="To date"
             />
           </div>

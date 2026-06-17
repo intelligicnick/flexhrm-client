@@ -222,3 +222,197 @@ export const formatDurationMinutes = (minutes: number): string => {
   if (remainingMinutes === 0) return `${hours} hr`;
   return `${hours} hr ${remainingMinutes} min`;
 };
+
+/** App-wide locale and timezone for calendars and displayed dates. */
+export const APP_DATE_LOCALE = "en-IN";
+export const APP_TIMEZONE = "Asia/Kolkata";
+
+/** Shared Tailwind classes for native date/time pickers across HRMS. */
+export const DATE_INPUT_CLASS =
+  "px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 " +
+  "focus:outline-none focus:border-[#ff791a] focus:ring-2 focus:ring-[#ff791a]/20 transition cursor-pointer";
+
+/** YYYY-MM-DD for HTML date inputs and API filters. */
+export function toIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/** Today's date in Asia/Kolkata as YYYY-MM-DD. */
+export function todayIsoDate(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIMEZONE,
+  }).format(date);
+}
+
+/**
+ * Parse flexible date strings (ISO, DD-MM-YYYY, DD/MM/YYYY, optional time, prefixes like "Filed -").
+ * Uses day-first (Indian) order for numeric dates.
+ */
+export function parseFlexibleDateMs(value: string): number | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const iso = Date.parse(raw);
+  if (!Number.isNaN(iso)) return iso;
+
+  const match = raw.match(
+    /(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const year = Number(match[3]);
+  const hasTime = Boolean(match[4]);
+  const hour = match[4] ? Number(match[4]) : 12;
+  const minute = match[5] ? Number(match[5]) : 0;
+  const second = match[6] ? Number(match[6]) : 0;
+  const ts = new Date(
+    year,
+    month,
+    day,
+    hasTime ? hour : 0,
+    hasTime ? minute : 0,
+    hasTime ? second : 0,
+  ).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+export function isoDateStartMs(isoDate: string): number {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+}
+
+export function isoDateEndMs(isoDate: string): number {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+}
+
+export function matchesIsoDateRange(
+  valueMs: number | null,
+  fromIso: string,
+  toIso: string,
+): boolean {
+  if (!fromIso && !toIso) return true;
+  if (valueMs === null) return false;
+
+  const fromBound = fromIso ? isoDateStartMs(fromIso) : null;
+  const toBound = toIso ? isoDateEndMs(toIso) : null;
+
+  if (fromBound !== null && toBound !== null) {
+    const lo = Math.min(fromBound, toBound);
+    const hi = Math.max(fromBound, toBound);
+    return valueMs >= lo && valueMs <= hi;
+  }
+  if (fromBound !== null) return valueMs >= fromBound;
+  if (toBound !== null) return valueMs <= toBound;
+  return true;
+}
+
+/** DD-MM-YYYY — matches tender Excel / filed-date columns. */
+export function formatDmyDate(date: Date): string {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+/** DD-MM-YYYY HH:mm:ss — tender end-date storage format. */
+export function formatDmyDateTime(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${formatDmyDate(date)} ${hours}:${minutes}:${seconds}`;
+}
+
+export function formatFiledDateStamp(date = new Date()): string {
+  return `Filed - ${formatDmyDate(date)}`;
+}
+
+/** Human-readable app date (en-IN). Pass ISO yyyy-mm-dd, epoch ms, Date, or flexible text. */
+export function formatAppDate(
+  value: string | Date | number,
+  options?: { withTime?: boolean },
+): string {
+  const withTime = options?.withTime ?? false;
+  let date: Date | null = null;
+
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === "number") {
+    date = new Date(value);
+  } else {
+    const raw = String(value).trim();
+    if (!raw) return "—";
+    const ms = parseFlexibleDateMs(raw);
+    date = ms !== null ? new Date(ms) : null;
+    if (!date || Number.isNaN(date.getTime())) return raw;
+  }
+
+  if (!date || Number.isNaN(date.getTime())) return "—";
+
+  const hasTime =
+    withTime ||
+    (typeof value === "string" && /\d{1,2}:\d{2}/.test(value));
+
+  return new Intl.DateTimeFormat(APP_DATE_LOCALE, {
+    timeZone: APP_TIMEZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    ...(hasTime
+      ? { hour: "2-digit", minute: "2-digit", hour12: true }
+      : {}),
+  }).format(date);
+}
+
+/** Label for yyyy-mm-dd picker values in filter chips and summaries. */
+export function formatIsoDateLabel(iso: string): string {
+  if (!iso) return "";
+  return formatAppDate(`${iso}T12:00:00`);
+}
+
+export function formatIsoDateRangeLabel(fromIso: string, toIso: string): string {
+  if (fromIso && toIso) {
+    return `${formatIsoDateLabel(fromIso)} – ${formatIsoDateLabel(toIso)}`;
+  }
+  if (fromIso) return `From ${formatIsoDateLabel(fromIso)}`;
+  if (toIso) return `Until ${formatIsoDateLabel(toIso)}`;
+  return "";
+}
+
+/** Display tender filed-date text with consistent formatting. */
+export function formatTenderFiledDate(value: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "—";
+  const ms = parseFlexibleDateMs(raw);
+  if (ms === null) return raw;
+  const formatted = formatAppDate(ms);
+  return /^filed\s*-/i.test(raw) ? `Filed - ${formatted}` : formatted;
+}
+
+/** Parse yyyy-mm-dd + optional HH:mm into tender end-date storage string. */
+export function composeTenderEndDate(isoDate: string, time?: string): string {
+  if (!isoDate) return "";
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const [hh = 0, mm = 0] = (time || "").split(":").map((n) => Number(n) || 0);
+  return formatDmyDateTime(new Date(y, m - 1, d, hh, mm, 0));
+}
+
+export function parseTenderEndDateToPicker(value: string): { date: string; time: string } {
+  const ms = parseFlexibleDateMs(value);
+  if (ms === null) return { date: "", time: "" };
+  const date = new Date(ms);
+  const time = value.includes(":")
+    ? `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+    : "";
+  return { date: toIsoDate(date), time };
+}
+
+export function parseTenderFiledDateToPicker(value: string): string {
+  const ms = parseFlexibleDateMs(value);
+  return ms === null ? "" : toIsoDate(new Date(ms));
+}

@@ -12,9 +12,12 @@ import {
   validateEmployee,
   normalizeSkillCategory,
   calculatePfAmounts,
+  calculateProfessionalTax,
   resolvePfCalculationMode,
-  DEFAULT_LOCATION_PT_AMOUNT,
-  parseLocationPtInput,
+  isPfEsicCompliant,
+  isProfessionalTaxApplicable,
+  isEmployeePtEnabled,
+  PROFESSIONAL_TAX_SLAB_SUMMARY,
 } from "../utils";
 import {
   applySalaryFieldChange,
@@ -35,7 +38,7 @@ interface EmployeeFormModalProps {
   basicSalaryPercent?: number;
   esicEligibilityLimit?: number;
   onLocationRegistryUpdate?: () => void;
-  onCreateLocation?: (name: string, complianceEnabled: boolean, ptAmount: number) => Promise<void>;
+  onCreateLocation?: (name: string, complianceEnabled: boolean, ptEnabled: boolean) => Promise<void>;
   onCreateRole?: (name: string) => Promise<void>;
 }
 
@@ -116,6 +119,7 @@ export default function EmployeeFormModal({
     basicSalary: 0,
     esic: "No",
     complianceEnabled: true,
+    ptEnabled: false,
     pfCalculationMode: "ceiling_15000",
     uan: "",
     aadharNo: "",
@@ -183,21 +187,25 @@ export default function EmployeeFormModal({
     const saved = localStorage.getItem("hrms_location_compliance");
     return saved ? JSON.parse(saved) : {};
   });
+  const [locationPtEnabled, setLocationPtEnabled] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem("hrms_location_pt_enabled");
+    return saved ? JSON.parse(saved) : {};
+  });
   const [newLocationCompliance, setNewLocationCompliance] = useState(true);
-  const [newLocationPtAmount, setNewLocationPtAmount] = useState(String(DEFAULT_LOCATION_PT_AMOUNT));
+  const [newLocationPtEnabled, setNewLocationPtEnabled] = useState(false);
 
   const resetQuickAddLocationForm = () => {
     setShowAddLocationInput(false);
     setNewLocationName("");
     setNewLocationCompliance(true);
-    setNewLocationPtAmount(String(DEFAULT_LOCATION_PT_AMOUNT));
+    setNewLocationPtEnabled(false);
   };
 
   const openQuickAddLocation = (prefill = "") => {
     setShowAddLocationInput(true);
     setNewLocationName(prefill);
     setNewLocationCompliance(true);
-    setNewLocationPtAmount(String(DEFAULT_LOCATION_PT_AMOUNT));
+    setNewLocationPtEnabled(false);
     setSearchFocused(false);
   };
 
@@ -205,9 +213,9 @@ export default function EmployeeFormModal({
     const val = rawName.trim();
     if (!val) return false;
 
-    const ptVal = parseLocationPtInput(newLocationPtAmount);
-    await onCreateLocation?.(val, newLocationCompliance, ptVal);
+    await onCreateLocation?.(val, newLocationCompliance, newLocationPtEnabled);
     setLocationCompliance((prev) => ({ ...prev, [val]: newLocationCompliance }));
+    setLocationPtEnabled((prev) => ({ ...prev, [val]: newLocationPtEnabled }));
 
     setLocalLocations((prev) => Array.from(new Set([...prev, val])));
     setFormData((prev) => ({ ...prev, location: val }));
@@ -239,6 +247,29 @@ export default function EmployeeFormModal({
     setNewRoleName("");
     return true;
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/locations")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (cancelled || !Array.isArray(data)) return;
+        const complianceMap: Record<string, boolean> = {};
+        const ptMap: Record<string, boolean> = {};
+        data.forEach((loc: { name?: string; complianceEnabled?: boolean; ptEnabled?: boolean; ptAmount?: number }) => {
+          if (!loc.name) return;
+          complianceMap[loc.name] = !!loc.complianceEnabled;
+          ptMap[loc.name] =
+            loc.ptEnabled !== undefined ? !!loc.ptEnabled : Number(loc.ptAmount || 0) > 0;
+        });
+        setLocationCompliance(complianceMap);
+        setLocationPtEnabled(ptMap);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load existing employee
   useEffect(() => {
@@ -1056,7 +1087,7 @@ export default function EmployeeFormModal({
                     <label className="text-xs font-bold text-slate-600 flex items-end h-10 mb-1">
                       <span>Statutory Compliance</span>
                     </label>
-                    <div className="flex flex-col gap-1.5 justify-center h-[34px]">
+                    <div className="flex flex-col gap-2 justify-center min-h-[34px]">
                       <div className="flex items-center gap-1.5">
                         <input
                           type="checkbox"
@@ -1069,16 +1100,37 @@ export default function EmployeeFormModal({
                           id="field-compliance-enabled"
                         />
                         <label htmlFor="field-compliance-enabled" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
-                          Enable PF/ESIC/PT
+                          Enable PF/ESIC
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          name="ptEnabled"
+                          checked={isEmployeePtEnabled(formData)}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, ptEnabled: e.target.checked }));
+                          }}
+                          className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
+                          id="field-pt-enabled"
+                        />
+                        <label htmlFor="field-pt-enabled" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                          Enable Professional Tax
                         </label>
                       </div>
                       {(() => {
                         const loc = formData.location || "";
-                        const isLocCompliant = loc ? !!locationCompliance[loc] : false;
+                        const isLocPfEsic = loc ? !!locationCompliance[loc] : false;
+                        const isLocPt = loc ? !!locationPtEnabled[loc] : false;
                         return (
-                          <span className={`text-[9px] font-black uppercase tracking-wider ${isLocCompliant ? "text-emerald-600" : "text-rose-500"}`}>
-                            Loc Compliance: {isLocCompliant ? "ON" : "OFF"}
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className={`text-[9px] font-black uppercase tracking-wider ${isLocPfEsic ? "text-emerald-600" : "text-rose-500"}`}>
+                              Loc PF/ESIC: {isLocPfEsic ? "ON" : "OFF"}
+                            </span>
+                            <span className={`text-[9px] font-black uppercase tracking-wider ${isLocPt ? "text-emerald-600" : "text-rose-500"}`}>
+                              Loc PT: {isLocPt ? "ON" : "OFF"}
+                            </span>
+                          </div>
                         );
                       })()}
                     </div>
@@ -1099,12 +1151,16 @@ export default function EmployeeFormModal({
                   </select>
                   {(() => {
                     const loc = formData.location || "";
-                    const isLocCompliant = loc ? !!locationCompliance[loc] : false;
-                    const isCompliant = isLocCompliant && formData.complianceEnabled !== false;
+                    const isCompliant = isPfEsicCompliant(formData, locationCompliance);
+                    const isPtEnabled = isProfessionalTaxApplicable(formData, locationPtEnabled);
                     const previewGross = Number(formData.grossSalary) || 0;
                     const { pfWage, employeePf, employerPf } = calculatePfAmounts(previewGross, {
                       mode: formData.pfCalculationMode,
                       isCompliant,
+                    });
+                    const ptPreview = calculateProfessionalTax(previewGross, {
+                      isPtEnabled,
+                      gender: formData.gender,
                     });
                     const modeLabel =
                       resolvePfCalculationMode(formData.pfCalculationMode) === "gross"
@@ -1120,13 +1176,19 @@ export default function EmployeeFormModal({
                             Employee PF (12%) ₹{employeePf.toLocaleString("en-IN")}, Employer PF (13%) ₹{employerPf.toLocaleString("en-IN")}.
                           </>
                         ) : null}
+                        {isPtEnabled && previewGross > 0 ? (
+                          <>
+                            {" "}
+                            Professional Tax (PT) ₹{ptPreview.toLocaleString("en-IN")} based on {formData.gender || "gender"} slab.
+                          </>
+                        ) : null}
                       </p>
                     );
                   })()}
                 </div>
 
                 <p className="text-[10px] text-slate-400 mt-2.5">
-                  💡 <strong>Indian Payroll Rule Check:</strong> ESIC eligibility is auto-enabled for monthly salaries of Rs. 21,000 or below. Basic Salary is mapped as 50% of gross as default. PF uses gross for the active salary month (prorated by attendance on the salary sheet).
+                  💡 <strong>Indian Payroll Rule Check:</strong> ESIC eligibility is auto-enabled for monthly salaries of Rs. 21,000 or below. Basic Salary is mapped as 50% of gross as default. PF uses gross for the active salary month (prorated by attendance on the salary sheet). PF/ESIC applies when enabled on the employee or office location. PT applies when enabled on the employee or a PT-levying office location.
                 </p>
               </div>
 
@@ -2007,27 +2069,26 @@ export default function EmployeeFormModal({
                   className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
                 />
                 <span className="text-[11px] font-bold text-slate-650 leading-snug">
-                  Enable Compliance (PF, ESIC, PT)
+                  Enable PF/ESIC compliance
                 </span>
               </label>
-              <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                <label htmlFor="inline-new-loc-pt" className="text-[11px] font-bold text-slate-650 whitespace-nowrap">
-                  Professional Tax (₹)
-                </label>
+              <label htmlFor="inline-new-loc-pt" className="flex items-start gap-2 cursor-pointer select-none">
                 <input
-                  type="number"
+                  type="checkbox"
                   id="inline-new-loc-pt"
-                  min={0}
-                  step={1}
-                  value={newLocationPtAmount}
-                  onChange={(e) => setNewLocationPtAmount(e.target.value)}
-                  className="w-24 rounded-lg border border-slate-250 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-800 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                  title="PT deducted when monthly gross exceeds ₹10,000"
+                  checked={newLocationPtEnabled}
+                  onChange={(e) => setNewLocationPtEnabled(e.target.checked)}
+                  className="mt-0.5 w-3.5 h-3.5 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer shrink-0"
                 />
+                <span className="text-[11px] font-bold text-slate-650 leading-snug">
+                  Enable Professional Tax (state-specific)
+                </span>
+              </label>
+              <div className="pt-2 border-t border-slate-200 text-[10px] text-slate-500 leading-relaxed space-y-1.5">
+                <p className="font-bold text-slate-600">Professional Tax slabs</p>
+                <p><span className="font-semibold text-slate-600">Male:</span> {PROFESSIONAL_TAX_SLAB_SUMMARY.male.map((row) => `${row.range} → ${row.amount}`).join("; ")}</p>
+                <p><span className="font-semibold text-slate-600">Female:</span> {PROFESSIONAL_TAX_SLAB_SUMMARY.female.map((row) => `${row.range} → ${row.amount}`).join("; ")}</p>
               </div>
-              <p className="text-[10px] text-slate-400 leading-snug">
-                PT applies per location when gross salary is above ₹10,000 for the month.
-              </p>
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-2">

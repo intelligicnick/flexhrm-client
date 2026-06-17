@@ -136,4 +136,26 @@ describe("applySalaryFieldChange", () => {
     expect(values.dailyWage).toBe(1000);
     expect(values.basicSalary).toBe(12000);
   });
+
+  it("preserves manual ESIC selection when salary fields are recalculated", () => {
+    let anchor: "gross" | "daily" | "basic" | null = null;
+    let values = toSalaryFieldValues({
+      ...base(),
+      grossSalary: 15000,
+      basicSalary: 7500,
+      esic: "No",
+    });
+    anchor = "gross";
+
+    ({ values, anchor } = applySalaryFieldChange(
+      values,
+      anchor,
+      "workingDaysType",
+      "22 Days (Sat/Sun Off)",
+      50,
+      21000,
+    ));
+
+    expect(values.esic).toBe("No");
+  });
 });

@@ -14,8 +14,17 @@ import {
 import SupervisorDateFilter from "./SupervisorDateFilter";
 import { SupervisorEmptyState, SupervisorLoadingScreen } from "./SupervisorUI";
 
+import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
+
+function photoSrc(photo: SchoolVisit["photos"][number]) {
+  return photo.photoDataBase64.startsWith("data:")
+    ? photo.photoDataBase64
+    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`;
+}
+
 function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string) => string }) {
   const [expanded, setExpanded] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const { t } = useSupervisorI18n();
 
   const statusColors = {
@@ -26,6 +35,9 @@ function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      {lightboxSrc && (
+        <SupervisorPhotoLightbox src={lightboxSrc} alt="" onClose={() => setLightboxSrc(null)} />
+      )}
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -33,7 +45,7 @@ function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="font-bold text-slate-900 text-sm truncate">{visit.schoolName}</p>
+            <p className="font-bold text-slate-900 text-sm break-words">{visit.schoolName}</p>
             <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
               <MapPin size={10} className="shrink-0" />
               {visit.block}
@@ -56,16 +68,21 @@ function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string
         {visit.photos?.length > 0 && (
           <div className="flex gap-2 mt-3">
             {visit.photos.slice(0, 3).map((photo) => (
-              <img
+              <button
                 key={photo.id}
-                src={
-                  photo.photoDataBase64.startsWith("data:")
-                    ? photo.photoDataBase64
-                    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`
-                }
-                alt=""
-                className="w-14 h-14 object-cover rounded-xl border border-slate-200"
-              />
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxSrc(photoSrc(photo));
+                }}
+                className="cursor-pointer"
+              >
+                <img
+                  src={photoSrc(photo)}
+                  alt=""
+                  className="w-14 h-14 object-cover rounded-xl border border-slate-200"
+                />
+              </button>
             ))}
             {visit.photos.length > 3 && (
               <div className="w-14 h-14 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
@@ -104,16 +121,18 @@ function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string
           {visit.photos?.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
               {visit.photos.map((photo) => (
-                <img
+                <button
                   key={photo.id}
-                  src={
-                    photo.photoDataBase64.startsWith("data:")
-                      ? photo.photoDataBase64
-                      : `data:${photo.mimeType};base64,${photo.photoDataBase64}`
-                  }
-                  alt=""
-                  className="w-full aspect-square object-cover rounded-xl border border-slate-200"
-                />
+                  type="button"
+                  onClick={() => setLightboxSrc(photoSrc(photo))}
+                  className="cursor-pointer"
+                >
+                  <img
+                    src={photoSrc(photo)}
+                    alt=""
+                    className="w-full aspect-square object-cover rounded-xl border border-slate-200"
+                  />
+                </button>
               ))}
             </div>
           )}

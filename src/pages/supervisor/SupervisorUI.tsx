@@ -22,7 +22,7 @@ export function SupervisorPageHeader({
 }
 
 export function SupervisorStatGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-3 gap-2">{children}</div>;
+  return <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{children}</div>;
 }
 
 export function SupervisorStatCard({
@@ -46,7 +46,7 @@ export function SupervisorStatCard({
     <div className={`rounded-2xl border p-3 ${accents[accent]}`}>
       <Icon size={16} className="mb-1.5 opacity-80" />
       <p className="text-lg font-black leading-none text-slate-900">{value}</p>
-      <p className="text-[9px] font-bold uppercase tracking-wide mt-1 opacity-70">{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide mt-1 opacity-80">{label}</p>
     </div>
   );
 }
@@ -116,7 +116,7 @@ export function SupervisorQuickAction({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl text-[10px] font-bold transition cursor-pointer ${
+      className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl text-[11px] font-bold transition cursor-pointer ${
         variant === "primary"
           ? "bg-[#ff791a] text-white shadow-md shadow-orange-200/60"
           : "bg-white border border-slate-200 text-slate-600 hover:border-orange-200 hover:bg-orange-50/50"
