@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Loader2, Puzzle, RefreshCw, X } from "lucide-react";
 import { parseApiError } from "../api";
+import { getApiBase } from "../env";
 
 const GEM_SELLER_BIDS_URL = "https://bidplus.gem.gov.in/seller-bids";
 
@@ -24,12 +25,17 @@ function formatCountdown(expiresAt: string): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function extensionApiUrl(): string {
+  return getApiBase() || window.location.origin;
+}
+
 export function ExtensionIntegrationModal({ open, onClose, onCopied }: ExtensionIntegrationModalProps) {
   const [code, setCode] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState("");
+  const apiUrl = extensionApiUrl();
   const onCopiedRef = useRef(onCopied);
   onCopiedRef.current = onCopied;
 
@@ -44,7 +50,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ flexhrmUrl: window.location.origin }),
+        body: JSON.stringify({ flexhrmUrl: extensionApiUrl() }),
       });
       if (!response.ok) {
         throw await parseApiError(response, "Could not generate connection code.");
@@ -90,6 +96,15 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
     }
   };
 
+  const copyApiUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(apiUrl);
+      onCopiedRef.current?.("API URL copied to clipboard.");
+    } catch {
+      onCopiedRef.current?.("Could not copy — select and copy the API URL manually.");
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -124,7 +139,10 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
         <div className="px-5 py-4 space-y-4 text-sm text-slate-600">
           <ol className="list-decimal pl-4 space-y-1.5 text-xs">
             <li>Install the FlexHRM Smart Capture extension in Chrome.</li>
-            <li>Open extension Settings and enter your connection code below.</li>
+            <li>
+              Open extension Settings, paste the <strong>API URL</strong> below (not the login page URL),
+              then enter your connection code.
+            </li>
             <li>
               Open{" "}
               <a
@@ -138,6 +156,25 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
               to capture tenders.
             </li>
           </ol>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Extension API URL
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex-1 rounded-lg bg-white border border-slate-200 px-3 py-2 font-mono text-[11px] text-slate-800 break-all">
+                {apiUrl}
+              </div>
+              <button
+                type="button"
+                onClick={() => void copyApiUrl()}
+                className="shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition"
+                title="Copy API URL"
+              >
+                <Copy size={16} className="text-slate-600" />
+              </button>
+            </div>
+          </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
