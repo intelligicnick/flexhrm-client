@@ -345,13 +345,20 @@ export interface Tender {
   id: string;
   bidNo: string;
   category: string;
+  ministry: string;
+  organisation: string;
+  consigneeOfficer: string;
+  /** @deprecated Use organisation */
   department: string;
+  /** @deprecated Use consigneeOfficer */
   officerName: string;
   address: string;
   tenderType: TenderType;
   quantity: number;
   rate: string;
+  additionalRequirements: string;
   endDate: string;
+  startDate: string;
   filedDate: string;
   preBidAt: string;
   preBidVenue: string;

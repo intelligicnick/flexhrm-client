@@ -79,13 +79,18 @@ const STATUS_ORDER: TenderStatus[] = [
 const EMPTY_FORM: CreateTenderInput = {
   bidNo: "",
   category: "",
+  ministry: "",
+  organisation: "",
+  consigneeOfficer: "",
   department: "",
   officerName: "",
   address: "",
   tenderType: "manpower",
   quantity: 0,
   rate: "",
+  additionalRequirements: "",
   endDate: "",
+  startDate: "",
   filedDate: "",
   preBidAt: "",
   preBidVenue: "",
@@ -123,8 +128,25 @@ function isNearNotParticipated(tender: Tender): boolean {
   return ts >= now && ts - now <= NEAR_PARTICIPATION_MS;
 }
 
+function tenderOrganisation(tender: Tender): string {
+  return tender.organisation?.trim() || tender.department?.trim() || "";
+}
+
+function tenderConsignee(tender: Tender): string {
+  return tender.consigneeOfficer?.trim() || tender.officerName?.trim() || "";
+}
+
 function tenderMatchesSearch(tender: Tender, term: string): boolean {
-  return [tender.bidNo, tender.category, tender.department, tender.officerName, tender.address, tender.outcome]
+  return [
+    tender.bidNo,
+    tender.category,
+    tender.ministry,
+    tenderOrganisation(tender),
+    tenderConsignee(tender),
+    tender.address,
+    tender.additionalRequirements,
+    tender.outcome,
+  ]
     .join(" ")
     .toLowerCase()
     .includes(term);
@@ -280,14 +302,14 @@ function truncatePreview(
 
 function TenderExpandedDetails({ tender }: { tender: Tender }) {
   const fields = [
-    { label: "Rate & additional requirements", value: tender.rate },
+    { label: "Additional requirements", value: tender.additionalRequirements },
     { label: "Pre-bid date & time", value: formatPreBidLabel(tender) },
     { label: "Pre-bid venue", value: formatPreBidVenueLabel(tender) },
-    { label: "Description", value: tender.description },
-    { label: "Address", value: tender.address },
+    { label: "Ministry / State", value: tender.ministry },
+    { label: "Organisation", value: tenderOrganisation(tender) },
     { label: "Department", value: tender.department },
-    { label: "Officer", value: tender.officerName },
-    { label: "Outcome", value: tender.outcome },
+    { label: "Consignee officer", value: tenderConsignee(tender) },
+    { label: "Address", value: tender.address },
     { label: "Notes", value: tender.notes },
   ].filter((field) => field.value && field.value !== "—");
 
@@ -330,6 +352,13 @@ function normalizeTender(row: Tender): Tender {
   if (status === "not_evaluated") status = "filed";
   return {
     ...row,
+    ministry: row.ministry || "",
+    organisation: row.organisation || row.department || "",
+    consigneeOfficer: row.consigneeOfficer || row.officerName || "",
+    department: row.organisation || row.department || "",
+    officerName: row.consigneeOfficer || row.officerName || "",
+    additionalRequirements: row.additionalRequirements || "",
+    startDate: row.startDate || "",
     status,
     preBidAt,
     preBidVenue,
@@ -410,13 +439,18 @@ async function parseTendersWorkbook(
       items.push({
         bidNo: resolvedBidNo,
         category: cellStr(row.getCell(2).value),
+        ministry: "",
+        organisation: cellStr(row.getCell(3).value),
+        consigneeOfficer: cellStr(row.getCell(4).value),
         department: cellStr(row.getCell(3).value),
         officerName: cellStr(row.getCell(4).value),
         address: cellStr(row.getCell(5).value),
         tenderType,
         quantity: parseQuantity(row.getCell(6).value),
         rate: cellStr(row.getCell(7).value),
+        additionalRequirements: "",
         endDate: cellStr(row.getCell(8).value),
+        startDate: "",
         filedDate: filedDateRaw,
         preBidAt: preBid.preBidAt,
         noPreBid: preBid.noPreBid,
@@ -480,6 +514,7 @@ export default function TendersPanel({
   const [dateTo, setDateTo] = useState("");
   const [endDateIso, setEndDateIso] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [startDateIso, setStartDateIso] = useState("");
   const [filedDateIso, setFiledDateIso] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<CreateTenderInput>(EMPTY_FORM);
@@ -553,6 +588,7 @@ export default function TendersPanel({
     setForm(EMPTY_FORM);
     setEndDateIso("");
     setEndTime("");
+    setStartDateIso("");
     setFiledDateIso("");
     setModalOpen(true);
   };
@@ -567,8 +603,13 @@ export default function TendersPanel({
       const payload: CreateTenderInput = {
         ...form,
         status: "not_filed",
-        filedDate: "",
+        filedDate: filedDateIso,
+        startDate: startDateIso,
         endDate: composeTenderEndDate(endDateIso, endTime),
+        organisation: form.organisation || form.department,
+        consigneeOfficer: form.consigneeOfficer || form.officerName,
+        department: form.organisation || form.department,
+        officerName: form.consigneeOfficer || form.officerName,
       };
       await onCreate(payload);
       setModalOpen(false);
@@ -813,34 +854,33 @@ export default function TendersPanel({
       ) : (
         <div className="flex-1 min-w-0 min-h-0 px-5 pb-5">
           <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-20rem)] border border-slate-200 rounded-xl shadow-xs scrollbar-thin">
-            <table className="w-full text-[11px] min-w-[1520px] table-fixed">
+            <table className="w-full text-[11px] min-w-[1680px] table-fixed">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-slate-800 text-left text-[10px] uppercase tracking-wider text-slate-300">
                   <th className="w-8 px-1 py-2 font-bold" aria-label="Expand" />
                   <th className="w-[130px] px-2 py-2 font-bold">Bid No.</th>
-                  <th className="w-[100px] min-w-[100px] px-2 py-2 font-bold">Type</th>
+                  <th className="w-[88px] min-w-[88px] px-2 py-2 font-bold">Type</th>
                   <th className="w-[150px] px-2 py-2 font-bold">Category</th>
-                  <th className="w-[130px] px-2 py-2 font-bold">Description</th>
-                  <th className="w-[110px] px-2 py-2 font-bold">Department</th>
+                  <th className="w-[100px] px-2 py-2 font-bold">Ministry</th>
+                  <th className="w-[100px] px-2 py-2 font-bold">Organisation</th>
+                  <th className="w-[100px] px-2 py-2 font-bold">Department</th>
                   <th className="w-[100px] px-2 py-2 font-bold">Address</th>
-                  <th className="w-[90px] px-2 py-2 font-bold">Officer</th>
+                  <th className="w-[88px] px-2 py-2 font-bold">Officer</th>
                   <th className="w-[44px] px-2 py-2 font-bold text-right">Qty</th>
-                  <th className="w-[120px] px-2 py-2 font-bold">Rate</th>
+                  <th className="w-[120px] px-2 py-2 font-bold">Add. Req.</th>
                   <th className="w-[108px] px-2 py-2 font-bold">End Date</th>
-                  <th className="w-[92px] px-2 py-2 font-bold">Filed Date</th>
+                  <th className="w-[88px] px-2 py-2 font-bold">Filed Date</th>
                   <th className="w-[88px] px-2 py-2 font-bold">Entry Date</th>
                   <th className="w-[108px] px-2 py-2 font-bold">Pre-Bid</th>
                   <th className="w-[120px] px-2 py-2 font-bold">Pre-Bid Venue</th>
                   <th className="w-[132px] px-2 py-2 font-bold">Status</th>
-                  <th className="w-[100px] px-2 py-2 font-bold">Stage</th>
-                  <th className="w-[110px] px-2 py-2 font-bold">Outcome</th>
                   {!readOnly && <th className="w-10 px-1 py-2 font-bold" />}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((tender, idx) => {
                   const deadline = deadlineMeta(tender.endDate);
-                  const ratePreview = truncatePreview(tender.rate, 34);
+                  const addReqPreview = truncatePreview(tender.additionalRequirements, 34);
                   const venuePreview = truncatePreview(formatPreBidVenueLabel(tender), 34);
                   const isExpanded = expandedTenderId === tender.id;
                   const deleted = isTenderDeleted(tender);
@@ -896,12 +936,17 @@ export default function TendersPanel({
                         </p>
                       </td>
                       <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-600 truncate" title={tender.description}>
-                          {tender.description || "—"}
+                        <p className="text-slate-600 truncate" title={tender.ministry}>
+                          {tender.ministry || "—"}
                         </p>
                       </td>
                       <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-700 truncate" title={tender.department}>
+                        <p className="text-slate-700 truncate" title={tender.organisation || "—"}>
+                          {tender.organisation || "—"}
+                        </p>
+                      </td>
+                      <td className="px-2 py-1 align-middle">
+                        <p className="text-slate-700 truncate" title={tender.department || "—"}>
                           {tender.department || "—"}
                         </p>
                       </td>
@@ -911,8 +956,8 @@ export default function TendersPanel({
                         </p>
                       </td>
                       <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-600 truncate" title={tender.officerName}>
-                          {tender.officerName || "—"}
+                        <p className="text-slate-600 truncate" title={tenderConsignee(tender)}>
+                          {tenderConsignee(tender) || "—"}
                         </p>
                       </td>
                       <td className="px-2 py-1 align-middle text-right tabular-nums font-semibold text-slate-800">
@@ -922,10 +967,10 @@ export default function TendersPanel({
                         <button
                           type="button"
                           onClick={() => toggleExpandedRow(tender.id)}
-                          className={`text-left w-full truncate ${ratePreview.truncated ? "text-orange-700 hover:underline cursor-pointer" : "text-slate-600 cursor-pointer"}`}
-                          title={tender.rate || "—"}
+                          className={`text-left w-full truncate ${addReqPreview.truncated ? "text-orange-700 hover:underline cursor-pointer" : "text-slate-600 cursor-pointer"}`}
+                          title={tender.additionalRequirements || "—"}
                         >
-                          {ratePreview.preview}
+                          {addReqPreview.preview}
                         </button>
                       </td>
                       <td className={`px-2 py-1 align-middle whitespace-nowrap ${deadline.className}`}>
@@ -997,16 +1042,6 @@ export default function TendersPanel({
                             />
                           </div>
                         )}
-                      </td>
-                      <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-500 truncate" title={tender.gemCurrentStage}>
-                          {tender.gemCurrentStage || "—"}
-                        </p>
-                      </td>
-                      <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-500 truncate" title={tender.outcome}>
-                          {tender.outcome || "—"}
-                        </p>
                       </td>
                       {!readOnly && (
                         <td className="px-1 py-1 align-middle">
@@ -1090,7 +1125,7 @@ export default function TendersPanel({
                 />
               </label>
               <label className="sm:col-span-2">
-                <span className="font-bold text-slate-600 block mb-1">Category</span>
+                <span className="font-bold text-slate-600 block mb-1">Item Category</span>
                 <textarea
                   value={form.category}
                   onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
@@ -1099,18 +1134,38 @@ export default function TendersPanel({
                 />
               </label>
               <label>
-                <span className="font-bold text-slate-600 block mb-1">Department</span>
+                <span className="font-bold text-slate-600 block mb-1">Ministry / State</span>
                 <input
-                  value={form.department}
-                  onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))}
+                  value={form.ministry}
+                  onChange={(e) => setForm((f) => ({ ...f, ministry: e.target.value }))}
                   className="w-full border border-slate-200 rounded-lg px-2 py-1.5"
                 />
               </label>
               <label>
-                <span className="font-bold text-slate-600 block mb-1">Officer Name</span>
+                <span className="font-bold text-slate-600 block mb-1">Organisation</span>
                 <input
-                  value={form.officerName}
-                  onChange={(e) => setForm((f) => ({ ...f, officerName: e.target.value }))}
+                  value={form.organisation}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      organisation: e.target.value,
+                      department: e.target.value,
+                    }))
+                  }
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5"
+                />
+              </label>
+              <label>
+                <span className="font-bold text-slate-600 block mb-1">Consignee Officer</span>
+                <input
+                  value={form.consigneeOfficer}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      consigneeOfficer: e.target.value,
+                      officerName: e.target.value,
+                    }))
+                  }
                   className="w-full border border-slate-200 rounded-lg px-2 py-1.5"
                 />
               </label>
@@ -1124,29 +1179,43 @@ export default function TendersPanel({
                 />
               </label>
               <label className="sm:col-span-2">
-                <span className="font-bold text-slate-600 block mb-1">Rate</span>
-                <textarea
+                <span className="font-bold text-slate-600 block mb-1">Estimated Bid Value</span>
+                <input
                   value={form.rate}
                   onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5"
+                  placeholder="Rs. 5,00,00,000"
+                />
+              </label>
+              <label className="sm:col-span-2">
+                <span className="font-bold text-slate-600 block mb-1">Additional Requirements</span>
+                <textarea
+                  value={form.additionalRequirements}
+                  onChange={(e) => setForm((f) => ({ ...f, additionalRequirements: e.target.value }))}
                   rows={5}
                   className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm whitespace-pre-line"
-                  placeholder="Rs. 5,00,00,000&#10;Basic Pay: 1008"
+                  placeholder={"Tenure (months): 12\nBasic Pay: 781\nWorking days/month: 26"}
                 />
               </label>
               <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <DateInput
-                  label="End Date"
+                  label="Bid End Date"
                   value={endDateIso}
                   onChange={(e) => setEndDateIso(e.target.value)}
                 />
                 <TimeInput
-                  label="End Time (optional)"
+                  label="Bid End Time (optional)"
                   value={endTime}
                   onChange={(e) => setEndTime(e.target.value)}
                 />
               </div>
               <DateInput
-                label="Filed Date"
+                label="Bid Start Date"
+                value={startDateIso}
+                onChange={(e) => setStartDateIso(e.target.value)}
+              />
+              <DateInput
+                label="Participation Filed"
                 value={filedDateIso}
                 onChange={(e) => setFiledDateIso(e.target.value)}
               />
