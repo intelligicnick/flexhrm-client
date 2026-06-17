@@ -301,6 +301,9 @@ export function useHRMSApp() {
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSendingResetCode, setIsSendingResetCode] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   // Admin module invitation states
   const [adminsList, setAdminsList] = useState<any[]>([]);
@@ -4400,6 +4403,7 @@ export function useHRMSApp() {
       return;
     }
     try {
+      setIsLoggingIn(true);
       setLoginError(null);
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -4424,6 +4428,8 @@ export function useHRMSApp() {
       // Permissions loaded via /api/auth/me effect when isLoggedIn becomes true
     } catch (err: any) {
       setLoginError(err.message);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -4435,6 +4441,7 @@ export function useHRMSApp() {
       return;
     }
     try {
+      setIsSendingResetCode(true);
       setForgotError(null);
       setForgotMessage(null);
       setIssuedResetToken(null);
@@ -4462,6 +4469,8 @@ export function useHRMSApp() {
       }
     } catch (err: any) {
       setForgotError(err.message);
+    } finally {
+      setIsSendingResetCode(false);
     }
   };
 
@@ -4489,6 +4498,7 @@ export function useHRMSApp() {
     }
 
     try {
+      setIsUpdatingPassword(true);
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4516,6 +4526,8 @@ export function useHRMSApp() {
       }, 2500);
     } catch (err: any) {
       setResetError(err.message);
+    } finally {
+      setIsUpdatingPassword(false);
     }
   };
 
@@ -6906,6 +6918,9 @@ export function useHRMSApp() {
     resetConfirmPassword,
     resetError,
     resetSuccess,
+    isLoggingIn,
+    isSendingResetCode,
+    isUpdatingPassword,
     adminsList,
     inviteUsername,
     invitePassword,

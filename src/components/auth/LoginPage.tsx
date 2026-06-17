@@ -31,7 +31,19 @@ export default function LoginPage() {
     setResetConfirmPassword,
     handleResetPasswordSubmit,
     setLoginView,
+    isLoggingIn,
+    isSendingResetCode,
+    isUpdatingPassword,
   } = useHRMS();
+
+  const primaryCtaClass = (busy: boolean) =>
+    [
+      "w-full py-2.5 font-bold rounded-lg text-xs shadow-md transition flex items-center justify-center gap-1.5",
+      busy
+        ? "bg-[#d45a0a] text-white shadow-orange-500/10 cursor-wait"
+        : "bg-[#ff791a] hover:bg-[#e4640c] active:bg-[#d45a0a] text-white shadow-orange-500/20 active:scale-[0.98] cursor-pointer",
+      "disabled:opacity-80 disabled:cursor-not-allowed",
+    ].join(" ");
 
   return (
               <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden" id="login-layout">
@@ -115,10 +127,11 @@ export default function LoginPage() {
     
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      className={primaryCtaClass(isLoggingIn)}
                       id="login-submit-button"
+                      disabled={isLoggingIn}
                     >
-                      Sign In
+                      {isLoggingIn ? "Logging in..." : "Sign In"}
                     </button>
                   </form>
                   )}
@@ -153,9 +166,10 @@ export default function LoginPage() {
     
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition cursor-pointer"
+                      className={primaryCtaClass(isSendingResetCode)}
+                      disabled={isSendingResetCode}
                     >
-                      Send Reset Code
+                      {isSendingResetCode ? "Sending..." : "Send Reset Code"}
                     </button>
     
                     <button
@@ -244,9 +258,10 @@ export default function LoginPage() {
     
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md shadow-orange-500/20 active:scale-98 transition cursor-pointer"
+                      className={primaryCtaClass(isUpdatingPassword)}
+                      disabled={isUpdatingPassword}
                     >
-                      Update Password
+                      {isUpdatingPassword ? "Updating..." : "Update Password"}
                     </button>
     
                     <button

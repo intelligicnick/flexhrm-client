@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Loader2, Puzzle, RefreshCw, X } from "lucide-react";
 import { parseApiError } from "../api";
 
@@ -30,8 +30,10 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState("");
+  const onCopiedRef = useRef(onCopied);
+  onCopiedRef.current = onCopied;
 
-  const generateCode = useCallback(async () => {
+  const generateCode = useCallback(async (notify = false) => {
     setLoading(true);
     setError("");
     try {
@@ -50,16 +52,23 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
       const data = (await response.json()) as ConnectionCodeResponse;
       setCode(data.code);
       setExpiresAt(data.expiresAt);
-      onCopied?.("Extension connection code generated.");
+      if (notify) {
+        onCopiedRef.current?.("Extension connection code generated.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate connection code.");
     } finally {
       setLoading(false);
     }
-  }, [onCopied]);
+  }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCode("");
+      setExpiresAt("");
+      setError("");
+      return;
+    }
     void generateCode();
   }, [open, generateCode]);
 
@@ -75,9 +84,9 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
     if (!code) return;
     try {
       await navigator.clipboard.writeText(code);
-      onCopied?.("Connection code copied to clipboard.");
+      onCopiedRef.current?.("Connection code copied to clipboard.");
     } catch {
-      onCopied?.("Could not copy — select and copy the code manually.");
+      onCopiedRef.current?.("Could not copy — select and copy the code manually.");
     }
   };
 
@@ -156,7 +165,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
               </button>
               <button
                 type="button"
-                onClick={() => void generateCode()}
+                onClick={() => void generateCode(true)}
                 disabled={loading}
                 className="shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition"
                 title="Generate new code"
