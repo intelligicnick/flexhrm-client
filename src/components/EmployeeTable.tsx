@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, LogOut, X } from "lucide-react";
+import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, LogOut, X, Briefcase } from "lucide-react";
 import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
 import EmployeeViewModal from "./EmployeeViewModal";
@@ -20,6 +20,8 @@ interface EmployeeTableProps {
   onMarkExit?: (employee: Employee, exitDate: string, exitReason: string) => Promise<boolean>;
   onExportSelected: (type: "csv" | "excel" | "pdf", ids: string[]) => void;
   readOnly?: boolean;
+  roleFilter?: string;
+  onRoleFilterChange?: (role: string) => void;
 }
 
 type ViewMode = "all" | "identity" | "salary" | "nominee";
@@ -50,9 +52,14 @@ export default function EmployeeTable({
   onMarkExit,
   onExportSelected,
   readOnly = false,
+  roleFilter: roleFilterProp,
+  onRoleFilterChange,
 }: EmployeeTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
+  const [localRoleFilter, setLocalRoleFilter] = useState("");
+  const roleFilter = onRoleFilterChange !== undefined ? (roleFilterProp ?? "") : localRoleFilter;
+  const setRoleFilter = onRoleFilterChange ?? setLocalRoleFilter;
   const [esicFilter, setEsicFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<"active" | "exited" | "all">("active");
   const [viewMode, setViewMode] = useState<ViewMode>("all");
@@ -70,6 +77,11 @@ export default function EmployeeTable({
   const locations = useMemo(() => {
     const locSet = new Set(employees.map((e) => e.location).filter(Boolean));
     return Array.from(locSet);
+  }, [employees]);
+
+  const roles = useMemo(() => {
+    const roleSet = new Set(employees.map((e) => e.role).filter(Boolean));
+    return Array.from(roleSet).sort((a, b) => a.localeCompare(b));
   }, [employees]);
 
   // Handle individual row select
@@ -138,6 +150,11 @@ export default function EmployeeTable({
       result = result.filter((e) => e.location === locationFilter);
     }
 
+    // Role Filter
+    if (roleFilter) {
+      result = result.filter((e) => (e.role || "").toLowerCase() === roleFilter.toLowerCase());
+    }
+
     // ESIC Filter
     if (esicFilter) {
       result = result.filter((e) => e.esic?.toLowerCase() === esicFilter.toLowerCase());
@@ -158,7 +175,7 @@ export default function EmployeeTable({
     });
 
     return result;
-  }, [employees, searchTerm, locationFilter, esicFilter, statusFilter, sortField, sortAsc]);
+  }, [employees, searchTerm, locationFilter, roleFilter, esicFilter, statusFilter, sortField, sortAsc]);
 
   // Handle select-all checkbox
   const isAllSelected = useMemo(() => {
@@ -190,6 +207,7 @@ export default function EmployeeTable({
   const clearFilters = () => {
     setSearchTerm("");
     setLocationFilter("");
+    setRoleFilter("");
     setEsicFilter("");
     setStatusFilter("active");
   };
@@ -246,6 +264,24 @@ export default function EmployeeTable({
               </select>
             </div>
 
+            {/* Role filter */}
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600">
+              <Briefcase size={16} className="text-slate-400 mr-1 shrink-0" />
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="py-2 pr-4 bg-transparent border-0 text-xs text-slate-700 focus:ring-0 focus:outline-none cursor-pointer max-w-[140px]"
+                id="role-filter-dd"
+              >
+                <option value="">All Job Roles</option>
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* ESIC filter */}
             <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600">
               <BadgePercent size={16} className="text-slate-400 mr-1 shrink-0" />
@@ -261,7 +297,7 @@ export default function EmployeeTable({
               </select>
             </div>
 
-            {(searchTerm || locationFilter || esicFilter || statusFilter !== "active") && (
+            {(searchTerm || locationFilter || roleFilter || esicFilter || statusFilter !== "active") && (
               <button
                 onClick={clearFilters}
                 className="px-3 py-2 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition font-semibold cursor-pointer"

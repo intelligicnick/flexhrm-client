@@ -45,16 +45,16 @@ describe("getEffectiveAttendanceStatus", () => {
     ).toBe("WO");
   });
 
-  it("returns WO on weekly off even when present is stored", () => {
+  it("returns present when explicitly marked on a weekly off day", () => {
     expect(
       getEffectiveAttendanceStatus("26 Days (Sun Off)", "June 2026", 7, "P"),
-    ).toBe("WO");
+    ).toBe("P");
   });
 
-  it("returns WO on weekly off even when absent is stored", () => {
+  it("returns absent when explicitly marked on a weekly off day", () => {
     expect(
       getEffectiveAttendanceStatus("26 Days (Sun Off)", "June 2026", 7, "A"),
-    ).toBe("WO");
+    ).toBe("A");
   });
 });
 
@@ -104,7 +104,19 @@ describe("getBulkAttendanceDisabledDays", () => {
     ).toEqual([1, 2, 3, 7, 8]);
   });
 
-  it("does not count weekly off days as present or absent", () => {
+  it("does not count unmarked weekly off days as present or absent", () => {
+    const { presents, absents } = countMonthAttendance(
+      { 8: "A", 9: "P" },
+      10,
+      () => false,
+      { workingDaysType: "26 Days (Sun Off)", monthStr: "June 2026" },
+    );
+
+    expect(presents).toBe(1);
+    expect(absents).toBe(1);
+  });
+
+  it("counts present when a weekly off day is explicitly marked", () => {
     const { presents, absents } = countMonthAttendance(
       { 7: "P", 8: "A", 9: "P" },
       10,
@@ -112,7 +124,7 @@ describe("getBulkAttendanceDisabledDays", () => {
       { workingDaysType: "26 Days (Sun Off)", monthStr: "June 2026" },
     );
 
-    expect(presents).toBe(1);
+    expect(presents).toBe(2);
     expect(absents).toBe(1);
   });
 });

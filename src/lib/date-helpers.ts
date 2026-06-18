@@ -229,7 +229,7 @@ export const APP_TIMEZONE = "Asia/Kolkata";
 
 /** Shared Tailwind classes for native date/time pickers across HRMS. */
 export const DATE_INPUT_CLASS =
-  "px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 " +
+  "px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 " +
   "focus:outline-none focus:border-[#ff791a] focus:ring-2 focus:ring-[#ff791a]/20 transition cursor-pointer";
 
 /** YYYY-MM-DD for HTML date inputs and API filters. */
@@ -410,6 +410,20 @@ export function parseTenderEndDateToPicker(value: string): { date: string; time:
     ? `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
     : "";
   return { date: toIsoDate(date), time };
+}
+
+/** Parse tender end-date storage string into datetime-local input value (yyyy-mm-ddTHH:mm). */
+export function parseTenderEndDateToDateTimeLocal(value: string): string {
+  const { date, time } = parseTenderEndDateToPicker(value);
+  if (!date) return "";
+  return `${date}T${time || "00:00"}`;
+}
+
+/** Compose tender end-date storage string from datetime-local input value. */
+export function composeTenderEndDateFromDateTimeLocal(value: string): string {
+  if (!value) return "";
+  const [date, time = ""] = value.split("T");
+  return composeTenderEndDate(date, time.slice(0, 5));
 }
 
 export function parseTenderFiledDateToPicker(value: string): string {

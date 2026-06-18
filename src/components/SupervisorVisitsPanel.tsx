@@ -1,5 +1,16 @@
 import React, { useMemo, useState } from "react";
-import { Camera, Check, Search, X, MapPin } from "lucide-react";
+import {
+  Camera,
+  Check,
+  CheckSquare,
+  LayoutGrid,
+  List,
+  Loader2,
+  Search,
+  Square,
+  X,
+  MapPin,
+} from "lucide-react";
 import {
   resolveHistoryFilterBounds,
   toIsoDate,
@@ -8,14 +19,17 @@ import {
 } from "../lib/supervisor-dates";
 import { SchoolVisit } from "../types";
 import { DateInput } from "./ui/DateInput";
+import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
   onUpdateStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
+  onBulkUpdateStatus?: (ids: string[], status: "approved" | "rejected") => Promise<boolean>;
   readOnly?: boolean;
 }
 
 type DatePreset = "all" | "day" | "week" | "month" | "range";
+type ViewMode = "list" | "tiles";
 
 function buildDateFilter(preset: DatePreset, fromDate: string, toDate: string): SupervisorHistoryFilter | null {
   const today = toIsoDate(new Date());
@@ -39,9 +53,109 @@ function buildDateFilter(preset: DatePreset, fromDate: string, toDate: string): 
   };
 }
 
+function statusBadgeClass(status: SchoolVisit["status"]) {
+  if (status === "approved") return "bg-emerald-100 text-emerald-700";
+  if (status === "rejected") return "bg-red-100 text-red-700";
+  return "bg-amber-100 text-amber-700";
+}
+
+function VisitTypeBadge({ visitType }: { visitType?: SchoolVisit["visitType"] }) {
+  return (
+    <span
+      className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+        visitType === "commitment" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"
+      }`}
+    >
+      {visitType === "commitment" ? "Commitment" : "Ad-hoc"}
+    </span>
+  );
+}
+
+interface VisitDetailsProps {
+  visit: SchoolVisit;
+  readOnly: boolean;
+  onUpdateStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
+  onViewPhoto: (visit: SchoolVisit, photoIndex: number) => void;
+}
+
+function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDetailsProps) {
+  return (
+    <div className="p-3 space-y-3 text-xs">
+      {visit.notes && <p className="text-slate-600">{visit.notes}</p>}
+      {visit.materialsGiven?.length > 0 && (
+        <div>
+          <span className="font-bold text-slate-500 block mb-1">Materials Given</span>
+          <ul className="list-disc pl-4 text-slate-600">
+            {visit.materialsGiven.map((m, i) => (
+              <li key={i}>
+                {m.item}: {m.qty}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {visit.photos?.length > 0 && (
+        <div>
+          <span className="font-bold text-slate-500 block mb-2">
+            Photos ({visit.photos.length}) — click to view full size
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {visit.photos.map((photo, photoIndex) => (
+              <div key={photo.id} className="space-y-1">
+                <VisitPhotoThumbnail
+                  photo={photo}
+                  size="md"
+                  onView={() => onViewPhoto(visit, photoIndex)}
+                />
+                {(photo.takenAt || photo.locationLabel) && (
+                  <p className="text-[10px] text-slate-400 max-w-36 leading-tight">
+                    {photo.takenAt && (
+                      <span className="block">
+                        {new Date(photo.takenAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                      </span>
+                    )}
+                    {photo.locationLabel && <span className="block truncate">{photo.locationLabel}</span>}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {visit.gpsLocation && (
+        <p className="text-[10px] text-slate-500">
+          Visit GPS: {visit.gpsLocation.lat.toFixed(5)}, {visit.gpsLocation.lng.toFixed(5)}
+          {visit.gpsLocation.locationLabel && (
+            <span className="block mt-0.5">{visit.gpsLocation.locationLabel}</span>
+          )}
+        </p>
+      )}
+      {!readOnly && visit.status === "submitted" && (
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => onUpdateStatus(visit.id, "approved")}
+            className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer"
+          >
+            <Check size={12} /> Approve
+          </button>
+          <button
+            type="button"
+            onClick={() => onUpdateStatus(visit.id, "rejected")}
+            className="flex items-center gap-1 bg-red-600 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer"
+          >
+            <X size={12} /> Reject
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SupervisorVisitsPanel({
   visits,
   onUpdateStatus,
+  onBulkUpdateStatus,
   readOnly = false,
 }: SupervisorVisitsPanelProps) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -53,6 +167,13 @@ export default function SupervisorVisitsPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [lightbox, setLightbox] = useState<{
+    visit: SchoolVisit;
+    photoIndex: number;
+  } | null>(null);
 
   const blocks = useMemo(
     () => Array.from(new Set(visits.map((v) => v.block).filter(Boolean))).sort(),
@@ -94,6 +215,14 @@ export default function SupervisorVisitsPanel({
     return rows.sort((a, b) => b.visitDate.localeCompare(a.visitDate));
   }, [visits, searchTerm, blockFilter, supervisorFilter, statusFilter, visitTypeFilter, dateFilter]);
 
+  const selectableVisits = useMemo(
+    () => filtered.filter((v) => !readOnly && v.status === "submitted"),
+    [filtered, readOnly],
+  );
+
+  const allSelectableSelected =
+    selectableVisits.length > 0 && selectableVisits.every((v) => selectedIds.has(v.id));
+
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
     blockFilter !== "" ||
@@ -115,6 +244,43 @@ export default function SupervisorVisitsPanel({
     setToDate("");
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allSelectableSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectableVisits.map((v) => v.id)));
+    }
+  };
+
+  const bulkUpdateStatus = async (status: "approved" | "rejected") => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    try {
+      const ok = onBulkUpdateStatus
+        ? await onBulkUpdateStatus(ids, status)
+        : await Promise.all(ids.map((id) => onUpdateStatus(id, status))).then(
+            (results) => results.every(Boolean),
+          );
+      if (ok) setSelectedIds(new Set());
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const openPhoto = (visit: SchoolVisit, photoIndex: number) => {
+    setLightbox({ visit, photoIndex });
+  };
+
   const datePresets: { key: DatePreset; label: string }[] = [
     { key: "all", label: "All Dates" },
     { key: "day", label: "Today" },
@@ -130,6 +296,26 @@ export default function SupervisorVisitsPanel({
       })()
     : null;
 
+  const renderSelectCheckbox = (visit: SchoolVisit) => {
+    if (readOnly || visit.status !== "submitted") return null;
+    const checked = selectedIds.has(visit.id);
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggleSelect(visit.id);
+        }}
+        className={`shrink-0 p-1 rounded transition cursor-pointer ${
+          checked ? "text-[#ff791a]" : "text-slate-400 hover:text-slate-600"
+        }`}
+        aria-label={checked ? "Deselect visit" : "Select visit"}
+      >
+        {checked ? <CheckSquare size={18} /> : <Square size={18} />}
+      </button>
+    );
+  };
+
   return (
     <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
       <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -143,7 +329,36 @@ export default function SupervisorVisitsPanel({
               </span>
             )}
           </h2>
-          <p className="text-xs text-slate-400">Review school visits, photos, and materials logged by supervisors. Commitment visits fulfill diary entries; ad-hoc visits are optional extra check-ins.</p>
+          <p className="text-xs text-slate-400">
+            Review school visits, photos, and materials logged by supervisors. Commitment visits fulfill
+            diary entries; ad-hoc visits are optional extra check-ins.
+          </p>
+        </div>
+        <div className="inline-flex bg-slate-200/60 p-1 rounded-lg gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition cursor-pointer ${
+              viewMode === "list"
+                ? "bg-white text-slate-800 shadow-xs"
+                : "text-slate-600 hover:bg-white/40"
+            }`}
+            aria-pressed={viewMode === "list"}
+          >
+            <List size={14} /> Cards
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("tiles")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition cursor-pointer ${
+              viewMode === "tiles"
+                ? "bg-white text-slate-800 shadow-xs"
+                : "text-slate-600 hover:bg-white/40"
+            }`}
+            aria-pressed={viewMode === "tiles"}
+          >
+            <LayoutGrid size={14} /> Tiles
+          </button>
         </div>
       </div>
 
@@ -200,7 +415,7 @@ export default function SupervisorVisitsPanel({
           </p>
         )}
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           <select
             value={blockFilter}
             onChange={(e) => setBlockFilter(e.target.value)}
@@ -253,6 +468,16 @@ export default function SupervisorVisitsPanel({
               Clear Filters
             </button>
           )}
+          {selectableVisits.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+            >
+              {allSelectableSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+              {allSelectableSelected ? "Deselect all" : `Select all (${selectableVisits.length})`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -262,102 +487,169 @@ export default function SupervisorVisitsPanel({
             ? "No supervisor visits recorded yet."
             : "No visits match the current filters."}
         </p>
-      ) : (
+      ) : viewMode === "list" ? (
         <div className="space-y-3">
           {filtered.map((visit) => (
             <div key={visit.id} className="border border-slate-200 rounded-lg overflow-hidden">
               <button
                 type="button"
                 onClick={() => setExpandedId(expandedId === visit.id ? null : visit.id)}
-                className="w-full text-left p-3 bg-slate-50 hover:bg-slate-100 flex items-center justify-between gap-2 cursor-pointer"
+                className="w-full text-left p-3 bg-slate-50 hover:bg-slate-100 flex items-start gap-2 cursor-pointer"
               >
-                <div>
-                  <span className="font-bold text-slate-800 text-sm">{visit.schoolName}</span>
-                  <span className="text-xs text-slate-400 ml-2">{visit.visitDate}</span>
-                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ml-2 ${
-                    visit.visitType === "commitment"
-                      ? "bg-indigo-100 text-indigo-700"
-                      : "bg-slate-100 text-slate-600"
-                  }`}>
-                    {visit.visitType === "commitment" ? "Commitment" : "Ad-hoc"}
-                  </span>
-                  <span className="text-xs text-slate-500 block mt-0.5">
-                    <MapPin size={10} className="inline" /> {visit.block} — {visit.supervisorName}
-                  </span>
+                {renderSelectCheckbox(visit)}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-800 text-sm">{visit.schoolName}</span>
+                      <span className="text-xs text-slate-400 ml-2">{visit.visitDate}</span>
+                      <VisitTypeBadge visitType={visit.visitType} />
+                      <span className="text-xs text-slate-500 block mt-0.5">
+                        <MapPin size={10} className="inline" /> {visit.block} — {visit.supervisorName}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded shrink-0 ${statusBadgeClass(visit.status)}`}
+                    >
+                      {visit.status}
+                    </span>
+                  </div>
+                  {visit.photos?.length > 0 && expandedId !== visit.id && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <VisitPhotoThumbnail
+                        photo={visit.photos[0]}
+                        size="sm"
+                        onView={() => openPhoto(visit, 0)}
+                      />
+                      {visit.photos.length > 1 && (
+                        <span className="text-[10px] text-slate-400">+{visit.photos.length - 1} more</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                  visit.status === "approved" ? "bg-emerald-100 text-emerald-700" :
-                  visit.status === "rejected" ? "bg-red-100 text-red-700" :
-                  "bg-amber-100 text-amber-700"
-                }`}>{visit.status}</span>
               </button>
               {expandedId === visit.id && (
-                <div className="p-3 space-y-3 text-xs">
-                  {visit.notes && <p className="text-slate-600">{visit.notes}</p>}
-                  {visit.materialsGiven?.length > 0 && (
-                    <div>
-                      <span className="font-bold text-slate-500 block mb-1">Materials Given</span>
-                      <ul className="list-disc pl-4 text-slate-600">
-                        {visit.materialsGiven.map((m, i) => (
-                          <li key={i}>{m.item}: {m.qty}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {visit.photos?.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {visit.photos.map((photo) => (
-                        <div key={photo.id} className="w-28">
-                          <img
-                            src={photo.photoDataBase64.startsWith("data:") ? photo.photoDataBase64 : `data:${photo.mimeType};base64,${photo.photoDataBase64}`}
-                            alt={photo.caption || "Visit photo"}
-                            className="w-28 h-28 object-cover rounded border border-slate-200"
-                          />
-                          {(photo.takenAt || photo.locationLabel) && (
-                            <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                              {photo.takenAt && (
-                                <span className="block">
-                                  {new Date(photo.takenAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
-                                </span>
-                              )}
-                              {photo.locationLabel && <span className="block truncate">{photo.locationLabel}</span>}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {visit.gpsLocation && (
-                    <p className="text-[10px] text-slate-500">
-                      Visit GPS: {visit.gpsLocation.lat.toFixed(5)}, {visit.gpsLocation.lng.toFixed(5)}
-                      {visit.gpsLocation.locationLabel && (
-                        <span className="block mt-0.5">{visit.gpsLocation.locationLabel}</span>
-                      )}
-                    </p>
-                  )}
-                  {!readOnly && visit.status === "submitted" && (
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus(visit.id, "approved")}
-                        className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer"
-                      >
-                        <Check size={12} /> Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onUpdateStatus(visit.id, "rejected")}
-                        className="flex items-center gap-1 bg-red-600 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer"
-                      >
-                        <X size={12} /> Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <VisitDetails
+                  visit={visit}
+                  readOnly={readOnly}
+                  onUpdateStatus={onUpdateStatus}
+                  onViewPhoto={openPhoto}
+                />
               )}
             </div>
           ))}
         </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {filtered.map((visit) => (
+            <div
+              key={visit.id}
+              className="border border-slate-200 rounded-lg overflow-hidden flex flex-col bg-white hover:shadow-md transition"
+            >
+              <div className="relative">
+                {visit.photos?.length > 0 ? (
+                  <VisitPhotoThumbnail
+                    photo={visit.photos[0]}
+                    size="lg"
+                    onView={() => openPhoto(visit, 0)}
+                  />
+                ) : (
+                  <div className="w-full aspect-[4/3] bg-slate-100 flex items-center justify-center text-slate-400">
+                    <Camera size={32} />
+                  </div>
+                )}
+                <div className="absolute top-2 left-2">{renderSelectCheckbox(visit)}</div>
+                {visit.photos?.length > 1 && (
+                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-bold">
+                    {visit.photos.length} photos
+                  </span>
+                )}
+                <span
+                  className={`absolute bottom-2 right-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded ${statusBadgeClass(visit.status)}`}
+                >
+                  {visit.status}
+                </span>
+              </div>
+              <div className="p-3 flex-1 flex flex-col gap-2">
+                <div>
+                  <p className="font-bold text-slate-800 text-sm leading-tight">{visit.schoolName}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{visit.visitDate}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <VisitTypeBadge visitType={visit.visitType} />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    <MapPin size={10} className="inline" /> {visit.block} — {visit.supervisorName}
+                  </p>
+                </div>
+                {visit.materialsGiven?.length > 0 && (
+                  <p className="text-[10px] text-slate-500 line-clamp-2">
+                    Materials: {visit.materialsGiven.map((m) => `${m.item} (${m.qty})`).join(", ")}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(expandedId === visit.id ? null : visit.id)}
+                  className="mt-auto text-xs font-semibold text-[#ff791a] hover:underline text-left cursor-pointer"
+                >
+                  {expandedId === visit.id ? "Hide details" : "View details"}
+                </button>
+              </div>
+              {expandedId === visit.id && (
+                <VisitDetails
+                  visit={visit}
+                  readOnly={readOnly}
+                  onUpdateStatus={onUpdateStatus}
+                  onViewPhoto={openPhoto}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedIds.size > 0 && (
+        <div className="sticky bottom-4 z-20 mt-4 flex flex-wrap items-center justify-between gap-3 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg">
+          <span className="text-sm font-semibold">
+            {selectedIds.size} visit{selectedIds.size !== 1 ? "s" : ""} selected
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkProcessing}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => bulkUpdateStatus("rejected")}
+              disabled={bulkProcessing}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 transition cursor-pointer disabled:opacity-50"
+            >
+              {bulkProcessing ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+              Reject selected
+            </button>
+            <button
+              type="button"
+              onClick={() => bulkUpdateStatus("approved")}
+              disabled={bulkProcessing}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50"
+            >
+              {bulkProcessing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              Approve selected
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lightbox && lightbox.visit.photos?.length > 0 && (
+        <VisitPhotoLightbox
+          photos={lightbox.visit.photos}
+          index={lightbox.photoIndex}
+          visit={lightbox.visit}
+          onClose={() => setLightbox(null)}
+          onIndexChange={(photoIndex) => setLightbox({ visit: lightbox.visit, photoIndex })}
+        />
       )}
     </section>
   );

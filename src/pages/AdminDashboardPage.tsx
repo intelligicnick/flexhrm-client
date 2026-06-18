@@ -34,6 +34,7 @@ import { getDaysInMonthStatic } from "../lib/date-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { expiryBand } from "../lib/renewal-helpers";
 import { Tender } from "../types";
+import SupervisorMapPanel from "../components/SupervisorMapPanel";
 
 function isTenderDeleted(tender: Tender): boolean {
   return Boolean(tender.deletedAt?.trim());
@@ -86,7 +87,7 @@ function BarRow({ label, value, max, color, onClick }: BarRowProps) {
     <Tag
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`w-full text-left ${onClick ? "cursor-pointer hover:opacity-90" : ""}`}
+      className={`w-full text-left rounded-lg px-1 py-0.5 -mx-1 ${onClick ? "cursor-pointer hover:bg-slate-50 transition" : ""}`}
     >
       <div className="flex items-center justify-between text-xs mb-1">
         <span className="font-semibold text-slate-700 truncate pr-2">{label}</span>
@@ -204,8 +205,12 @@ export default function AdminDashboardPage() {
     setTenderDeadlineFilter,
     setAttendanceRecordFilter,
     setAttendanceSubView,
+    setEmployeeListRoleFilter,
+    setActivePimSubTab,
     userPermissions,
     companyBranch,
+    rawSchoolVisits,
+    rawSchoolSupervisors,
   } = useHRMS();
 
   const goToFieldTeam = (view: FieldTeamView) => {
@@ -217,6 +222,12 @@ export default function AdminDashboardPage() {
     setAttendanceRecordFilter(filter);
     setAttendanceSubView("grid");
     navigateToTab("Attendance");
+  };
+
+  const openEmployeesByRole = (role: string) => {
+    setEmployeeListRoleFilter(role);
+    setActivePimSubTab("Employee List");
+    navigateToTab("Employees");
   };
 
   const goToUpcomingTenders = () => {
@@ -640,32 +651,62 @@ export default function AdminDashboardPage() {
         )}
 
         {canView("Employees") && (
-          <button
-            type="button"
-            onClick={() => navigateToTab("Employees")}
-            className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
-          >
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmployeeListRoleFilter("");
+                  setActivePimSubTab("Employee List");
+                  navigateToTab("Employees");
+                }}
+                className="text-sm font-extrabold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-[#ff791a] transition"
+              >
                 <Users size={16} className="text-purple-500" />
                 Top Roles
-              </h3>
-              <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmployeeListRoleFilter("");
+                  setActivePimSubTab("Employee List");
+                  navigateToTab("Employees");
+                }}
+                className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
+              >
                 View roster <ChevronRight size={12} />
-              </span>
+              </button>
             </div>
             <div className="space-y-3">
               {roleChart.length === 0 ? (
                 <p className="text-xs text-slate-400">No role data yet.</p>
               ) : (
                 roleChart.map(([role, count]) => (
-                  <BarRow key={role} label={role} value={count} max={roleMax} color="bg-purple-500" />
+                  <BarRow
+                    key={role}
+                    label={role}
+                    value={count}
+                    max={roleMax}
+                    color="bg-purple-500"
+                    onClick={() => openEmployeesByRole(role)}
+                  />
                 ))
               )}
             </div>
-          </button>
+          </div>
         )}
       </section>
+
+      {/* Supervisor map */}
+      {canView("Field Team") && (
+        <section>
+          <SupervisorMapPanel
+            supervisors={rawSchoolSupervisors}
+            visits={rawSchoolVisits}
+            onOpenFieldTeam={() => goToFieldTeam("supervisors")}
+          />
+        </section>
+      )}
 
       {/* Payroll & school summary */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">

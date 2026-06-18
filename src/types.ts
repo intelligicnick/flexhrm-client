@@ -365,6 +365,8 @@ export interface Tender {
   gemCurrentStage: string;
   /** ISO timestamp when soft-deleted; empty when active */
   deletedAt?: string;
+  /** ISO timestamp when GeM status was last synced via Smart Capture */
+  statusSyncedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }

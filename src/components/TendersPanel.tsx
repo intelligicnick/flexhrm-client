@@ -4,7 +4,6 @@ import {
   Gavel,
   Plus,
   Search,
-  Filter,
   Trash2,
   Upload,
   Clock,
@@ -14,7 +13,12 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react";
+import { resolveGemBidPdfUrl, resolveGemBidSearchUrl } from "../lib/gem-helpers";
 import {
   Tender,
   TenderType,
@@ -27,10 +31,11 @@ import {
   formatAppDate,
   formatFiledDateStamp,
   formatTenderFiledDate,
-  composeTenderEndDate,
+  composeTenderEndDateFromDateTimeLocal,
+  APP_TIMEZONE,
 } from "../lib/date-helpers";
 import DateRangeField from "./ui/DateRangeField";
-import { DateInput, TimeInput } from "./ui/DateInput";
+import { DateInput, DateTimeInput } from "./ui/DateInput";
 
 const STATUS_LABELS: Record<TenderStatus, string> = {
   not_filed: "Not Participated",
@@ -132,8 +137,86 @@ function tenderOrganisation(tender: Tender): string {
   return tender.organisation?.trim() || tender.department?.trim() || "";
 }
 
+const MANPOWER_TERM_RE =
+  /tenure|basic pay|provident fund|esi|working days|duration of employment|estimated bid|in months|in inr/i;
+
+function isLikelyConsigneeName(value: string): boolean {
+  const name = value.trim().replace(/^[\d.]+\s+/, "");
+  if (!name || !/[A-Za-z]/.test(name)) return false;
+  if (MANPOWER_TERM_RE.test(name)) return false;
+  if (/^(consignee|reporting|officer)$/i.test(name)) return false;
+  if (/^number of\b/i.test(name)) return false;
+  if (/^address\s*:/i.test(name)) return false;
+  return true;
+}
+
+function extractConsigneeFromText(text: string): string {
+  const patterns = [
+    /consignee\s+reporting\s*\/?\s*officer\s*[:\-–]?\s*([A-Za-z][A-Za-z\s.'-]{1,80}?)(?=\s*,|\s+address|\n|$)/i,
+    /(?:^|[\n,])\s*\d+\s+([A-Z][A-Za-z]+(?:\s+[A-Za-z.'-]+){1,4})\s*(?:\n|,|\d{6})/m,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const candidate = match?.[1]?.trim() ?? "";
+    if (isLikelyConsigneeName(candidate)) return candidate.replace(/^\d+\s+/, "").trim();
+  }
+  return "";
+}
+
+function formatManpowerRequirements(text: string): string {
+  const value = text.trim();
+  if (!value) return "";
+
+  const splitRe =
+    /(?=Tenure\s*\/?\s*Duration|Basic Pay|Provident Fund|ESI\s*\(|Number of working days|Estimated Bid Value)/i;
+  const parts = value
+    .split(splitRe)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length > 1) {
+    return parts.join("\n");
+  }
+
+  return value.replace(/\s{2,}/g, " ");
+}
+
+function tenderDepartment(tender: Tender): string {
+  const org = tenderOrganisation(tender);
+  const dept = tender.department?.trim() || "";
+  if (!dept || dept === org) return "";
+  return dept;
+}
+
 function tenderConsignee(tender: Tender): string {
-  return tender.consigneeOfficer?.trim() || tender.officerName?.trim() || "";
+  const raw = tender.consigneeOfficer?.trim() || tender.officerName?.trim() || "";
+  if (isLikelyConsigneeName(raw)) return raw.replace(/^\d+\s+/, "").trim();
+
+  const fromRaw = extractConsigneeFromText(raw);
+  if (fromRaw) return fromRaw;
+
+  const addReq = tender.additionalRequirements?.trim() || "";
+  const fromAddReq = extractConsigneeFromText(addReq);
+  if (fromAddReq) return fromAddReq;
+
+  return "";
+}
+
+function tenderAdditionalRequirements(tender: Tender): string {
+  const parts: string[] = [];
+  const addReq = tender.additionalRequirements?.trim();
+  if (addReq) parts.push(addReq);
+
+  const rawOfficer = tender.consigneeOfficer?.trim() || tender.officerName?.trim() || "";
+  if (
+    rawOfficer &&
+    MANPOWER_TERM_RE.test(rawOfficer) &&
+    !parts.some((part) => part.includes(rawOfficer.slice(0, 24)))
+  ) {
+    parts.push(rawOfficer);
+  }
+
+  return formatManpowerRequirements(parts.join("\n"));
 }
 
 function tenderMatchesSearch(tender: Tender, term: string): boolean {
@@ -144,7 +227,7 @@ function tenderMatchesSearch(tender: Tender, term: string): boolean {
     tenderOrganisation(tender),
     tenderConsignee(tender),
     tender.address,
-    tender.additionalRequirements,
+    tenderAdditionalRequirements(tender),
     tender.outcome,
   ]
     .join(" ")
@@ -183,40 +266,104 @@ function tenderMatchesDateRange(
   return matchesIsoDateRange(ts, from, to);
 }
 
+function calendarDaysUntilEnd(endMs: number, nowMs = Date.now()): number {
+  const dayKey = (ms: number) => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: APP_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(ms));
+    const year = Number(parts.find((p) => p.type === "year")?.value);
+    const month = Number(parts.find((p) => p.type === "month")?.value);
+    const day = Number(parts.find((p) => p.type === "day")?.value);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((dayKey(endMs) - dayKey(nowMs)) / (1000 * 60 * 60 * 24));
+}
+
 function deadlineMeta(endDate: string): {
   label: string;
-  className: string;
+  cellClassName: string;
   urgent: boolean;
-  band: "passed" | "soon" | "ok" | "none";
+  band: "passed" | "critical" | "warning" | "orange" | "ok" | "none";
 } {
   const ts = parseEndDateMs(endDate);
   if (!endDate.trim()) {
-    return { label: "—", className: "text-slate-400", urgent: false, band: "none" };
+    return {
+      label: "—",
+      cellClassName: "text-slate-400",
+      urgent: false,
+      band: "none",
+    };
   }
+  const withTime = /\d{1,2}:\d{2}/.test(endDate);
+  const formatted = formatAppDate(endDate, { withTime });
   if (ts === null) {
-    return { label: endDate, className: "text-slate-700", urgent: false, band: "ok" };
-  }
-  const now = Date.now();
-  const diffHours = (ts - now) / (1000 * 60 * 60);
-  const formatted = formatAppDate(endDate, { withTime: /\d{1,2}:\d{2}/.test(endDate) });
-
-  if (diffHours < 0) {
     return {
       label: formatted,
-      className: "text-red-700 font-semibold",
+      cellClassName: "text-slate-700",
+      urgent: false,
+      band: "ok",
+    };
+  }
+
+  const daysLeft = calendarDaysUntilEnd(ts);
+
+  if (daysLeft < 0) {
+    return {
+      label: formatted,
+      cellClassName: "bg-red-200 text-red-950 font-bold",
       urgent: true,
       band: "passed",
     };
   }
-  if (diffHours <= 48) {
+  if (daysLeft <= 2) {
     return {
       label: formatted,
-      className: "text-amber-700 font-semibold",
+      cellClassName: "bg-red-100 text-red-800 font-bold",
       urgent: true,
-      band: "soon",
+      band: "critical",
     };
   }
-  return { label: formatted, className: "text-slate-700", urgent: false, band: "ok" };
+  if (daysLeft <= 5) {
+    return {
+      label: formatted,
+      cellClassName: "bg-rose-100 text-rose-800 font-bold",
+      urgent: true,
+      band: "warning",
+    };
+  }
+  if (daysLeft <= 10) {
+    return {
+      label: formatted,
+      cellClassName: "bg-orange-100 text-orange-800 font-semibold",
+      urgent: true,
+      band: "orange",
+    };
+  }
+  return {
+    label: formatted,
+    cellClassName: "bg-emerald-100 text-emerald-800 font-semibold",
+    urgent: false,
+    band: "ok",
+  };
+}
+
+function tenderDeadlineCellClass(
+  tender: Tender,
+  deadline: ReturnType<typeof deadlineMeta>,
+): string {
+  if (isTenderDeleted(tender) || tender.status !== "not_filed") {
+    return "text-slate-600";
+  }
+  return deadline.cellClassName;
+}
+
+function formatStatusSyncedAt(value?: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "—";
+  return formatAppDate(raw, { withTime: true });
 }
 
 function normalizeTenderStatus(raw: string): TenderStatus {
@@ -301,36 +448,97 @@ function truncatePreview(
 }
 
 function TenderExpandedDetails({ tender }: { tender: Tender }) {
-  const fields = [
-    { label: "Additional requirements", value: tender.additionalRequirements },
-    { label: "Pre-bid date & time", value: formatPreBidLabel(tender) },
-    { label: "Pre-bid venue", value: formatPreBidVenueLabel(tender) },
-    { label: "Ministry / State", value: tender.ministry },
-    { label: "Organisation", value: tenderOrganisation(tender) },
-    { label: "Department", value: tender.department },
-    { label: "Consignee officer", value: tenderConsignee(tender) },
-    { label: "Address", value: tender.address },
-    { label: "Notes", value: tender.notes },
-  ].filter((field) => field.value && field.value !== "—");
+  const consignee = tenderConsignee(tender);
+  const addReq = tenderAdditionalRequirements(tender);
+  const department = tenderDepartment(tender);
+
+  const sections = [
+    {
+      title: "Bid details",
+      fields: [
+        {
+          label: "Bid number",
+          value: tender.bidNo,
+          href: resolveGemBidPdfUrl(tender) ?? resolveGemBidSearchUrl(tender.bidNo),
+        },
+        { label: "Item category", value: tender.category },
+        { label: "Type", value: tender.tenderType === "travel" ? "Travel Plus" : "Manpower" },
+        { label: "Quantity", value: tender.quantity ? String(tender.quantity) : "" },
+        { label: "Estimated bid value", value: tender.rate },
+        { label: "Bid end date", value: formatAppDate(tender.endDate, { withTime: /\d{1,2}:\d{2}/.test(tender.endDate) }) },
+        { label: "Participation filed", value: tender.filedDate ? formatTenderFiledDate(tender.filedDate) : "" },
+        { label: "Last GeM sync", value: formatStatusSyncedAt(tender.statusSyncedAt) },
+      ],
+    },
+    {
+      title: "Buyer / consignee (as per PDF)",
+      fields: [
+        { label: "Ministry / State", value: tender.ministry },
+        { label: "Organisation", value: tenderOrganisation(tender) },
+        { label: "Department", value: department },
+        { label: "Consignee Reporting/Officer", value: consignee },
+        { label: "Address", value: tender.address },
+      ],
+    },
+    {
+      title: "Additional requirements",
+      fields: [{ label: "Manpower / service terms", value: addReq }],
+    },
+    {
+      title: "Pre-bid & notes",
+      fields: [
+        { label: "Pre-bid date & time", value: formatPreBidLabel(tender) },
+        { label: "Pre-bid venue", value: formatPreBidVenueLabel(tender) },
+        { label: "Notes", value: tender.notes },
+      ],
+    },
+  ]
+    .map((section) => ({
+      ...section,
+      fields: section.fields.filter((field) => field.value && field.value !== "—"),
+    }))
+    .filter((section) => section.fields.length > 0);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 text-[11px] leading-relaxed">
-      {fields.map((field) => (
-        <div
-          key={field.label}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-xs"
-        >
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">
-            {field.label}
+    <div className="rounded-xl border border-orange-100 bg-linear-to-br from-orange-50/80 via-white to-slate-50 p-4 shadow-xs space-y-4">
+      {sections.map((section) => (
+        <div key={section.title}>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#ff791a] mb-2 flex items-center gap-1.5">
+            <span className="w-1 h-3 rounded-full bg-[#ff791a]" />
+            {section.title}
           </p>
-          <p className="text-slate-700 whitespace-pre-line">{field.value}</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+            {section.fields.map((field) => (
+              <div
+                key={field.label}
+                className="rounded-lg border border-slate-200/80 bg-white px-3 py-2.5"
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                  {field.label}
+                </p>
+                {"href" in field && field.href ? (
+                  <a
+                    href={field.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-mono text-sm text-sky-700 hover:text-sky-900 hover:underline"
+                  >
+                    {field.value}
+                    <ExternalLink size={11} className="opacity-70" />
+                  </a>
+                ) : (
+                  <p className="text-slate-700 text-xs whitespace-pre-line leading-relaxed">{field.value}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-const TABLE_COL_SPAN = 18;
+const TABLE_COL_SPAN = 19;
 
 function splitLegacyPreBid(preBidAt: string): { at: string; venue: string } {
   const match = preBidAt.trim().match(/^(.+?)\s+@\s+(.+)$/);
@@ -470,14 +678,82 @@ async function parseTendersWorkbook(
   });
 }
 
+type BidNumberCellProps = {
+  tender: Tender;
+  copiedBidId: string | null;
+  onCopy: (tender: Tender) => void;
+};
+
+function BidNumberCell({ tender, copiedBidId, onCopy }: BidNumberCellProps) {
+  const pdfUrl = resolveGemBidPdfUrl(tender);
+  const copied = copiedBidId === tender.id;
+  const deleted = isTenderDeleted(tender);
+  const missed = isMissedParticipation(tender);
+
+  return (
+    <div>
+      <div className="flex items-start gap-0.5">
+        {pdfUrl ? (
+          <a
+            href={pdfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-start gap-0.5 font-mono text-[10px] font-bold text-sky-700 hover:text-sky-900 hover:underline leading-tight"
+            title="Open GeM bid PDF in new tab"
+          >
+            <span className="whitespace-normal break-all">{tender.bidNo}</span>
+            <ExternalLink size={9} className="shrink-0 opacity-70 mt-0.5" />
+          </a>
+        ) : (
+          <a
+            href={resolveGemBidSearchUrl(tender.bidNo)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-start gap-0.5 font-mono text-[10px] font-bold text-slate-700 hover:text-sky-800 hover:underline leading-tight"
+            title="Search this bid on GeM (PDF link not stored — re-import via extension to capture PDF URL)"
+          >
+            <span className="whitespace-normal break-all">{tender.bidNo}</span>
+            <ExternalLink size={9} className="shrink-0 opacity-50 mt-0.5" />
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopy(tender);
+          }}
+          className="shrink-0 p-0.5 rounded hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 cursor-pointer transition"
+          title={copied ? "Copied!" : "Copy bid number"}
+        >
+          {copied ? (
+            <Check size={11} className="text-emerald-600" />
+          ) : (
+            <Copy size={11} />
+          )}
+        </button>
+      </div>
+      {(deleted || missed) && (
+        <div className="mt-0.5 flex flex-wrap gap-1">
+          {deleted && (
+            <span className="text-[9px] font-bold uppercase text-slate-400">Deleted</span>
+          )}
+          {missed && (
+            <span className="text-[9px] font-bold uppercase text-red-600">Locked</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TypeBadge({ type }: { type: TenderType }) {
   const isTravel = type === "travel";
   return (
     <span
       className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
         isTravel
-          ? "bg-violet-50 text-violet-700 ring-1 ring-violet-100"
-          : "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
+          ? "bg-violet-100 text-violet-700 ring-1 ring-violet-200/80"
+          : "bg-sky-100 text-sky-700 ring-1 ring-sky-200/80"
       }`}
     >
       {isTravel ? "Travel" : "Manpower"}
@@ -518,8 +794,7 @@ export default function TendersPanel({
   }, [initialDeadlineFilter]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [endDateIso, setEndDateIso] = useState("");
-  const [endTime, setEndTime] = useState("");
+  const [endDateTimeLocal, setEndDateTimeLocal] = useState("");
   const [startDateIso, setStartDateIso] = useState("");
   const [filedDateIso, setFiledDateIso] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -528,7 +803,23 @@ export default function TendersPanel({
   const [importing, setImporting] = useState(false);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
   const [expandedTenderId, setExpandedTenderId] = useState<string | null>(null);
+  const [copiedBidId, setCopiedBidId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const copyBidTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const copyBidNumber = async (tender: Tender) => {
+    try {
+      await navigator.clipboard.writeText(tender.bidNo);
+    } catch {
+      window.prompt("Copy bid number:", tender.bidNo);
+      return;
+    }
+    setCopiedBidId(tender.id);
+    if (copyBidTimeoutRef.current) clearTimeout(copyBidTimeoutRef.current);
+    copyBidTimeoutRef.current = setTimeout(() => {
+      setCopiedBidId((current) => (current === tender.id ? null : current));
+    }, 1500);
+  };
 
   const normalizedTenders = useMemo(
     () => tenders.map(normalizeTender),
@@ -592,8 +883,7 @@ export default function TendersPanel({
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
-    setEndDateIso("");
-    setEndTime("");
+    setEndDateTimeLocal("");
     setStartDateIso("");
     setFiledDateIso("");
     setModalOpen(true);
@@ -611,7 +901,7 @@ export default function TendersPanel({
         status: "not_filed",
         filedDate: filedDateIso,
         startDate: startDateIso,
-        endDate: composeTenderEndDate(endDateIso, endTime),
+        endDate: composeTenderEndDateFromDateTimeLocal(endDateTimeLocal),
         organisation: form.organisation || form.department,
         consigneeOfficer: form.consigneeOfficer || form.officerName,
         department: form.organisation || form.department,
@@ -701,19 +991,109 @@ export default function TendersPanel({
     }
   };
 
+  const hasActiveFilters =
+    Boolean(typeFilter || statusFilter || deadlineFilter !== "all" || dateFrom || dateTo || search.trim());
+
+  const applyQuickFilter = (key: "all" | "filed" | "qualified" | "upcoming" | "passed") => {
+    if (key === "all") {
+      setTypeFilter("");
+      setStatusFilter("");
+      setDeadlineFilter("all");
+      setSearch("");
+      clearDateRange();
+      return;
+    }
+    if (key === "filed") {
+      setStatusFilter("filed");
+      setDeadlineFilter("all");
+      return;
+    }
+    if (key === "qualified") {
+      setStatusFilter("qualified");
+      setDeadlineFilter("all");
+      return;
+    }
+    setStatusFilter("");
+    setDeadlineFilter(key);
+  };
+
+  const statCards = [
+    {
+      key: "all" as const,
+      label: "Total",
+      value: stats.total,
+      icon: FileSpreadsheet,
+      tone: "text-slate-700",
+      bg: "bg-white",
+      ring: "ring-slate-200",
+      active: !hasActiveFilters,
+    },
+    {
+      key: "filed" as const,
+      label: "Participated",
+      value: stats.filed,
+      icon: CheckCircle2,
+      tone: "text-sky-600",
+      bg: "bg-sky-50",
+      ring: "ring-sky-200",
+      active: statusFilter === "filed",
+    },
+    {
+      key: "qualified" as const,
+      label: "Qualified",
+      value: stats.qualified,
+      icon: Gavel,
+      tone: "text-emerald-600",
+      bg: "bg-emerald-50",
+      ring: "ring-emerald-200",
+      active: statusFilter === "qualified",
+    },
+    {
+      key: "upcoming" as const,
+      label: "Upcoming",
+      value: stats.upcoming,
+      icon: Clock,
+      tone: "text-amber-600",
+      bg: "bg-amber-50",
+      ring: "ring-amber-200",
+      active: deadlineFilter === "upcoming" && !statusFilter,
+    },
+    {
+      key: "passed" as const,
+      label: "Passed",
+      value: stats.passed,
+      icon: AlertTriangle,
+      tone: "text-red-600",
+      bg: "bg-red-50",
+      ring: "ring-red-200",
+      active: deadlineFilter === "passed" && !statusFilter,
+    },
+  ];
+
+  const selectClass =
+    "px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:border-orange-300 focus:ring-2 focus:ring-orange-100 outline-none transition";
+
   return (
-    <section className="flex-1 flex flex-col min-h-[400px] min-w-0 bg-white border border-slate-200 rounded-xl shadow-xs">
-      <div className="bg-linear-to-r from-orange-50 via-white to-slate-50 border-b border-slate-100 px-5 py-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+    <section className="flex-1 flex flex-col min-h-[400px] min-w-0 bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+      <div className="relative border-b border-slate-100 bg-linear-to-r from-[#fff7f0] via-white to-slate-50 px-5 py-5">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,121,26,0.08),transparent_55%)] pointer-events-none" />
+        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#ff791a] mb-1">
-              Intelligic Solutions
-            </p>
-            <h2 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
-              <Gavel className="text-[#ff791a]" size={20} />
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#ff791a]">
+                Intelligic Solutions
+              </p>
+              <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-bold text-white tabular-nums">
+                {activeTenders.length} active
+              </span>
+            </div>
+            <h2 className="font-extrabold text-slate-900 text-xl flex items-center gap-2.5 tracking-tight">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1e293b] text-[#ff791a] shadow-sm">
+                <Gavel size={18} />
+              </span>
               GeM Tenders
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-1 max-w-xl">
               Manpower &amp; Travel Plus bids — track deadlines, filing and evaluation status
             </p>
           </div>
@@ -733,7 +1113,7 @@ export default function TendersPanel({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={importing}
-                className="px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs transition"
               >
                 <Upload size={14} />
                 {importing ? "Importing…" : "Import Excel"}
@@ -741,7 +1121,7 @@ export default function TendersPanel({
               <button
                 type="button"
                 onClick={openCreate}
-                className="px-3 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className="px-3.5 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md shadow-orange-200/50 transition"
               >
                 <Plus size={14} />
                 Add Tender
@@ -751,94 +1131,108 @@ export default function TendersPanel({
         </div>
       </div>
 
-      <div className="px-5 pt-4 pb-2">
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
-          {[
-            { label: "Total", value: stats.total, icon: FileSpreadsheet, tone: "text-slate-700", bg: "bg-slate-50" },
-            { label: "Participated", value: stats.filed, icon: CheckCircle2, tone: "text-sky-600", bg: "bg-sky-50/80" },
-            { label: "Qualified", value: stats.qualified, icon: Gavel, tone: "text-emerald-600", bg: "bg-emerald-50/80" },
-            { label: "Upcoming", value: stats.upcoming, icon: Clock, tone: "text-amber-600", bg: "bg-amber-50/80" },
-            { label: "Passed", value: stats.passed, icon: AlertTriangle, tone: "text-red-600", bg: "bg-red-50/80" },
-          ].map(({ label, value, icon: Icon, tone, bg }) => (
-            <div key={label} className={`rounded-xl border border-slate-100 ${bg} px-3 py-2.5`}>
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                <Icon size={12} className={tone} />
-                {label}
+      <div className="px-5 pt-4 pb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-4">
+          {statCards.map(({ key, label, value, icon: Icon, tone, bg, ring, active }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => applyQuickFilter(key)}
+              className={`rounded-xl border text-left px-3.5 py-3 transition-all cursor-pointer ${
+                active
+                  ? `${bg} border-transparent ring-2 ${ring} shadow-sm`
+                  : "bg-white border-slate-100 hover:border-slate-200 hover:shadow-xs"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                <Icon size={14} className={tone} />
               </div>
-              <div className={`text-xl font-extrabold tabular-nums ${tone}`}>{value}</div>
-            </div>
+              <p className={`text-2xl font-extrabold tabular-nums mt-1 ${tone}`}>{value}</p>
+            </button>
           ))}
         </div>
 
-        <div className="flex flex-col sm:flex-row flex-wrap gap-2 mb-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search bid no., dept, category, outcome… (includes deleted)"
-              className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50/50 focus:bg-white focus:border-orange-300 focus:ring-2 focus:ring-orange-100 outline-none transition"
-            />
+        <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3 space-y-3 mb-3">
+          <div className="flex flex-col lg:flex-row flex-wrap gap-2">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search bid no., dept, category, outcome… (includes deleted)"
+                className="w-full pl-9 pr-3 py-2.5 text-xs border border-slate-200 rounded-xl bg-white focus:border-orange-300 focus:ring-2 focus:ring-orange-100 outline-none transition"
+              />
+            </div>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as "" | TenderType)}
+              className={selectClass}
+            >
+              <option value="">All types</option>
+              <option value="manpower">Manpower</option>
+              <option value="travel">Travel Plus</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "" | TenderStatus)}
+              className={selectClass}
+            >
+              <option value="">All status</option>
+              {STATUS_ORDER.map((key) => (
+                <option key={key} value={key}>
+                  {STATUS_LABELS[key]}
+                </option>
+              ))}
+            </select>
+            <select
+              value={deadlineFilter}
+              onChange={(e) => setDeadlineFilter(e.target.value as typeof deadlineFilter)}
+              className={selectClass}
+            >
+              <option value="all">All deadlines</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="passed">Passed</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void onRefresh()}
+              className="px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl bg-white hover:bg-slate-50 flex items-center gap-1.5 font-semibold text-slate-600 transition"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => applyQuickFilter("all")}
+                className="px-3.5 py-2.5 text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold flex items-center gap-1 transition"
+              >
+                <X size={12} />
+                Clear filters
+              </button>
+            )}
           </div>
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as "" | TenderType)}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-          >
-            <option value="">All types</option>
-            <option value="manpower">Manpower</option>
-            <option value="travel">Travel Plus</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "" | TenderStatus)}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-          >
-            <option value="">All status</option>
-            {STATUS_ORDER.map((key) => (
-              <option key={key} value={key}>
-                {STATUS_LABELS[key]}
-              </option>
-            ))}
-          </select>
-          <select
-            value={deadlineFilter}
-            onChange={(e) => setDeadlineFilter(e.target.value as typeof deadlineFilter)}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-          >
-            <option value="all">All deadlines</option>
-            <option value="upcoming">Upcoming</option>
-            <option value="passed">Passed</option>
-          </select>
-          <button
-            type="button"
-            onClick={() => void onRefresh()}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center gap-1.5 font-semibold text-slate-600"
-          >
-            <Filter size={12} />
-            Refresh
-          </button>
+
+          <DateRangeField
+            field={dateRangeField}
+            fieldOptions={[
+              { value: "endDate", label: "End date" },
+              { value: "filedDate", label: "Filed date" },
+            ]}
+            onFieldChange={(value) => setDateRangeField(value as "endDate" | "filedDate")}
+            from={dateFrom}
+            to={dateTo}
+            onFromChange={setDateFrom}
+            onToChange={setDateTo}
+            onClear={clearDateRange}
+          />
         </div>
 
-        <DateRangeField
-          field={dateRangeField}
-          fieldOptions={[
-            { value: "endDate", label: "End date" },
-            { value: "filedDate", label: "Filed date" },
-          ]}
-          onFieldChange={(value) => setDateRangeField(value as "endDate" | "filedDate")}
-          from={dateFrom}
-          to={dateTo}
-          onFromChange={setDateFrom}
-          onToChange={setDateTo}
-          onClear={clearDateRange}
-          className="mb-3"
-        />
-
         {toast && (
-          <div className="mb-3 px-3 py-2 rounded-lg bg-slate-800 text-white text-xs flex items-center justify-between animate-fade-in">
+          <div className="mb-3 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-xs flex items-center justify-between shadow-lg animate-fade-in">
             <span>{toast}</span>
-            <button type="button" onClick={() => setToast(null)} className="cursor-pointer ml-2">
+            <button type="button" onClick={() => setToast(null)} className="cursor-pointer ml-3 p-0.5 rounded hover:bg-white/10">
               <X size={14} />
             </button>
           </div>
@@ -846,74 +1240,141 @@ export default function TendersPanel({
       </div>
 
       {filtered.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center py-16 px-5">
-          <div className="text-center space-y-3 max-w-md">
-            <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto">
-              <Gavel size={28} className="text-[#ff791a]" />
+        <div className="flex-1 flex items-center justify-center py-20 px-5">
+          <div className="text-center space-y-4 max-w-md">
+            <div className="w-16 h-16 rounded-2xl bg-linear-to-br from-orange-100 to-orange-50 flex items-center justify-center mx-auto shadow-sm ring-1 ring-orange-100">
+              <Gavel size={30} className="text-[#ff791a]" />
             </div>
-            <p className="text-sm text-slate-700 font-bold">No tenders yet</p>
-            <p className="text-xs text-slate-400">
-              Add tenders manually or import your TENDERS.xlsx workbook to get started.
-            </p>
+            <div>
+              <p className="text-base text-slate-800 font-bold">
+                {hasActiveFilters ? "No tenders match your filters" : "No tenders yet"}
+              </p>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                {hasActiveFilters
+                  ? "Try clearing filters or broadening your search."
+                  : "Add tenders manually or import your TENDERS.xlsx workbook to get started."}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={() => applyQuickFilter("all")}
+                  className="px-4 py-2 text-xs font-bold border border-slate-200 rounded-xl hover:bg-slate-50 transition"
+                >
+                  Clear filters
+                </button>
+              )}
+              {!readOnly && !hasActiveFilters && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 text-xs font-bold border border-slate-200 rounded-xl hover:bg-slate-50 flex items-center gap-1.5 transition"
+                  >
+                    <Upload size={13} />
+                    Import Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openCreate}
+                    className="px-4 py-2 text-xs font-bold bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-xl flex items-center gap-1.5 transition"
+                  >
+                    <Plus size={13} />
+                    Add Tender
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       ) : (
         <div className="flex-1 min-w-0 min-h-0 px-5 pb-5">
-          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-20rem)] border border-slate-200 rounded-xl shadow-xs scrollbar-thin">
-            <table className="w-full text-[11px] min-w-[1680px] table-fixed">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-800 text-left text-[10px] uppercase tracking-wider text-slate-300">
-                  <th className="w-8 px-1 py-2 font-bold" aria-label="Expand" />
-                  <th className="w-[130px] px-2 py-2 font-bold">Bid No.</th>
-                  <th className="w-[88px] min-w-[88px] px-2 py-2 font-bold">Type</th>
-                  <th className="w-[150px] px-2 py-2 font-bold">Category</th>
-                  <th className="w-[100px] px-2 py-2 font-bold">Ministry</th>
-                  <th className="w-[100px] px-2 py-2 font-bold">Organisation</th>
-                  <th className="w-[100px] px-2 py-2 font-bold">Department</th>
-                  <th className="w-[100px] px-2 py-2 font-bold">Address</th>
-                  <th className="w-[88px] px-2 py-2 font-bold">Officer</th>
-                  <th className="w-[44px] px-2 py-2 font-bold text-right">Qty</th>
-                  <th className="w-[120px] px-2 py-2 font-bold">Add. Req.</th>
-                  <th className="w-[108px] px-2 py-2 font-bold">End Date</th>
-                  <th className="w-[88px] px-2 py-2 font-bold">Filed Date</th>
-                  <th className="w-[88px] px-2 py-2 font-bold">Entry Date</th>
-                  <th className="w-[108px] px-2 py-2 font-bold">Pre-Bid</th>
-                  <th className="w-[120px] px-2 py-2 font-bold">Pre-Bid Venue</th>
-                  <th className="w-[132px] px-2 py-2 font-bold">Status</th>
-                  {!readOnly && <th className="w-10 px-1 py-2 font-bold" />}
+          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-20rem)] border border-slate-200/80 rounded-xl shadow-xs scrollbar-thin bg-white">
+            <table className="w-full text-xs min-w-[1760px] table-fixed">
+              <thead className="sticky top-0 z-10 shadow-sm">
+                <tr className="bg-slate-100/90 text-left text-[9px] uppercase tracking-wider text-slate-500 backdrop-blur-sm">
+                  <th className="w-8 px-1 py-1.5" aria-label="Expand" />
+                  <th colSpan={3} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-[#ff791a]">
+                    Bid
+                  </th>
+                  <th colSpan={5} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                    Buyer / Consignee
+                  </th>
+                  <th colSpan={2} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                    Terms
+                  </th>
+                  <th colSpan={5} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                    Dates & Pre-Bid
+                  </th>
+                  <th className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">Status</th>
+                  <th className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">Last Updated</th>
+                  {!readOnly && <th className="w-10 px-1 py-1.5 border-l border-slate-200/80" aria-label="Actions" />}
+                </tr>
+                <tr className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                  <th className="w-8 px-1 py-2.5 font-semibold" aria-label="Expand" />
+                  <th className="min-w-[200px] px-2 py-2.5 font-semibold">Bid No.</th>
+                  <th className="w-[88px] min-w-[88px] px-2 py-2.5 font-semibold">Type</th>
+                  <th className="w-[150px] px-2 py-2.5 font-semibold">Category</th>
+                  <th className="w-[100px] px-2 py-2.5 font-semibold border-l border-slate-100">Ministry</th>
+                  <th className="w-[110px] px-2 py-2.5 font-semibold">Organisation</th>
+                  <th className="w-[100px] px-2 py-2.5 font-semibold">Department</th>
+                  <th className="w-[110px] px-2 py-2.5 font-semibold">Address</th>
+                  <th className="w-[120px] px-2 py-2.5 font-semibold leading-tight normal-case">
+                    <span className="block text-[9px] uppercase text-slate-400">Consignee</span>
+                    <span className="block font-semibold">Reporting/Officer</span>
+                  </th>
+                  <th className="w-[44px] px-2 py-2.5 font-semibold text-right border-l border-slate-100">Qty</th>
+                  <th className="w-[140px] px-2 py-2.5 font-semibold">Add. Req.</th>
+                  <th className="min-w-[148px] px-2 py-2.5 font-semibold border-l border-slate-100">End Date</th>
+                  <th className="min-w-[132px] px-2 py-2.5 font-semibold">Filed</th>
+                  <th className="w-[88px] px-2 py-2.5 font-semibold">Entry</th>
+                  <th className="w-[108px] px-2 py-2.5 font-semibold">Pre-Bid</th>
+                  <th className="w-[120px] px-2 py-2.5 font-semibold">Pre-Bid Venue</th>
+                  <th className="w-[132px] px-2 py-2.5 font-semibold border-l border-slate-100">Status</th>
+                  <th className="min-w-[140px] px-2 py-2.5 font-semibold border-l border-slate-100 leading-tight">
+                    <span className="block">Last Updated</span>
+                    <span className="block text-[9px] normal-case text-slate-400">GeM sync</span>
+                  </th>
+                  {!readOnly && <th className="w-10 px-1 py-2.5 font-semibold" />}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((tender, idx) => {
                   const deadline = deadlineMeta(tender.endDate);
-                  const addReqPreview = truncatePreview(tender.additionalRequirements, 34);
+                  const deadlineCellClass = tenderDeadlineCellClass(tender, deadline);
+                  const addReqText = tenderAdditionalRequirements(tender);
+                  const addReqPreview = truncatePreview(addReqText, 36);
+                  const consignee = tenderConsignee(tender);
+                  const department = tenderDepartment(tender);
                   const venuePreview = truncatePreview(formatPreBidVenueLabel(tender), 34);
                   const isExpanded = expandedTenderId === tender.id;
                   const deleted = isTenderDeleted(tender);
                   const locked = isStatusLocked(tender);
-                  const urgentNotParticipated = isNearNotParticipated(tender) || isMissedParticipation(tender);
+                  const urgentNotParticipated =
+                    isNearNotParticipated(tender) || isMissedParticipation(tender);
                   const rowBg = deleted
                     ? "bg-slate-100/80"
                     : urgentNotParticipated
-                      ? "bg-amber-50/70"
-                      : deadline.band === "passed"
-                        ? "bg-red-50/40"
-                        : deadline.band === "soon"
-                          ? "bg-amber-50/50"
-                          : idx % 2 === 0
-                            ? "bg-white"
-                            : "bg-slate-50/40";
+                      ? "bg-amber-50/50"
+                      : idx % 2 === 0
+                        ? "bg-white"
+                        : "bg-slate-50/40";
 
                   return (
                     <React.Fragment key={tender.id}>
                     <tr
-                      className={`border-t border-slate-100 hover:bg-orange-50/40 transition-colors h-9 ${rowBg} ${isExpanded ? "ring-1 ring-inset ring-orange-200" : ""}`}
+                      className={`border-t border-slate-100 hover:bg-orange-50/50 transition-colors ${rowBg} ${isExpanded ? "bg-orange-50/60 ring-1 ring-inset ring-orange-200" : ""}`}
                     >
-                      <td className="px-1 py-1 align-middle text-center">
+                      <td className="px-1 py-2 align-middle text-center">
                         <button
                           type="button"
                           onClick={() => toggleExpandedRow(tender.id)}
-                          className="p-1 rounded hover:bg-slate-100 text-slate-500 cursor-pointer"
+                          className={`p-1 rounded-lg cursor-pointer transition ${
+                            isExpanded
+                              ? "bg-orange-100 text-orange-700"
+                              : "hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                          }`}
                           title="Show full details"
                         >
                           <ChevronRight
@@ -922,87 +1383,86 @@ export default function TendersPanel({
                           />
                         </button>
                       </td>
-                      <td className="px-2 py-1 align-middle">
-                        <span className="font-mono text-[10px] font-bold text-slate-900 truncate block">
-                          {tender.bidNo}
-                          {deleted && (
-                            <span className="ml-1 text-[9px] font-bold uppercase text-slate-400">Deleted</span>
-                          )}
-                          {isMissedParticipation(tender) && (
-                            <span className="ml-1 text-[9px] font-bold uppercase text-red-600">Locked</span>
-                          )}
-                        </span>
+                      <td className="px-2 py-2 align-middle">
+                        <BidNumberCell
+                          tender={tender}
+                          copiedBidId={copiedBidId}
+                          onCopy={copyBidNumber}
+                        />
                       </td>
-                      <td className="px-2 py-1 align-middle overflow-hidden">
+                      <td className="px-2 py-2 align-middle overflow-hidden">
                         <TypeBadge type={tender.tenderType} />
                       </td>
-                      <td className="px-2 py-1 align-middle min-w-0 overflow-hidden">
+                      <td className="px-2 py-2 align-middle min-w-0 overflow-hidden">
                         <p className="text-slate-700 truncate" title={tender.category}>
                           {tender.category || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-2 align-middle border-l border-slate-100/80">
                         <p className="text-slate-600 truncate" title={tender.ministry}>
                           {tender.ministry || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-700 truncate" title={tender.organisation || "—"}>
-                          {tender.organisation || "—"}
+                      <td className="px-2 py-2 align-middle">
+                        <p className="text-slate-700 truncate" title={tenderOrganisation(tender) || "—"}>
+                          {tenderOrganisation(tender) || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-700 truncate" title={tender.department || "—"}>
-                          {tender.department || "—"}
+                      <td className="px-2 py-2 align-middle">
+                        <p className="text-slate-600 truncate" title={department || "Same as organisation"}>
+                          {department || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-2 align-middle">
                         <p className="text-slate-600 truncate" title={tender.address}>
                           {tender.address || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle">
-                        <p className="text-slate-600 truncate" title={tenderConsignee(tender)}>
-                          {tenderConsignee(tender) || "—"}
+                      <td className="px-2 py-2 align-middle">
+                        <p
+                          className={`truncate ${consignee ? "text-slate-800 font-medium" : "text-slate-300"}`}
+                          title={consignee || "Not extracted from PDF"}
+                        >
+                          {consignee || "—"}
                         </p>
                       </td>
-                      <td className="px-2 py-1 align-middle text-right tabular-nums font-semibold text-slate-800">
+                      <td className="px-2 py-2 align-middle text-right tabular-nums font-semibold text-slate-800 border-l border-slate-100/80">
                         {tender.quantity || "—"}
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-2 align-middle">
                         <button
                           type="button"
                           onClick={() => toggleExpandedRow(tender.id)}
-                          className={`text-left w-full truncate ${addReqPreview.truncated ? "text-orange-700 hover:underline cursor-pointer" : "text-slate-600 cursor-pointer"}`}
-                          title={tender.additionalRequirements || "—"}
+                          className={`text-left w-full truncate ${addReqPreview.truncated ? "text-orange-700 hover:underline cursor-pointer" : addReqText ? "text-slate-700 cursor-pointer" : "text-slate-300 cursor-pointer"}`}
+                          title={addReqText || "—"}
                         >
                           {addReqPreview.preview}
                         </button>
                       </td>
-                      <td className={`px-2 py-1 align-middle whitespace-nowrap ${deadline.className}`}>
-                        <div className="flex items-center gap-1 truncate">
+                      <td className="px-2 py-2 align-middle min-w-[148px] border-l border-slate-100/80">
+                        <span className={`inline-flex items-start gap-1 leading-tight rounded-lg px-2 py-1 text-[11px] ${deadlineCellClass}`}>
                           {deadline.urgent && deadline.label !== "—" && (
-                            <Clock size={10} className="shrink-0" />
+                            <Clock size={10} className="shrink-0 mt-0.5" />
                           )}
-                          <span className="truncate">{deadline.label}</span>
-                        </div>
+                          <span className="whitespace-normal break-words">{deadline.label}</span>
+                        </span>
                       </td>
-                      <td className="px-2 py-1 align-middle whitespace-nowrap">
+                      <td className="px-2 py-2 align-middle min-w-[132px]">
                         {tender.filedDate ? (
-                          <span className="text-sky-700 font-medium truncate block">
+                          <span className="text-sky-700 font-medium whitespace-normal break-words leading-tight block">
                             {formatTenderFiledDate(tender.filedDate)}
                           </span>
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}
                       </td>
-                      <td className="px-2 py-1 align-middle whitespace-nowrap text-slate-600 truncate">
+                      <td className="px-2 py-2 align-middle whitespace-nowrap text-slate-600 truncate">
                         {tender.entryDate ? formatAppDate(tender.entryDate) : tender.createdAt ? formatAppDate(tender.createdAt) : "—"}
                       </td>
-                      <td className="px-2 py-1 align-middle whitespace-nowrap text-slate-600 truncate">
+                      <td className="px-2 py-2 align-middle whitespace-nowrap text-slate-600 truncate">
                         {formatPreBidLabel(tender)}
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-2 align-middle">
                         <button
                           type="button"
                           onClick={() => toggleExpandedRow(tender.id)}
@@ -1012,10 +1472,10 @@ export default function TendersPanel({
                           {venuePreview.preview}
                         </button>
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-2 align-middle border-l border-slate-100/80">
                         {readOnly || locked ? (
                           <span
-                            className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border truncate max-w-full ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
+                            className={`inline-flex max-w-full items-center px-2 py-0.5 rounded-full text-[10px] font-bold border truncate ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
                             title={
                               isMissedParticipation(tender)
                                 ? "Deadline passed without participation"
@@ -1034,7 +1494,7 @@ export default function TendersPanel({
                               onChange={(e) =>
                                 void handleStatusChange(tender, e.target.value as TenderStatus)
                               }
-                              className={`w-full appearance-none pl-1.5 pr-6 py-1 rounded-md text-[10px] font-bold border cursor-pointer transition disabled:opacity-60 ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
+                              className={`w-full appearance-none pl-2 pr-6 py-1 rounded-full text-[10px] font-bold border cursor-pointer transition disabled:opacity-60 ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
                             >
                               {selectableStatuses(tender.status).map((key) => (
                                 <option key={key} value={key}>
@@ -1049,13 +1509,27 @@ export default function TendersPanel({
                           </div>
                         )}
                       </td>
+                      <td className="px-2 py-2 align-middle min-w-[140px] border-l border-slate-100/80">
+                        <span
+                          className={`whitespace-normal break-words leading-tight block ${
+                            tender.statusSyncedAt ? "text-violet-800 font-medium" : "text-slate-300"
+                          }`}
+                          title={
+                            tender.statusSyncedAt
+                              ? "Last updated from GeM via FlexHRM Smart Capture"
+                              : "Not synced yet — use Sync Status on GeM Seller Bids"
+                          }
+                        >
+                          {formatStatusSyncedAt(tender.statusSyncedAt)}
+                        </span>
+                      </td>
                       {!readOnly && (
-                        <td className="px-1 py-1 align-middle">
+                        <td className="px-1 py-2 align-middle">
                           {!locked && !deleted && (
                             <button
                               type="button"
                               onClick={() => void handleDelete(tender)}
-                              className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 cursor-pointer transition"
+                              className="p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-500 cursor-pointer transition"
                               title="Delete"
                             >
                               <Trash2 size={13} />
@@ -1066,7 +1540,7 @@ export default function TendersPanel({
                     </tr>
                     {isExpanded && (
                       <tr className={`${rowBg} border-t border-orange-100`}>
-                        <td colSpan={readOnly ? TABLE_COL_SPAN - 1 : TABLE_COL_SPAN} className="px-3 py-3">
+                        <td colSpan={readOnly ? TABLE_COL_SPAN - 1 : TABLE_COL_SPAN} className="px-4 py-4 bg-orange-50/30">
                           <TenderExpandedDetails tender={tender} />
                         </td>
                       </tr>
@@ -1077,23 +1551,39 @@ export default function TendersPanel({
               </tbody>
             </table>
           </div>
-          <p className="text-[10px] text-slate-400 mt-2 text-right">
-            {filtered.length} shown · {activeTenders.length} active
-            {search.trim() ? " (search includes deleted)" : ""} · scroll left/right for all columns
-          </p>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[10px] text-slate-500">
+            <p>
+              <span className="font-bold text-slate-700 tabular-nums">{filtered.length}</span> shown ·{" "}
+              <span className="font-bold text-slate-700 tabular-nums">{activeTenders.length}</span> active
+              {search.trim() ? " · search includes deleted" : ""}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-400">Deadline:</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800 font-semibold">10+ days</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-orange-800 font-semibold">≤10 days</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-red-800 font-semibold">≤2 days / passed</span>
+            </div>
+          </div>
         </div>
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-orange-50/50">
-              <h3 className="font-extrabold text-slate-900">Add Tender</h3>
-              <button type="button" onClick={() => setModalOpen(false)} className="cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-linear-to-r from-orange-50 to-white shrink-0">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base">Add Tender</h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">Enter bid details manually</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition"
+              >
                 <X size={18} className="text-slate-400" />
               </button>
             </div>
-            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs overflow-y-auto">
               <label className="sm:col-span-2">
                 <span className="font-bold text-slate-600 block mb-1">Bid No. *</span>
                 <input
@@ -1162,7 +1652,7 @@ export default function TendersPanel({
                 />
               </label>
               <label>
-                <span className="font-bold text-slate-600 block mb-1">Consignee Officer</span>
+                <span className="font-bold text-slate-600 block mb-1">Consignee Reporting/Officer</span>
                 <input
                   value={form.consigneeOfficer}
                   onChange={(e) =>
@@ -1203,18 +1693,12 @@ export default function TendersPanel({
                   placeholder={"Tenure (months): 12\nBasic Pay: 781\nWorking days/month: 26"}
                 />
               </label>
-              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <DateInput
-                  label="Bid End Date"
-                  value={endDateIso}
-                  onChange={(e) => setEndDateIso(e.target.value)}
-                />
-                <TimeInput
-                  label="Bid End Time (optional)"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                />
-              </div>
+              <DateTimeInput
+                label="Bid End Date & Time"
+                value={endDateTimeLocal}
+                onChange={(e) => setEndDateTimeLocal(e.target.value)}
+                className="sm:col-span-2"
+              />
               <DateInput
                 label="Bid Start Date"
                 value={startDateIso}
@@ -1293,11 +1777,11 @@ export default function TendersPanel({
                 />
               </label>
             </div>
-            <div className="px-4 py-3 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-lg cursor-pointer"
+                className="px-4 py-2 text-xs font-bold border border-slate-200 rounded-xl hover:bg-white cursor-pointer transition"
               >
                 Cancel
               </button>
@@ -1305,9 +1789,9 @@ export default function TendersPanel({
                 type="button"
                 onClick={() => void handleSubmit()}
                 disabled={submitting}
-                className="px-3 py-1.5 text-xs font-bold bg-[#ff791a] text-white rounded-lg cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 text-xs font-bold bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-xl cursor-pointer disabled:opacity-50 shadow-sm transition"
               >
-                {submitting ? "Saving…" : "Save"}
+                {submitting ? "Saving…" : "Save Tender"}
               </button>
             </div>
           </div>

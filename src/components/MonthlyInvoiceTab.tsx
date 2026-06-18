@@ -8,7 +8,6 @@ import {
   filterSchoolsByBillingCategory,
   filterLineItemsByBillingCategory,
   getSchoolBillingToilets,
-  getSchoolCleaningDays,
 } from "../lib/school-work-helpers";
 import {
   exportGovtInvoiceExcelCombined,
@@ -153,6 +152,26 @@ export default function MonthlyInvoiceTab({
     setDistrict(districtForBlock);
   }, [districtForBlock]);
   const [defaultDays, setDefaultDays] = useState(STANDARD_MONTH_DAYS);
+  const lastDaysSyncKeyRef = useRef("");
+
+  useEffect(() => {
+    if (!selectedMonth) return;
+    const monthBillings = billings.filter((billing) => billing.monthKey === selectedMonth);
+    const syncKey = `${selectedMonth}|${block}|${monthBillings
+      .map((billing) => `${billing.id}:${billing.cleaningDays}`)
+      .join(",")}`;
+    if (syncKey === lastDaysSyncKeyRef.current) return;
+    lastDaysSyncKeyRef.current = syncKey;
+
+    if (monthBillings.length === 0) {
+      setDefaultDays(STANDARD_MONTH_DAYS);
+      return;
+    }
+    const preferred =
+      (block && monthBillings.find((billing) => billing.block === block)) ||
+      monthBillings[0];
+    setDefaultDays(preferred.cleaningDays || STANDARD_MONTH_DAYS);
+  }, [selectedMonth, block, billings]);
   const [financialYear, setFinancialYear] = useState("2025-2026");
   const [category, setCategory] = useState<"elementary" | "secondary" | "all">("all");
   const [generating, setGenerating] = useState(false);
@@ -160,6 +179,7 @@ export default function MonthlyInvoiceTab({
   const [exportingPdf, setExportingPdf] = useState(false);
   const [draftDaysBySchoolId, setDraftDaysBySchoolId] = useState<Record<string, number>>({});
   const [draftToiletsBySchoolId, setDraftToiletsBySchoolId] = useState<Record<string, number>>({});
+  const [manualDaysSchoolIds, setManualDaysSchoolIds] = useState<Set<string>>(() => new Set());
   const [viewBlockFilter, setViewBlockFilter] = useState("");
   const [viewCategoryFilter, setViewCategoryFilter] = useState("");
   const [viewMonthFilter, setViewMonthFilter] = useState("");
@@ -298,14 +318,6 @@ export default function MonthlyInvoiceTab({
   const activePreviewSchools =
     previewTab === "elementary" ? elementaryPreviewSchools : secondaryPreviewSchools;
 
-  const savedDaysBySchoolId = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const school of blockSchools) {
-      map[school.id] = getSchoolCleaningDays(school, selectedMonth, defaultDays);
-    }
-    return map;
-  }, [blockSchools, selectedMonth, defaultDays]);
-
   const savedToiletsBySchoolId = useMemo(() => {
     const map: Record<string, number> = {};
     for (const school of blockSchools) {
@@ -315,12 +327,12 @@ export default function MonthlyInvoiceTab({
   }, [blockSchools, selectedMonth]);
 
   const daysBySchoolId = useMemo(() => {
-    const merged = { ...savedDaysBySchoolId };
-    for (const [id, days] of Object.entries(draftDaysBySchoolId)) {
-      if (blockSchools.some((s) => s.id === id)) merged[id] = days;
+    const map: Record<string, number> = {};
+    for (const school of blockSchools) {
+      map[school.id] = draftDaysBySchoolId[school.id] ?? defaultDays;
     }
-    return merged;
-  }, [savedDaysBySchoolId, draftDaysBySchoolId, blockSchools]);
+    return map;
+  }, [blockSchools, draftDaysBySchoolId, defaultDays]);
 
   const toiletsBySchoolId = useMemo(() => {
     const merged = { ...savedToiletsBySchoolId };
@@ -392,12 +404,33 @@ export default function MonthlyInvoiceTab({
     if (ok) {
       setDraftDaysBySchoolId({});
       setDraftToiletsBySchoolId({});
+      setManualDaysSchoolIds(new Set());
     }
     setSavingWorkdays(false);
     return ok;
   };
 
+  const resetInvoiceDrafts = () => {
+    setDraftDaysBySchoolId({});
+    setDraftToiletsBySchoolId({});
+    setManualDaysSchoolIds(new Set());
+  };
+
+  const handleDefaultDaysChange = (rawValue: string) => {
+    const nextDefault = Math.min(31, Math.max(1, Number(rawValue) || STANDARD_MONTH_DAYS));
+    setDefaultDays(nextDefault);
+    setDraftDaysBySchoolId((prev) => {
+      const next = { ...prev };
+      for (const school of blockSchools) {
+        if (manualDaysSchoolIds.has(school.id)) continue;
+        next[school.id] = nextDefault;
+      }
+      return next;
+    });
+  };
+
   const handleDaysChange = (schoolId: string, days: number) => {
+    setManualDaysSchoolIds((prev) => new Set(prev).add(schoolId));
     setDraftDaysBySchoolId((prev) => ({ ...prev, [schoolId]: days }));
   };
 
@@ -478,6 +511,7 @@ export default function MonthlyInvoiceTab({
     }
     setDraftDaysBySchoolId(daysDraft);
     setDraftToiletsBySchoolId(toiletsDraft);
+    setManualDaysSchoolIds(new Set());
     if (selectedMonth !== billing.monthKey && onMonthChange) {
       onMonthChange(billing.monthKey);
     }
@@ -549,6 +583,7 @@ export default function MonthlyInvoiceTab({
           selectedMonth={selectedMonth}
           monthsList={monthsList}
           onMonthChange={onMonthChange}
+          defaultDays={defaultDays}
           onSaveWorkdays={onSaveWorkdays}
           onSavePayUpdates={onSavePayUpdates}
           onSavePartnerDetails={onSavePartnerDetails}
@@ -584,7 +619,10 @@ export default function MonthlyInvoiceTab({
             </label>
             <select
               value={block}
-              onChange={(e) => setBlock(e.target.value)}
+              onChange={(e) => {
+                setBlock(e.target.value);
+                resetInvoiceDrafts();
+              }}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold cursor-pointer"
             >
               {blockNames.map((b) => (
@@ -601,7 +639,10 @@ export default function MonthlyInvoiceTab({
               </label>
               <select
                 value={selectedMonth}
-                onChange={(e) => onMonthChange(e.target.value)}
+                onChange={(e) => {
+                  resetInvoiceDrafts();
+                  onMonthChange(e.target.value);
+                }}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold cursor-pointer"
               >
                 {monthsList.map((m) => (
@@ -621,7 +662,7 @@ export default function MonthlyInvoiceTab({
               min={1}
               max={31}
               value={defaultDays}
-              onChange={(e) => setDefaultDays(Number(e.target.value) || STANDARD_MONTH_DAYS)}
+              onChange={(e) => handleDefaultDaysChange(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs"
             />
           </div>

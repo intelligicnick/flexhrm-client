@@ -753,7 +753,10 @@ export function getPartnerPayBaseValues(
     school && monthKey
       ? getSchoolBillingToilets(school, monthKey)
       : Number(partner.noOfToilets) || 0;
-  const days = school ? getSchoolCleaningDays(school, monthKey, defaultDays) : defaultDays;
+  const days =
+    school && monthKey
+      ? getSchoolCleaningDays(school, monthKey, defaultDays)
+      : defaultDays;
   const monthlyPay = Number(partner.monthlyPay) || 0;
   const perToiletPay = getPartnerPerToiletPay({ ...partner, noOfToilets: toilets, monthlyPay });
   return { toilets, days, monthlyPay, perToiletPay };

@@ -405,6 +405,7 @@ export function useHRMSApp() {
   const activeSidebarTab = pathToTab(location.pathname);
   const setActiveSidebarTab = (tab: string) => navigate(tabToPath(tab));
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
+  const [employeeListRoleFilter, setEmployeeListRoleFilter] = useState("");
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
     "School Work": false,
     "Bids": false,
@@ -1854,9 +1855,9 @@ export function useHRMSApp() {
                 continue;
               }
               if (sortedDates.includes(d)) {
-                empData[d] = "P"; // Selected date -> Present
+                empData[d] = "P";
               } else {
-                empData[d] = "A"; // Unselected date -> Absent
+                empData[d] = "A";
               }
             }
             monthData[empId] = empData;
@@ -4209,6 +4210,8 @@ export function useHRMSApp() {
       fetchRenewals();
       fetchSchoolWorks();
       fetchPendingSupervisorRequestCount();
+      fetchSchoolVisits();
+      fetchSchoolSupervisors();
     }
   }, [isLoggedIn, activeSidebarTab]);
 
@@ -5766,6 +5769,36 @@ export function useHRMSApp() {
     }
   };
 
+  const handleBulkUpdateVisitStatus = async (
+    ids: string[],
+    status: "approved" | "rejected",
+  ): Promise<boolean> => {
+    if (ids.length === 0) return true;
+    try {
+      const results = await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/school-visits/${id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          }),
+        ),
+      );
+      if (results.some((res) => !res.ok)) {
+        throw new Error("Some visits could not be updated.");
+      }
+      await fetchSchoolVisits();
+      await fetchAdminNotifications();
+      triggerSuccess(
+        `${ids.length} visit${ids.length !== 1 ? "s" : ""} marked as ${status}.`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage(err.message);
+      return false;
+    }
+  };
+
   const handleRespondSupervisorRequest = async (
     id: string,
     adminResponse: string,
@@ -6953,6 +6986,7 @@ export function useHRMSApp() {
     roleError,
     roleSuccess,
     activePimSubTab,
+    employeeListRoleFilter,
     sidebarSearch,
     isSidebarCollapsed,
     isProfileOpen,
@@ -7302,6 +7336,7 @@ export function useHRMSApp() {
     handleAddExpenseRecord,
     handleDeleteExpenseRecord,
     handleUpdateVisitStatus,
+    handleBulkUpdateVisitStatus,
     handleRespondSupervisorRequest,
     handleCloseSupervisorRequest,
     handleResolveSupervisorEscalation,
@@ -7423,6 +7458,7 @@ export function useHRMSApp() {
     setRoleError,
     setRoleSuccess,
     setActivePimSubTab,
+    setEmployeeListRoleFilter,
     setSidebarSearch,
     setIsSidebarCollapsed,
     setIsProfileOpen,

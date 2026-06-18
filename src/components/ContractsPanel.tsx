@@ -193,7 +193,6 @@ async function parseContractsWorkbook(buffer: ArrayBuffer): Promise<CreateContra
 
 function ContractExpandedDetails({ contract }: { contract: Contract }) {
   const rows = [
-    { label: "Corresponding office", value: contract.correspondingOffice },
     { label: "Contract value", value: contract.contractValue },
     { label: "Linked tender", value: contract.tenderBidNo },
     { label: "Extension end date", value: contract.extensionEndDate },
@@ -534,7 +533,6 @@ export default function ContractsPanel({
       tenderBidNo: tender.bidNo,
       officerName: tender.officerName || prev.officerName,
       officeName: tender.department || prev.officeName,
-      correspondingOffice: tender.address || prev.correspondingOffice,
       category: tender.category || prev.category,
       contractType: tender.tenderType,
       companyName: tender.tenderType === "travel" ? "Travel Plus" : prev.companyName,
@@ -863,14 +861,6 @@ export default function ContractsPanel({
                   <input
                     value={form.officeName}
                     onChange={(e) => setForm({ ...form, officeName: e.target.value })}
-                    className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
-                  />
-                </label>
-                <label className="block sm:col-span-2">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">Corresponding Office</span>
-                  <input
-                    value={form.correspondingOffice}
-                    onChange={(e) => setForm({ ...form, correspondingOffice: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, Loader2, Puzzle, RefreshCw, X } from "lucide-react";
+import { Check, Copy, Loader2, Puzzle, RefreshCw, X } from "lucide-react";
 import { parseApiError } from "../api";
 import { getApiBase } from "../env";
 
@@ -35,6 +35,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState("");
+  const [copiedField, setCopiedField] = useState<"apiUrl" | "code" | null>(null);
   const apiUrl = extensionApiUrl();
   const onCopiedRef = useRef(onCopied);
   onCopiedRef.current = onCopied;
@@ -73,6 +74,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
       setCode("");
       setExpiresAt("");
       setError("");
+      setCopiedField(null);
       return;
     }
     void generateCode();
@@ -86,10 +88,18 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
     return () => window.clearInterval(timer);
   }, [expiresAt]);
 
+  const markCopied = (field: "apiUrl" | "code") => {
+    setCopiedField(field);
+    window.setTimeout(() => {
+      setCopiedField((current) => (current === field ? null : current));
+    }, 2000);
+  };
+
   const copyCode = async () => {
     if (!code) return;
     try {
       await navigator.clipboard.writeText(code);
+      markCopied("code");
       onCopiedRef.current?.("Connection code copied to clipboard.");
     } catch {
       onCopiedRef.current?.("Could not copy — select and copy the code manually.");
@@ -99,6 +109,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
   const copyApiUrl = async () => {
     try {
       await navigator.clipboard.writeText(apiUrl);
+      markCopied("apiUrl");
       onCopiedRef.current?.("API URL copied to clipboard.");
     } catch {
       onCopiedRef.current?.("Could not copy — select and copy the API URL manually.");
@@ -168,10 +179,18 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
               <button
                 type="button"
                 onClick={() => void copyApiUrl()}
-                className="shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition"
-                title="Copy API URL"
+                className={`shrink-0 p-2.5 rounded-lg border transition ${
+                  copiedField === "apiUrl"
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-200 bg-white hover:bg-slate-50"
+                }`}
+                title={copiedField === "apiUrl" ? "Copied!" : "Copy API URL"}
               >
-                <Copy size={16} className="text-slate-600" />
+                {copiedField === "apiUrl" ? (
+                  <Check size={16} className="text-emerald-600" />
+                ) : (
+                  <Copy size={16} className="text-slate-600" />
+                )}
               </button>
             </div>
           </div>
@@ -195,10 +214,18 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
                 type="button"
                 onClick={() => void copyCode()}
                 disabled={!code || loading}
-                className="shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition"
-                title="Copy code"
+                className={`shrink-0 p-2.5 rounded-lg border disabled:opacity-50 transition ${
+                  copiedField === "code"
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-200 bg-white hover:bg-slate-50"
+                }`}
+                title={copiedField === "code" ? "Copied!" : "Copy code"}
               >
-                <Copy size={16} className="text-slate-600" />
+                {copiedField === "code" ? (
+                  <Check size={16} className="text-emerald-600" />
+                ) : (
+                  <Copy size={16} className="text-slate-600" />
+                )}
               </button>
               <button
                 type="button"

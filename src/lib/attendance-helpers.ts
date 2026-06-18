@@ -36,6 +36,9 @@ export function getEffectiveAttendanceStatus(
   dayNum: number,
   storedStatus: string,
 ): string {
+  if (storedStatus) {
+    return storedStatus;
+  }
   if (isWeeklyOffDay(workingDaysType, monthStr, dayNum)) {
     return "WO";
   }

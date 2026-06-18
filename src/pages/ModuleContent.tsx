@@ -121,6 +121,7 @@ import {
   countMonthAttendance,
   getSalaryProrationDays,
   isWeeklyOffDay,
+  getEffectiveAttendanceStatus,
   getBulkAttendanceDisabledDays,
   filterSelectableBulkDays,
   employeeMatchesAttendanceRecordFilter,
@@ -465,6 +466,7 @@ export default function ModuleContent() {
     handleDiscardSchoolBulkEditDrafts,
     handleApplySchoolBulkEdit,
     handleUpdateVisitStatus,
+    handleBulkUpdateVisitStatus,
     handleRespondSupervisorRequest,
     handleCloseSupervisorRequest,
     handleResolveSupervisorEscalation,
@@ -5264,6 +5266,12 @@ export default function ModuleContent() {
                                                 const currentStatus = empData[dayNum] || "";
                                                 const isExitedToday = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
                                                 const isWeeklyOff = isWeeklyOffDay(emp.workingDaysType, selectedMonth, dayNum);
+                                                const effectiveStatus = getEffectiveAttendanceStatus(
+                                                  emp.workingDaysType,
+                                                  selectedMonth,
+                                                  dayNum,
+                                                  currentStatus,
+                                                );
                                                 return (
                                                   <td key={i} className="px-0.5 py-1 text-center">
                                                     {isExitedToday ? (
@@ -5273,23 +5281,44 @@ export default function ModuleContent() {
                                                       >
                                                         —
                                                       </span>
-                                                    ) : isWeeklyOff ? (
-                                                      <span
-                                                        className="text-[9px] font-black text-center bg-violet-100 text-violet-800 rounded px-1 py-0.5 select-none"
-                                                        title="Weekly Off"
+                                                    ) : isWeeklyOff && currentStatus !== "P" ? (
+                                                      <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
+                                                        value="WO"
+                                                        onChange={(e) => {
+                                                          const val = e.target.value;
+                                                          if (val === "P") handleCellAttendanceChange(emp.id, dayNum, "P");
+                                                        }}
+                                                        disabled={!userPermissions.attendance?.edit}
+                                                        title="Weekly Off — change to Present if employee worked"
+                                                        className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-violet-100 text-violet-800"
                                                       >
-                                                        WO
-                                                      </span>
+                                                        <option value="WO">WO</option>
+                                                        <option value="P">P</option>
+                                                      </select>
+                                                    ) : isWeeklyOff && currentStatus === "P" ? (
+                                                      <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
+                                                        value="P"
+                                                        onChange={(e) => {
+                                                          const val = e.target.value;
+                                                          handleCellAttendanceChange(emp.id, dayNum, val === "WO" ? "" : val);
+                                                        }}
+                                                        disabled={!userPermissions.attendance?.edit}
+                                                        title="Present on weekly off — change back to WO if needed"
+                                                        className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-emerald-100 text-emerald-800"
+                                                      >
+                                                        <option value="WO">WO</option>
+                                                        <option value="P">P</option>
+                                                      </select>
                                                     ) : (
                                                       <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
                                                         value={currentStatus}
                                                         onChange={(e) => handleCellAttendanceChange(emp.id, dayNum, e.target.value)}
                                                         disabled={!userPermissions.attendance?.edit}
                                                         className={`text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer ${
-                                                          currentStatus === "P" ? "bg-emerald-100 text-emerald-800" :
-                                                          currentStatus === "A" ? "bg-rose-100 text-rose-800" :
-                                                          currentStatus === "L" ? "bg-amber-100 text-amber-800" :
-                                                          currentStatus === "H" ? "bg-blue-100 text-blue-800" :
+                                                          effectiveStatus === "P" ? "bg-emerald-100 text-emerald-800" :
+                                                          effectiveStatus === "A" ? "bg-rose-100 text-rose-800" :
+                                                          effectiveStatus === "L" ? "bg-amber-100 text-amber-800" :
+                                                          effectiveStatus === "H" ? "bg-blue-100 text-blue-800" :
                                                           "bg-slate-100 text-slate-400 font-semibold"
                                                         }`}
                                                       >
@@ -5492,6 +5521,7 @@ export default function ModuleContent() {
                                   }}
                                   onDeleteSupervisor={handleDeleteSchoolSupervisor}
                                   onUpdateVisitStatus={handleUpdateVisitStatus}
+                                  onBulkUpdateVisitStatus={handleBulkUpdateVisitStatus}
                                   onRespondToRequest={handleRespondSupervisorRequest}
                                   onCloseRequest={handleCloseSupervisorRequest}
                                   onResolveEscalation={handleResolveSupervisorEscalation}

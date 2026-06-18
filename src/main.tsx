@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { setupFetchInterceptor } from './api';
 import './index.css';
+import 'leaflet/dist/leaflet.css';
 
 setupFetchInterceptor();
 

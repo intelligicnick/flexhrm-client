@@ -18,6 +18,7 @@ interface FieldTeamPanelProps {
   onEditSupervisor: (supervisor: SchoolSupervisor) => void;
   onDeleteSupervisor: (id: string) => void;
   onUpdateVisitStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
+  onBulkUpdateVisitStatus?: (ids: string[], status: "approved" | "rejected") => Promise<boolean>;
   onRespondToRequest: (
     id: string,
     adminResponse: string,
@@ -54,6 +55,7 @@ export default function FieldTeamPanel({
   onEditSupervisor,
   onDeleteSupervisor,
   onUpdateVisitStatus,
+  onBulkUpdateVisitStatus,
   onRespondToRequest,
   onCloseRequest,
   onResolveEscalation,
@@ -167,6 +169,7 @@ export default function FieldTeamPanel({
         <SupervisorVisitsPanel
           visits={visits}
           onUpdateStatus={onUpdateVisitStatus}
+          onBulkUpdateStatus={onBulkUpdateVisitStatus}
           readOnly={readOnly}
         />
       ) : view === "requests" ? (

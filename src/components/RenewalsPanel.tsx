@@ -12,6 +12,7 @@ import {
   Server,
   Shield,
   Upload,
+  X,
 } from "lucide-react";
 import {
   CreateRenewalInput,
@@ -41,6 +42,11 @@ import RenewalDocumentsPanel, {
 } from "./RenewalDocumentsPanel";
 import RenewalBulkUploadModal from "./RenewalBulkUploadModal";
 import RenewalRenewModal from "./RenewalRenewModal";
+
+const RENEWAL_FORM_FIELD =
+  "mt-1 w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-[#ff791a] focus:ring-2 focus:ring-[#ff791a]/20 transition";
+const RENEWAL_FORM_TEXTAREA =
+  "w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-[#ff791a] focus:ring-2 focus:ring-[#ff791a]/20 transition";
 
 interface RenewalsPanelProps {
   category: RenewalCategory;
@@ -129,6 +135,10 @@ function titleLabel(category: RenewalCategory): string {
   return "Description";
 }
 
+function categorySupportsDocuments(category: RenewalCategory): boolean {
+  return category !== "it_renewals";
+}
+
 function normalizeRenewal(item: Renewal): Renewal {
   return {
     ...item,
@@ -160,6 +170,7 @@ export default function RenewalsPanel({
 }: RenewalsPanelProps) {
   const subtypeLabels = getSubtypeLabels(category);
   const Icon = categoryIcon(category);
+  const supportsDocuments = categorySupportsDocuments(category);
   const docsPanelRef = useRef<RenewalDocumentsPanelHandle>(null);
 
   const patchForm = (
@@ -203,6 +214,10 @@ export default function RenewalsPanel({
   const normalizedRenewals = useMemo(() => renewals.map(normalizeRenewal), [renewals]);
 
   const loadDocCounts = useCallback(async () => {
+    if (!supportsDocuments) {
+      setDocCounts({});
+      return;
+    }
     const entries = await Promise.all(
       normalizedRenewals.map(async (item) => {
         try {
@@ -214,7 +229,7 @@ export default function RenewalsPanel({
       }),
     );
     setDocCounts(Object.fromEntries(entries));
-  }, [normalizedRenewals]);
+  }, [normalizedRenewals, supportsDocuments]);
 
   useEffect(() => {
     void loadDocCounts();
@@ -226,7 +241,7 @@ export default function RenewalsPanel({
     if (subTypeFilter) n += 1;
     if (ownerFilter) n += 1;
     if (expiryFilter !== "all") n += 1;
-    if (docsFilter) n += 1;
+    if (supportsDocuments && docsFilter) n += 1;
     if (issuedFrom || issuedTo) n += 1;
     if (expiresFrom || expiresTo) n += 1;
     if (clientFilter.trim()) n += 1;
@@ -234,7 +249,7 @@ export default function RenewalsPanel({
     if (hasAmountFilter) n += 1;
     return n;
   }, [
-    search, subTypeFilter, ownerFilter, expiryFilter, docsFilter,
+    search, subTypeFilter, ownerFilter, expiryFilter, docsFilter, supportsDocuments,
     issuedFrom, issuedTo, expiresFrom, expiresTo, clientFilter, titleFilter, hasAmountFilter,
   ]);
 
@@ -281,9 +296,11 @@ export default function RenewalsPanel({
       if (!matchesIsoDateRange(issuedTs, issuedFrom, issuedTo)) return false;
       const expiresTs = parseFlexibleDateMs(item.expiresOn || item.expiryDate);
       if (!matchesIsoDateRange(expiresTs, expiresFrom, expiresTo)) return false;
-      const docCount = docCounts[item.id] ?? 0;
-      if (docsFilter === "has_docs" && docCount === 0) return false;
-      if (docsFilter === "missing_docs" && docCount > 0) return false;
+      if (supportsDocuments) {
+        const docCount = docCounts[item.id] ?? 0;
+        if (docsFilter === "has_docs" && docCount === 0) return false;
+        if (docsFilter === "missing_docs" && docCount > 0) return false;
+      }
       const meta = expiryMeta(item);
       if (expiryFilter === "no_expiry" && meta.band !== "no_expiry") return false;
       if (expiryFilter === "expired" && meta.band !== "passed") return false;
@@ -297,7 +314,7 @@ export default function RenewalsPanel({
     return [...items].sort(compareRenewalUrgency);
   }, [
     normalizedRenewals, search, subTypeFilter, ownerFilter, expiryFilter, category,
-    docsFilter, docCounts, issuedFrom, issuedTo, expiresFrom, expiresTo,
+    docsFilter, docCounts, supportsDocuments, issuedFrom, issuedTo, expiresFrom, expiresTo,
     clientFilter, titleFilter, hasAmountFilter,
   ]);
 
@@ -397,9 +414,11 @@ export default function RenewalsPanel({
         renewalId = created.id;
       }
 
-      const pending = docsPanelRef.current?.getPendingUploads() ?? [];
-      if (renewalId && pending.length > 0) {
-        await uploadRenewalDocumentsBulk(renewalId, pending);
+      if (supportsDocuments) {
+        const pending = docsPanelRef.current?.getPendingUploads() ?? [];
+        if (renewalId && pending.length > 0) {
+          await uploadRenewalDocumentsBulk(renewalId, pending);
+        }
       }
 
       closeForm();
@@ -475,14 +494,16 @@ export default function RenewalsPanel({
         </div>
         {!readOnly && (
           <div className="flex flex-wrap gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsBulkUploadOpen(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#ff791a] text-[#ff791a] hover:bg-orange-50 text-xs font-bold rounded-lg shadow-sm transition"
-            >
-              <Upload size={14} />
-              Upload
-            </button>
+            {supportsDocuments && (
+              <button
+                type="button"
+                onClick={() => setIsBulkUploadOpen(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#ff791a] text-[#ff791a] hover:bg-orange-50 text-xs font-bold rounded-lg shadow-sm transition"
+              >
+                <Upload size={14} />
+                Upload
+              </button>
+            )}
             <button
               type="button"
               onClick={openCreate}
@@ -655,15 +676,17 @@ export default function RenewalsPanel({
             <option value="expired">Expired</option>
             <option value="no_expiry">No Expiry</option>
           </select>
-          <select
-            value={docsFilter}
-            onChange={(e) => setDocsFilter(e.target.value as DocsFilter)}
-            className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white min-w-[140px]"
-          >
-            <option value="">All Documents</option>
-            <option value="has_docs">Has Documents</option>
-            <option value="missing_docs">Missing Documents</option>
-          </select>
+          {supportsDocuments && (
+            <select
+              value={docsFilter}
+              onChange={(e) => setDocsFilter(e.target.value as DocsFilter)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white min-w-[140px]"
+            >
+              <option value="">All Documents</option>
+              <option value="has_docs">Has Documents</option>
+              <option value="missing_docs">Missing Documents</option>
+            </select>
+          )}
         </div>
 
         {showAdvancedFilters && (
@@ -778,7 +801,9 @@ export default function RenewalsPanel({
                   <th className="py-2 pr-3 font-bold">Issued On</th>
                   <th className="py-2 pr-3 font-bold">Expires On</th>
                   <th className="py-2 pr-3 font-bold">Period</th>
-                  <th className="py-2 pr-3 font-bold">Docs</th>
+                  {supportsDocuments && (
+                    <th className="py-2 pr-3 font-bold">Docs</th>
+                  )}
                   <th className="py-2 font-bold text-right">Actions</th>
                 </tr>
               </thead>
@@ -807,9 +832,11 @@ export default function RenewalsPanel({
                       <td className="py-2.5 pr-3 text-slate-600">
                         {item.hasExpiry === false ? "—" : renewalPeriodLabel(item.renewalPeriod)}
                       </td>
-                      <td className="py-2.5 pr-3">
-                        <DocCount count={docCounts[item.id]} />
-                      </td>
+                      {supportsDocuments && (
+                        <td className="py-2.5 pr-3">
+                          <DocCount count={docCounts[item.id]} />
+                        </td>
+                      )}
                       <td className="py-2.5 text-right">
                         <div className="inline-flex gap-1">
                           {!readOnly && item.hasExpiry !== false && (
@@ -849,75 +876,127 @@ export default function RenewalsPanel({
       </div>
 
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[92vh] overflow-y-auto">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-              <h3 className="font-bold text-slate-800">
-                {editingId ? "Edit Renewal" : "Add Renewal"}
-              </h3>
-              <button type="button" onClick={closeForm} className="text-slate-400 hover:text-slate-600 text-lg">
-                ×
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+          onClick={closeForm}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-orange-100 bg-orange-50 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="p-2 rounded-lg bg-white text-[#ff791a] shadow-sm shrink-0">
+                  <Icon size={18} />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-extrabold text-slate-800">
+                    {editingId ? "Edit Renewal" : "Add Renewal"}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 truncate">{tabLabel}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeForm}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-orange-100 transition shrink-0"
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
-              <label className="block text-xs font-bold text-slate-600">
-                Type
-                <select
-                  value={form.subType}
-                  onChange={(e) => setForm((prev) => ({ ...prev, subType: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
-                >
-                  {Object.entries(subtypeLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              <section>
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Record Details
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block text-[11px] font-bold text-slate-500">
+                    Type
+                    <select
+                      value={form.subType}
+                      onChange={(e) => setForm((prev) => ({ ...prev, subType: e.target.value }))}
+                      className={RENEWAL_FORM_FIELD}
+                    >
+                      {Object.entries(subtypeLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
 
-              <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/50">
-                <div>
-                  <p className="text-xs font-bold text-slate-700">Renewal required?</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Choose whether this item needs periodic renewal tracking.
-                  </p>
+                  <label className={`block text-[11px] font-bold text-slate-500 ${category === "car_papers" ? "sm:col-span-2" : ""}`}>
+                    {titleLabel(category)}
+                    <input
+                      value={form.title}
+                      onChange={(e) =>
+                        setForm((prev) =>
+                          patchForm(prev, {
+                            title:
+                              category === "car_papers"
+                                ? e.target.value.toUpperCase()
+                                : e.target.value,
+                          }),
+                        )
+                      }
+                      className={`${RENEWAL_FORM_FIELD}${
+                        category === "car_papers" ? " uppercase" : ""
+                      }`}
+                      placeholder={
+                        category === "car_papers"
+                          ? "e.g. KA-01-AB-1234"
+                          : category === "it_renewals"
+                            ? "e.g. example.com or prod-server-01"
+                            : "Optional details"
+                      }
+                    />
+                  </label>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((prev) => patchForm(prev, { hasExpiry: true }))
-                    }
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                      form.hasExpiry
-                        ? "bg-[#ff791a] border-[#ff791a] text-white"
-                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        hasExpiry: false,
-                        expiresOn: "",
-                        expiryDate: "",
-                      }))
-                    }
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                      !form.hasExpiry
-                        ? "bg-slate-700 border-slate-700 text-white"
-                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    No
-                  </button>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">Renewal Schedule</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Track expiry dates for periodic renewals.
+                    </p>
+                  </div>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => patchForm(prev, { hasExpiry: true }))}
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
+                        form.hasExpiry
+                          ? "bg-[#ff791a] text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          hasExpiry: false,
+                          expiresOn: "",
+                          expiryDate: "",
+                        }))
+                      }
+                      className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
+                        !form.hasExpiry
+                          ? "bg-slate-700 text-white shadow-sm"
+                          : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      No
+                    </button>
+                  </div>
                 </div>
 
                 {form.hasExpiry && (
-                  <>
-                    <label className="block text-xs font-bold text-slate-600">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <label className="block text-[11px] font-bold text-slate-500 sm:col-span-2">
                       Renewal Period
                       <select
                         value={form.renewalPeriod}
@@ -928,14 +1007,14 @@ export default function RenewalsPanel({
                             }),
                           )
                         }
-                        className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+                        className={RENEWAL_FORM_FIELD}
                       >
                         <option value="monthly">Monthly Renewal</option>
                         <option value="yearly">Yearly Renewal</option>
                       </select>
                     </label>
 
-                    <label className="block text-xs font-bold text-slate-600">
+                    <label className="block text-[11px] font-bold text-slate-500">
                       Issued On
                       <DateInput
                         value={form.issuedOn}
@@ -946,7 +1025,7 @@ export default function RenewalsPanel({
                       />
                     </label>
 
-                    <label className="block text-xs font-bold text-slate-600">
+                    <label className="block text-[11px] font-bold text-slate-500">
                       Expires On
                       <DateInput
                         value={form.expiresOn}
@@ -957,109 +1036,100 @@ export default function RenewalsPanel({
                         Auto-filled from Issued On + {renewalPeriodLabel(form.renewalPeriod)}. Override if needed.
                       </p>
                     </label>
-                  </>
+                  </div>
                 )}
-              </div>
-
-              <label className="block text-xs font-bold text-slate-600">
-                {titleLabel(category)}
-                <input
-                  value={form.title}
-                  onChange={(e) =>
-                    setForm((prev) =>
-                      patchForm(prev, {
-                        title:
-                          category === "car_papers"
-                            ? e.target.value.toUpperCase()
-                            : e.target.value,
-                      }),
-                    )
-                  }
-                  className={`mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg${
-                    category === "car_papers" ? " uppercase" : ""
-                  }`}
-                  placeholder={
-                    category === "car_papers"
-                      ? "e.g. KA-01-AB-1234"
-                      : category === "it_renewals"
-                        ? "e.g. example.com or prod-server-01"
-                        : "Optional details"
-                  }
-                />
-              </label>
+              </section>
 
               {category === "it_renewals" && (
-                <>
-                  <label className="block text-xs font-bold text-slate-600">
-                    Owner
-                    <select
-                      value={form.ownerType}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          ownerType: e.target.value as RenewalOwnerType,
-                        }))
-                      }
-                      className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
-                    >
-                      <option value="mine">Mine</option>
-                      <option value="client">Client</option>
-                    </select>
-                  </label>
-                  {form.ownerType === "client" && (
-                    <>
-                      <label className="block text-xs font-bold text-slate-600">
-                        Client Name
-                        <input
-                          value={form.clientName}
-                          onChange={(e) =>
-                            setForm((prev) => ({ ...prev, clientName: e.target.value }))
-                          }
-                          className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
-                        />
-                      </label>
-                      <label className="block text-xs font-bold text-slate-600">
-                        Amount (₹)
-                        <input
-                          value={form.amount}
-                          onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
-                          className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
-                          placeholder="Renewal amount for client"
-                        />
-                      </label>
-                    </>
-                  )}
-                </>
+                <section>
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    Ownership
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block text-[11px] font-bold text-slate-500">
+                      Owner
+                      <select
+                        value={form.ownerType}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            ownerType: e.target.value as RenewalOwnerType,
+                          }))
+                        }
+                        className={RENEWAL_FORM_FIELD}
+                      >
+                        <option value="mine">Mine</option>
+                        <option value="client">Client</option>
+                      </select>
+                    </label>
+                    {form.ownerType === "client" && (
+                      <>
+                        <label className="block text-[11px] font-bold text-slate-500">
+                          Client Name
+                          <input
+                            value={form.clientName}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, clientName: e.target.value }))
+                            }
+                            className={RENEWAL_FORM_FIELD}
+                          />
+                        </label>
+                        <label className="block text-[11px] font-bold text-slate-500 sm:col-span-2">
+                          Amount (₹)
+                          <input
+                            value={form.amount}
+                            onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
+                            className={RENEWAL_FORM_FIELD}
+                            placeholder="Renewal amount for client"
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </section>
               )}
 
-              <label className="block text-xs font-bold text-slate-600">
-                Notes
+              <section>
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Notes
+                </h4>
                 <textarea
                   value={form.notes}
                   onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                  rows={2}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+                  rows={3}
+                  placeholder="Optional comments or reminders"
+                  className={RENEWAL_FORM_TEXTAREA}
                 />
-              </label>
+              </section>
 
-              <RenewalDocumentsPanel
-                ref={docsPanelRef}
-                renewalId={editingId}
-                defaultLabel={defaultDocLabel}
-                readOnly={readOnly}
-                hideSaveAll
-              />
+              {supportsDocuments && (
+                <section>
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    Documents
+                  </h4>
+                  <RenewalDocumentsPanel
+                    ref={docsPanelRef}
+                    renewalId={editingId}
+                    defaultLabel={defaultDocLabel}
+                    readOnly={readOnly}
+                    hideSaveAll
+                    embedded
+                  />
+                </section>
+              )}
 
               {formError && (
-                <p className="text-xs text-red-600 font-medium">{formError}</p>
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 font-medium">
+                  {formError}
+                </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-slate-100 flex justify-end gap-2 sticky bottom-0 bg-white">
+            <div className="px-5 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2 shrink-0">
               <button
                 type="button"
                 onClick={closeForm}
-                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg"
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100"
               >
                 Cancel
               </button>
@@ -1070,7 +1140,7 @@ export default function RenewalsPanel({
                   onClick={() => void handleSave()}
                   className="px-4 py-2 text-xs font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded-lg disabled:opacity-60"
                 >
-                  {saving ? "Saving..." : "Save"}
+                  {saving ? "Saving..." : editingId ? "Save Changes" : "Add Renewal"}
                 </button>
               )}
             </div>
@@ -1078,7 +1148,7 @@ export default function RenewalsPanel({
         </div>
       )}
 
-      {isBulkUploadOpen && (
+      {supportsDocuments && isBulkUploadOpen && (
         <RenewalBulkUploadModal
           category={category}
           tabLabel={tabLabel}

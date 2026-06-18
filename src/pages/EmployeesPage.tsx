@@ -151,6 +151,7 @@ export default function EmployeesPage() {
     roleError,
     roleSuccess,
     activePimSubTab,
+    employeeListRoleFilter,
     sidebarSearch,
     isSidebarCollapsed,
     isProfileOpen,
@@ -623,6 +624,7 @@ export default function EmployeesPage() {
     setReportEsicFilter,
     setReportSkillFilters,
     setReportRoleFilters,
+    setEmployeeListRoleFilter,
     setIsReportLocDropdownOpen,
     setIsSkillDropdownOpen,
     setIsRoleDropdownOpen,
@@ -873,6 +875,8 @@ export default function EmployeesPage() {
                                         }
                                         onExportSelected={handleExportSelected}
                                         readOnly={!userPermissions.employees?.edit}
+                                        roleFilter={employeeListRoleFilter}
+                                        onRoleFilterChange={setEmployeeListRoleFilter}
                                       />
                                     )}
                                   </section>

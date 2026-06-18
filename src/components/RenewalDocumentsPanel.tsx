@@ -61,6 +61,8 @@ interface RenewalDocumentsPanelProps {
   readOnly?: boolean;
   /** Hide inline Save all — parent handles upload via ref */
   hideSaveAll?: boolean;
+  /** Compact styling for use inside the renewal form modal */
+  embedded?: boolean;
 }
 
 interface PendingUpload {
@@ -197,7 +199,10 @@ function SavedDocumentPreviewModal({
 }
 
 const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDocumentsPanelProps>(
-  function RenewalDocumentsPanel({ renewalId, defaultLabel = "Document", readOnly = false, hideSaveAll = false }, ref) {
+  function RenewalDocumentsPanel(
+    { renewalId, defaultLabel = "Document", readOnly = false, hideSaveAll = false, embedded = false },
+    ref,
+  ) {
     const [documents, setDocuments] = useState<RenewalDocument[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -513,54 +518,100 @@ const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDoc
         )}
 
         {!readOnly && (
-          <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4">
-            <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-orange-900">
-              <Upload size={14} />
-              Upload Documents
-            </h3>
-            <p className="mt-1 text-[11px] text-slate-500">
-              Select one or more images/PDFs. Adjust quality, crop, then save.
-              {!renewalId && " Files will upload when you save the renewal record."}
-            </p>
-
-            <div className="mt-3">
-              <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                Default quality for new uploads
-              </label>
-              <div className="mt-1 flex items-center gap-2">
+          <>
+            {embedded ? (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-4">
                 <input
-                  type="range"
-                  min={10}
-                  max={100}
-                  step={5}
-                  value={defaultQualityPercent}
-                  onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
-                  className="w-full accent-[#ff791a]"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  onChange={(e) => void handleFileSelect(e)}
+                  className="hidden"
                 />
-                <span className="w-10 shrink-0 text-xs font-bold text-[#ff791a]">{defaultQualityPercent}%</span>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full flex-col items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-5 text-center transition hover:border-[#ff791a]/40 hover:bg-orange-50/40"
+                >
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-50 text-[#ff791a]">
+                    <Upload size={18} />
+                  </span>
+                  <span className="text-sm font-bold text-slate-700">Choose images or PDFs</span>
+                  <span className="text-[11px] text-slate-500">
+                    Crop and compress before saving
+                    {!renewalId && " · uploads when you save the record"}
+                  </span>
+                </button>
+                <div className="mt-3 flex items-center gap-3">
+                  <label className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Quality
+                  </label>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={defaultQualityPercent}
+                    onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
+                    className="w-full accent-[#ff791a]"
+                  />
+                  <span className="w-10 shrink-0 text-right text-xs font-bold text-[#ff791a]">
+                    {defaultQualityPercent}%
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4">
+                <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-orange-900">
+                  <Upload size={14} />
+                  Upload Documents
+                </h3>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Select one or more images/PDFs. Adjust quality, crop, then save.
+                  {!renewalId && " Files will upload when you save the renewal record."}
+                </p>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              onChange={(e) => void handleFileSelect(e)}
-              className="hidden"
-            />
+                <div className="mt-3">
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                    Default quality for new uploads
+                  </label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={10}
+                      max={100}
+                      step={5}
+                      value={defaultQualityPercent}
+                      onChange={(e) => setDefaultQualityPercent(Number(e.target.value))}
+                      className="w-full accent-[#ff791a]"
+                    />
+                    <span className="w-10 shrink-0 text-xs font-bold text-[#ff791a]">{defaultQualityPercent}%</span>
+                  </div>
+                </div>
 
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600"
-            >
-              <Upload size={14} />
-              Upload
-            </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  multiple
+                  onChange={(e) => void handleFileSelect(e)}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600"
+                >
+                  <Upload size={14} />
+                  Upload
+                </button>
+              </div>
+            )}
 
             {pendingItems.length > 0 && (
-              <div className="mt-4 space-y-3">
+              <div className="space-y-3">
                 <p className="text-xs font-bold text-slate-700">Pending ({pendingItems.length})</p>
                 {pendingItems.map((pending) => (
                   <div key={pending.id} className="rounded-xl border border-slate-200 bg-white p-3">
@@ -651,7 +702,7 @@ const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDoc
                   </div>
                 ))}
 
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-orange-100 pt-3">
+                <div className={`flex flex-wrap items-center justify-between gap-2 border-t pt-3 ${embedded ? "border-slate-200" : "border-orange-100"}`}>
                   <button
                     type="button"
                     onClick={() => setPendingItems([])}
@@ -682,7 +733,7 @@ const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDoc
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
 
         {renewalId && (

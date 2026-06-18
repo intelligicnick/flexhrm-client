@@ -71,3 +71,29 @@ export function TimeInput({ label, id, className = "", ...props }: TimeInputProp
     </label>
   );
 }
+
+export interface DateTimeInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> {
+  label?: string;
+}
+
+export function DateTimeInput({ label, id, className = "", ...props }: DateTimeInputProps) {
+  const inputId = id || props.name;
+  const input = (
+    <input
+      id={inputId}
+      type="datetime-local"
+      className={[DATE_INPUT_CLASS, className].filter(Boolean).join(" ")}
+      {...props}
+    />
+  );
+
+  if (!label) return input;
+
+  return (
+    <label htmlFor={inputId} className="block w-full">
+      <span className="text-xs font-bold text-slate-600 block mb-1">{label}</span>
+      {input}
+    </label>
+  );
+}

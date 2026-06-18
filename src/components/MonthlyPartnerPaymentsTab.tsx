@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
-import { CheckCircle2, DownloadCloud, FileSpreadsheet, IndianRupee, MousePointerClick, RotateCcw, Save } from "lucide-react";
+import { CheckCircle2, DownloadCloud, FileSpreadsheet, IndianRupee, Pencil, RotateCcw, Save } from "lucide-react";
 import { SchoolPartner, SchoolWork, SchoolDistrict } from "../types";
 import {
   PARTNER_PAYMENT_HEADERS,
@@ -18,7 +18,6 @@ import {
   PARTNER_PAY_COL_TOILETS,
   PARTNER_PAY_COL_TOTAL,
   PARTNER_PAY_TEXT_TO_SCHOOL_FIELD,
-  PARTNER_PAY_STATUS_OPTIONS,
   STANDARD_MONTH_DAYS,
   PartnerPayEditableField,
   PartnerPayNumericField,
@@ -40,6 +39,7 @@ import {
   type BulkPayPartnerSheetInput,
   type SavedBulkPayRecord,
 } from "../utils";
+import PartnerPayBulkEditModal from "./PartnerPayBulkEditModal";
 
 interface MonthlyPartnerPaymentsTabProps {
   partners: SchoolPartner[];
@@ -48,6 +48,7 @@ interface MonthlyPartnerPaymentsTabProps {
   selectedMonth?: string;
   monthsList?: string[];
   onMonthChange?: (monthKey: string) => void;
+  defaultDays: number;
   onSaveWorkdays?: (payload: {
     block: string;
     district?: string;
@@ -131,6 +132,7 @@ export default function MonthlyPartnerPaymentsTab({
   selectedMonth,
   monthsList,
   onMonthChange,
+  defaultDays,
   onSaveWorkdays,
   onSavePayUpdates,
   onSavePartnerDetails,
@@ -144,13 +146,14 @@ export default function MonthlyPartnerPaymentsTab({
   const monthMultiplier = 1;
   const [districtFilter, setDistrictFilter] = useState("");
   const [blockFilter, setBlockFilter] = useState("");
-  const [defaultDays, setDefaultDays] = useState(STANDARD_MONTH_DAYS);
+  const manualDaysPartnerIdsRef = useRef<Set<string>>(new Set());
   const [numericDrafts, setNumericDrafts] = useState<NumericDraftMap>({});
   const [textDrafts, setTextDrafts] = useState<TextDraftMap>({});
   const [statusDrafts, setStatusDrafts] = useState<StatusDraftMap>({});
   const [saving, setSaving] = useState(false);
   const [columnSelection, setColumnSelection] = useState<ColumnSelection | null>(null);
   const [checkedPartnerIds, setCheckedPartnerIds] = useState<string[]>([]);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const columnSelectionRef = useRef<ColumnSelection | null>(null);
   const selectedPartnerIdsRef = useRef<string[]>([]);
 
@@ -194,6 +197,27 @@ export default function MonthlyPartnerPaymentsTab({
     columnSelectionRef.current = columnSelection;
     selectedPartnerIdsRef.current = selectedPartnerIds;
   }, [columnSelection, selectedPartnerIds]);
+
+  useEffect(() => {
+    setNumericDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const partner of filteredPartners) {
+        if (!partner.id || manualDaysPartnerIdsRef.current.has(partner.id)) continue;
+        const draft = next[partner.id];
+        if (draft?.days === undefined) continue;
+        const updated = { ...draft };
+        delete updated.days;
+        if (Object.keys(updated).length === 0) {
+          delete next[partner.id];
+        } else {
+          next[partner.id] = updated;
+        }
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [defaultDays, filteredPartners]);
 
   const resolveValues = useCallback(
     (partner: SchoolPartner): PartnerPayValues => {
@@ -251,6 +275,9 @@ export default function MonthlyPartnerPaymentsTab({
     (partnerId: string, field: PartnerPayNumericField, rawValue: string) => {
       const partner = filteredPartners.find((p) => p.id === partnerId);
       if (!partner) return;
+      if (field === "days") {
+        manualDaysPartnerIdsRef.current.add(partnerId);
+      }
       const school = partner.schoolWorkId ? schoolsById[partner.schoolWorkId] : undefined;
       const base = getPartnerPayBaseValues(partner, school, selectedMonth, defaultDays);
       const current = { ...base, ...(numericDrafts[partnerId] || {}) };
@@ -288,6 +315,11 @@ export default function MonthlyPartnerPaymentsTab({
   const applyNumericDraftUpdateMany = useCallback(
     (partnerIds: string[], field: PartnerPayNumericField, value: string) => {
       if (partnerIds.length === 0) return;
+      if (field === "days") {
+        for (const partnerId of partnerIds) {
+          manualDaysPartnerIdsRef.current.add(partnerId);
+        }
+      }
       setNumericDrafts((prev) => {
         let next = prev;
         for (const partnerId of partnerIds) {
@@ -460,22 +492,25 @@ export default function MonthlyPartnerPaymentsTab({
 
   const activateCell = useCallback(
     (partnerId: string, field: PartnerPayColumnField, shiftKey: boolean) => {
+      const clickIdx = filteredPartners.findIndex((p) => p.id === partnerId);
+      if (clickIdx === -1) return;
+
       const selection = columnSelectionRef.current;
-      if (shiftKey && selection) {
-        const clickIdx = filteredPartners.findIndex((p) => p.id === partnerId);
-        if (clickIdx === -1) return;
-        if (selection.field === field) {
+      if (shiftKey) {
+        if (selection?.field === field) {
           const next = { ...selection, focusPartnerId: partnerId };
           columnSelectionRef.current = next;
           selectedPartnerIdsRef.current = selectionToPartnerIds(next, filteredPartners);
           setColumnSelection(next);
           return;
         }
-        const anchorIdx = filteredPartners.findIndex((p) => p.id === selection.anchorPartnerId);
-        const focusIdx = filteredPartners.findIndex((p) => p.id === selection.focusPartnerId);
-        if (anchorIdx === -1) return;
-        const start = Math.min(anchorIdx, focusIdx === -1 ? anchorIdx : focusIdx, clickIdx);
-        const end = Math.max(anchorIdx, focusIdx === -1 ? anchorIdx : focusIdx, clickIdx);
+        const anchorId =
+          selection?.focusPartnerId ??
+          selection?.anchorPartnerId ??
+          filteredPartners[0]?.id;
+        const anchorIdx = filteredPartners.findIndex((p) => p.id === anchorId);
+        const start = Math.min(anchorIdx >= 0 ? anchorIdx : 0, clickIdx);
+        const end = Math.max(anchorIdx >= 0 ? anchorIdx : 0, clickIdx);
         const next = {
           field,
           anchorPartnerId: filteredPartners[start].id,
@@ -492,6 +527,25 @@ export default function MonthlyPartnerPaymentsTab({
       setColumnSelection(next);
     },
     [filteredPartners],
+  );
+
+  const handleBulkApplyValue = useCallback(
+    (value: string) => {
+      const selection = columnSelectionRef.current;
+      const selectedIds = selectedPartnerIdsRef.current;
+      if (!selection || selectedIds.length === 0) return;
+      const field = selection.field;
+      if (field === "paymentStatus") {
+        applyStatusDraftUpdateMany(selectedIds, value as PartnerPayStatus);
+        return;
+      }
+      if (isPartnerPayNumericField(field)) {
+        applyNumericDraftUpdateMany(selectedIds, field, value);
+        return;
+      }
+      applyTextDraftUpdateMany(selectedIds, field, value);
+    },
+    [applyNumericDraftUpdateMany, applyTextDraftUpdateMany, applyStatusDraftUpdateMany],
   );
 
   const handleColumnHeaderClick = useCallback(
@@ -551,6 +605,7 @@ export default function MonthlyPartnerPaymentsTab({
     setNumericDrafts({});
     setTextDrafts({});
     setStatusDrafts({});
+    manualDaysPartnerIdsRef.current = new Set();
     clearColumnSelection();
     setCheckedPartnerIds([]);
   };
@@ -680,6 +735,7 @@ export default function MonthlyPartnerPaymentsTab({
       setStatusDrafts({});
       clearColumnSelection();
       setCheckedPartnerIds([]);
+      setIsBulkEditOpen(false);
     } finally {
       setSaving(false);
     }
@@ -764,134 +820,55 @@ export default function MonthlyPartnerPaymentsTab({
     });
   };
 
-  const renderNumericEditableCell = (
+  const renderNumericDisplayCell = (
     partner: SchoolPartner,
     field: PartnerPayNumericField,
     displayValue: number,
     colIndex: number,
   ) => {
     const isDirty = Boolean(numericDrafts[partner.id]?.[field]);
-    const selected =
-      columnSelection?.field === field && selectedPartnerIds.includes(partner.id);
-    const min = field === "days" ? 1 : 0;
-    const max = field === "days" ? 31 : undefined;
-
     return (
       <td
         key={colIndex}
-        onMouseDown={(e) => {
-          if (!canEdit || e.button !== 0) return;
-          if (e.shiftKey) e.preventDefault();
-          activateCell(partner.id, field, e.shiftKey);
-        }}
-        className={`p-1 border border-[#d4d4d4] text-center bg-[#fff9e6] ${
-          selected ? "ring-2 ring-inset ring-blue-400" : ""
-        }`}
+        className={`p-2 border border-[#d4d4d4] text-center ${isDirty ? "bg-orange-50 text-orange-700 font-semibold" : ""}`}
       >
-        {canEdit ? (
-          <input
-            type="number"
-            min={min}
-            max={max}
-            value={displayValue}
-            data-partner-id={partner.id}
-            data-pay-field={field}
-            onChange={(e) => handleFieldChange(partner.id, field, e.target.value)}
-            className={`w-full text-center bg-transparent border-0 outline-none font-semibold ${
-              isDirty ? "text-orange-700" : ""
-            }`}
-          />
-        ) : (
-          displayValue
-        )}
+        {displayValue}
       </td>
     );
   };
 
-  const renderTextEditableCell = (
+  const renderTextDisplayCell = (
     partner: SchoolPartner,
     field: PartnerPayTextField,
     displayValue: string,
     colIndex: number,
   ) => {
     const isDirty = Boolean(textDrafts[partner.id]?.[field]);
-    const selected =
-      columnSelection?.field === field && selectedPartnerIds.includes(partner.id);
-
     return (
       <td
         key={colIndex}
-        onMouseDown={(e) => {
-          if (!canEdit || e.button !== 0) return;
-          if (e.shiftKey) e.preventDefault();
-          activateCell(partner.id, field, e.shiftKey);
-        }}
-        className={`p-1 border border-[#d4d4d4] bg-[#fff9e6] ${
-          selected ? "ring-2 ring-inset ring-blue-400" : ""
-        }`}
+        className={`p-2 border border-[#d4d4d4] ${isDirty ? "bg-orange-50 text-orange-700 font-semibold" : ""}`}
       >
-        {canEdit ? (
-          <input
-            type="text"
-            value={displayValue}
-            data-partner-id={partner.id}
-            data-pay-field={field}
-            onChange={(e) => handleFieldChange(partner.id, field, e.target.value)}
-            className={`w-full bg-transparent border-0 outline-none ${
-              isDirty ? "text-orange-700 font-semibold" : ""
-            }`}
-          />
-        ) : (
-          displayValue
-        )}
+        {displayValue}
       </td>
     );
   };
 
-  const renderStatusCell = (
+  const renderStatusDisplayCell = (
     partner: SchoolPartner,
     displayStatus: PartnerPayStatus,
     colIndex: number,
   ) => {
     const isDirty = Boolean(statusDrafts[partner.id]);
-    const selected =
-      columnSelection?.field === "paymentStatus" && selectedPartnerIds.includes(partner.id);
-
     return (
-      <td
-        key={colIndex}
-        onMouseDown={(e) => {
-          if (!canEdit || e.button !== 0) return;
-          if (e.shiftKey) e.preventDefault();
-          activateCell(partner.id, "paymentStatus", e.shiftKey);
-        }}
-        className={`p-1 border border-[#d4d4d4] text-center bg-violet-50/60 ${
-          selected ? "ring-2 ring-inset ring-blue-400" : ""
-        }`}
-      >
-        {canEdit ? (
-          <select
-            value={displayStatus}
-            data-partner-id={partner.id}
-            data-pay-field="paymentStatus"
-            onChange={(e) =>
-              handleFieldChange(partner.id, "paymentStatus", e.target.value)
-            }
-            className={`w-full px-1 py-0.5 rounded text-xs font-bold border cursor-pointer focus:outline-none ${partnerPayStatusClass(displayStatus)} ${
-              isDirty ? "ring-1 ring-orange-400" : ""
-            }`}
-          >
-            {PARTNER_PAY_STATUS_OPTIONS.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold border ${partnerPayStatusClass(displayStatus)}`}>
-            {displayStatus}
-          </span>
-        )}
+      <td key={colIndex} className="p-2 border border-[#d4d4d4] text-center">
+        <span
+          className={`inline-block px-2 py-0.5 rounded text-xs font-bold border ${partnerPayStatusClass(displayStatus)} ${
+            isDirty ? "ring-1 ring-orange-400" : ""
+          }`}
+        >
+          {displayStatus}
+        </span>
       </td>
     );
   };
@@ -907,7 +884,7 @@ export default function MonthlyPartnerPaymentsTab({
             Partner Payments
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Bank sheet export — bulk edit bank details, toilets, days, and pay · save when done
+            Bank sheet export — use Bulk Edit for bank details, toilets, days, and pay
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -953,12 +930,20 @@ export default function MonthlyPartnerPaymentsTab({
             min={1}
             max={31}
             value={defaultDays}
-            onChange={(e) => setDefaultDays(Number(e.target.value) || STANDARD_MONTH_DAYS)}
-            title="Full month days for proration"
-            className="w-20 px-3 py-1.5 border border-slate-200 rounded-lg text-xs"
+            readOnly
+            title="Synced from Create Invoice / View Saved"
+            className="w-20 px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 text-slate-700 cursor-default"
           />
           {canEdit && (
             <>
+              <button
+                type="button"
+                onClick={() => setIsBulkEditOpen(true)}
+                disabled={filteredPartners.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white text-xs font-bold rounded-lg cursor-pointer"
+              >
+                <Pencil size={14} /> Bulk Edit ({filteredPartners.length})
+              </button>
               <button
                 type="button"
                 onClick={handleDiscard}
@@ -1039,6 +1024,20 @@ export default function MonthlyPartnerPaymentsTab({
         </span>
       </div>
 
+      {canEdit && changeCount > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 mb-3 text-xs text-amber-900">
+          <strong>{changeCount}</strong> unsaved bulk edit change{changeCount === 1 ? "" : "s"} — open{" "}
+          <button
+            type="button"
+            onClick={() => setIsBulkEditOpen(true)}
+            className="font-bold text-[#ff791a] hover:underline cursor-pointer"
+          >
+            Bulk Edit
+          </button>{" "}
+          or click Save to apply
+        </div>
+      )}
+
       {canEdit && checkedPartnerIds.length > 0 && (
         <div className="bg-slate-900 px-4 py-3 text-white flex flex-wrap items-center justify-between gap-3 mb-3 rounded-lg">
           <div className="flex items-center gap-2">
@@ -1082,34 +1081,6 @@ export default function MonthlyPartnerPaymentsTab({
         </div>
       )}
 
-      {canEdit && columnSelection && selectedPartnerIds.length > 0 && (
-        <div className="px-4 py-2 border border-blue-200 bg-blue-50/70 rounded-lg flex flex-wrap items-center justify-between gap-3 mb-3 text-xs">
-          <div className="flex items-center gap-2 text-blue-900">
-            <MousePointerClick size={14} />
-            <span>
-              <strong>{selectedPartnerIds.length}</strong> row
-              {selectedPartnerIds.length !== 1 ? "s" : ""} selected
-              {selectedFieldLabel ? ` in ${selectedFieldLabel}` : ""} — edit one cell to fill all
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={clearColumnSelection}
-            className="text-xs font-semibold text-blue-700 hover:text-blue-900 cursor-pointer"
-          >
-            Clear selection
-          </button>
-        </div>
-      )}
-
-      {canEdit && (
-        <div className="px-1 pb-2 text-[10px] text-slate-500">
-          Bulk edit: click a cell · <strong>Shift+click</strong> to extend rows · column header =
-          select all rows in column · edit one cell to fill all selected · enter{" "}
-          <strong>Monthly Pay</strong> to auto-update per-toilet (and vice versa)
-        </div>
-      )}
-
       <div className="overflow-x-auto max-h-[560px] border border-[#d4d4d4] rounded-lg">
         <table
           className="w-full text-xs text-left min-w-[1300px] border-collapse"
@@ -1128,21 +1099,14 @@ export default function MonthlyPartnerPaymentsTab({
                   />
                 </th>
               )}
-              {PARTNER_PAYMENT_HEADERS.map((header, index) => {
-                const editable = EDITABLE_FIELDS.find((f) => f.col === index);
-                return (
+              {PARTNER_PAYMENT_HEADERS.map((header) => (
                   <th
                     key={header}
-                    className={`p-2 whitespace-nowrap border border-[#d4d4d4] font-semibold ${
-                      editable && canEdit ? "cursor-pointer hover:bg-[#d4ead4]" : ""
-                    }`}
-                    title={editable && canEdit ? "Click to select entire column" : undefined}
-                    onClick={() => editable && canEdit && handleColumnHeaderClick(editable.field)}
+                    className="p-2 whitespace-nowrap border border-[#d4d4d4] font-semibold"
                   >
                     {header}
                   </th>
-                );
-              })}
+                ))}
             </tr>
           </thead>
           <tbody>
@@ -1189,7 +1153,7 @@ export default function MonthlyPartnerPaymentsTab({
                     )}
                     {row.map((cell, cellIndex) => {
                       if (cellIndex === PARTNER_PAY_COL_SCHOOL_NAME) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "schoolName",
                           textValues.schoolName,
@@ -1197,7 +1161,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_SCHOOL_CATEGORY) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "schoolCategory",
                           textValues.schoolCategory,
@@ -1205,7 +1169,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_PARTNER_NAME) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "partnerName",
                           textValues.partnerName,
@@ -1213,7 +1177,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_ACCOUNT_HOLDER) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "accountHolderName",
                           textValues.accountHolderName,
@@ -1221,7 +1185,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_ACCOUNT_NUMBER) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "accountNumber",
                           textValues.accountNumber,
@@ -1229,7 +1193,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_IFSC) {
-                        return renderTextEditableCell(
+                        return renderTextDisplayCell(
                           partner,
                           "ifscCode",
                           textValues.ifscCode,
@@ -1237,13 +1201,13 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_TOILETS) {
-                        return renderNumericEditableCell(partner, "toilets", values.toilets, cellIndex);
+                        return renderNumericDisplayCell(partner, "toilets", values.toilets, cellIndex);
                       }
                       if (cellIndex === PARTNER_PAY_COL_DAYS) {
-                        return renderNumericEditableCell(partner, "days", values.days, cellIndex);
+                        return renderNumericDisplayCell(partner, "days", values.days, cellIndex);
                       }
                       if (cellIndex === PARTNER_PAY_COL_PER_TOILET) {
-                        return renderNumericEditableCell(
+                        return renderNumericDisplayCell(
                           partner,
                           "perToiletPay",
                           values.perToiletPay,
@@ -1251,7 +1215,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_MONTHLY) {
-                        return renderNumericEditableCell(
+                        return renderNumericDisplayCell(
                           partner,
                           "monthlyPay",
                           values.monthlyPay,
@@ -1269,7 +1233,7 @@ export default function MonthlyPartnerPaymentsTab({
                         );
                       }
                       if (cellIndex === PARTNER_PAY_COL_STATUS) {
-                        return renderStatusCell(
+                        return renderStatusDisplayCell(
                           partner,
                           resolvePaymentStatus(partner),
                           cellIndex,
@@ -1288,6 +1252,37 @@ export default function MonthlyPartnerPaymentsTab({
           </tbody>
         </table>
       </div>
+
+      {canEdit && (
+        <PartnerPayBulkEditModal
+          isOpen={isBulkEditOpen}
+          onClose={() => setIsBulkEditOpen(false)}
+          selectedMonth={selectedMonth}
+          filteredPartners={filteredPartners}
+          paymentRows={paymentRows}
+          changeCount={changeCount}
+          saving={saving}
+          columnSelection={columnSelection}
+          selectedPartnerIds={selectedPartnerIds}
+          selectedFieldLabel={selectedFieldLabel}
+          editableFields={EDITABLE_FIELDS}
+          numericDrafts={numericDrafts}
+          textDrafts={textDrafts}
+          statusDrafts={statusDrafts}
+          monthMultiplier={monthMultiplier}
+          defaultDays={defaultDays}
+          resolveValues={resolveValues}
+          resolveTextValues={resolveTextValues}
+          resolvePaymentStatus={resolvePaymentStatus}
+          onFieldChange={handleFieldChange}
+          onBulkApplyValue={handleBulkApplyValue}
+          onActivateCell={activateCell}
+          onColumnHeaderClick={handleColumnHeaderClick}
+          onClearColumnSelection={clearColumnSelection}
+          onDiscard={handleDiscard}
+          onSave={handleSave}
+        />
+      )}
     </section>
   );
 }
