@@ -4,6 +4,8 @@ import {
   Car,
   CheckCircle2,
   Clock,
+  Download,
+  FileSpreadsheet,
   FileText,
   Filter,
   Plus,
@@ -42,6 +44,11 @@ import RenewalDocumentsPanel, {
 } from "./RenewalDocumentsPanel";
 import RenewalBulkUploadModal from "./RenewalBulkUploadModal";
 import RenewalRenewModal from "./RenewalRenewModal";
+import {
+  downloadRenewalExcelTemplate,
+  parseRenewalsWorkbook,
+  validateRenewalImportRow,
+} from "../lib/renewal-excel";
 
 const RENEWAL_FORM_FIELD =
   "mt-1 w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-[#ff791a] focus:ring-2 focus:ring-[#ff791a]/20 transition";
@@ -57,6 +64,7 @@ interface RenewalsPanelProps {
   onCreate: (payload: CreateRenewalInput) => Promise<Renewal>;
   onUpdate: (id: string, payload: Partial<CreateRenewalInput>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onImport?: (items: CreateRenewalInput[]) => Promise<{ created: number; updated: number; skipped: number }>;
 }
 
 type ExpiryFilter = "all" | "active" | "expiring_soon" | "expired" | "no_expiry";
@@ -167,11 +175,13 @@ export default function RenewalsPanel({
   onCreate,
   onUpdate,
   onDelete,
+  onImport,
 }: RenewalsPanelProps) {
   const subtypeLabels = getSubtypeLabels(category);
   const Icon = categoryIcon(category);
   const supportsDocuments = categorySupportsDocuments(category);
   const docsPanelRef = useRef<RenewalDocumentsPanelHandle>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   const patchForm = (
     prev: CreateRenewalInput,
@@ -210,6 +220,8 @@ export default function RenewalsPanel({
   const [form, setForm] = useState<CreateRenewalInput>(() => emptyForm(category));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importToast, setImportToast] = useState<string | null>(null);
 
   const normalizedRenewals = useMemo(() => renewals.map(normalizeRenewal), [renewals]);
 
@@ -480,6 +492,47 @@ export default function RenewalsPanel({
     await loadDocCounts();
   };
 
+  const handleImportFile = async (file: File) => {
+    if (!onImport) return;
+    setImporting(true);
+    setImportToast(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const items = await parseRenewalsWorkbook(buffer, category);
+      if (items.length === 0) {
+        setImportToast("No renewal rows found in the spreadsheet.");
+        return;
+      }
+
+      const valid: CreateRenewalInput[] = [];
+      let invalidCount = 0;
+      items.forEach((item) => {
+        const errors = validateRenewalImportRow(item, category, subtypeLabels);
+        if (Object.keys(errors).length > 0) invalidCount += 1;
+        else valid.push(item);
+      });
+
+      if (valid.length === 0) {
+        setImportToast(`All ${items.length} row(s) had validation errors. Check the template columns and required fields.`);
+        return;
+      }
+
+      const result = await onImport(valid);
+      const skippedMsg =
+        invalidCount > 0 ? ` ${invalidCount} row(s) skipped due to validation errors.` : "";
+      setImportToast(
+        `Import complete: ${result.created} added, ${result.updated} updated, ${result.skipped} skipped.${skippedMsg}`,
+      );
+      await onRefresh();
+      await loadDocCounts();
+    } catch (err) {
+      setImportToast(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setImporting(false);
+      if (excelInputRef.current) excelInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="space-y-5" id={`renewals-panel-${category}`}>
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
@@ -494,6 +547,47 @@ export default function RenewalsPanel({
         </div>
         {!readOnly && (
           <div className="flex flex-wrap gap-2 shrink-0">
+            {onImport && (
+              <>
+                <input
+                  ref={excelInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void downloadRenewalExcelTemplate(category, false)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition"
+                  title="Download blank Excel template with column headers"
+                >
+                  <Download size={14} />
+                  Blank Template
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void downloadRenewalExcelTemplate(category, true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-800 text-xs font-bold rounded-lg shadow-sm transition"
+                  title="Download sample-filled Excel with example data"
+                >
+                  <FileSpreadsheet size={14} />
+                  Sample Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => excelInputRef.current?.click()}
+                  disabled={importing}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
+                >
+                  <Upload size={14} />
+                  {importing ? "Importing…" : "Bulk Upload"}
+                </button>
+              </>
+            )}
             {supportsDocuments && (
               <button
                 type="button"
@@ -501,7 +595,7 @@ export default function RenewalsPanel({
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#ff791a] text-[#ff791a] hover:bg-orange-50 text-xs font-bold rounded-lg shadow-sm transition"
               >
                 <Upload size={14} />
-                Upload
+                Upload Docs
               </button>
             )}
             <button
@@ -515,6 +609,19 @@ export default function RenewalsPanel({
           </div>
         )}
       </div>
+
+      {importToast && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+          <span>{importToast}</span>
+          <button
+            type="button"
+            onClick={() => setImportToast(null)}
+            className="text-slate-400 hover:text-slate-600 shrink-0"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <button

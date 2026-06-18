@@ -6032,6 +6032,27 @@ export function useHRMSApp() {
     triggerSuccess("Renewal deleted.");
   };
 
+  const handleImportRenewals = async (
+    items: CreateRenewalInput[],
+  ): Promise<{ created: number; updated: number; skipped: number }> => {
+    const res = await fetch("/api/renewals/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to import renewals.");
+    const data = await res.json();
+    await fetchRenewals();
+    triggerSuccess(
+      `Imported ${data.created || 0} new, updated ${data.updated || 0}, skipped ${data.skipped || 0}.`,
+    );
+    return {
+      created: data.created || 0,
+      updated: data.updated || 0,
+      skipped: data.skipped || 0,
+    };
+  };
+
   const handleSaveSchoolSupervisor = async (
     data: Partial<SchoolSupervisor> & { password?: string },
   ): Promise<boolean> => {
@@ -7368,6 +7389,7 @@ export function useHRMSApp() {
     handleCreateRenewal,
     handleUpdateRenewal,
     handleDeleteRenewal,
+    handleImportRenewals,
     pendingSupervisorRequestCount,
     adminNotifications,
     adminNotificationUnreadCount,

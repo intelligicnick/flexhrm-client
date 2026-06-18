@@ -498,6 +498,7 @@ export default function ModuleContent() {
     handleCreateRenewal,
     handleUpdateRenewal,
     handleDeleteRenewal,
+    handleImportRenewals,
     pendingSupervisorRequestCount,
     fieldTeamView,
     setFieldTeamView,
@@ -5772,6 +5773,7 @@ export default function ModuleContent() {
                                     onCreate={handleCreateRenewal}
                                     onUpdate={handleUpdateRenewal}
                                     onDelete={handleDeleteRenewal}
+                                    onImport={handleImportRenewals}
                                   />
                                 );
                               })()}
