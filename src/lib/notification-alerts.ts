@@ -1,4 +1,6 @@
 import { AppNotification } from "../types";
+import { getSupervisorLang, SupervisorLang } from "./supervisor-i18n";
+import { localizeSupervisorNotification } from "./supervisor-notifications-i18n";
 
 const POLL_INTERVAL_MS = 45_000;
 const SOUND_ENABLED_KEY = "hrms_notification_sound";
@@ -84,11 +86,18 @@ export function alertForNewNotifications(
   previousCount: number,
   nextCount: number,
   latest?: AppNotification | null,
+  lang: SupervisorLang = getSupervisorLang(),
 ): void {
   if (nextCount <= previousCount) return;
   playNotificationSound();
-  const title = latest?.title || "New notification";
-  const body = latest?.message || `You have ${nextCount} unread notification(s).`;
+  const localized = latest ? localizeSupervisorNotification(latest, lang) : null;
+  const title = localized?.title || latest?.title || (lang === "hi" ? "नई सूचना" : "New notification");
+  const body =
+    localized?.message ||
+    latest?.message ||
+    (lang === "hi"
+      ? `आपके पास ${nextCount} अपठित सूचनाएं हैं।`
+      : `You have ${nextCount} unread notification(s).`);
   showBrowserNotification(title, body);
 }
 

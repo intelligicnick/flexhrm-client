@@ -14,6 +14,8 @@ export interface SidebarItemDef {
 
 export const getModuleKey = (tabName: string): string => {
   switch (tabName) {
+    case "Dashboard":
+      return "";
     case "Admin":
     case "Role & Access":
     case "Audit Logs":

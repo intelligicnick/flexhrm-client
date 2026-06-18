@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AppNotification } from "../types";
+import { SupervisorLang } from "../lib/supervisor-i18n";
 import {
   POLL_INTERVAL_MS,
   alertForNewNotifications,
@@ -12,6 +13,7 @@ interface UseNotificationPollerOptions {
   fetchUnreadCount: () => Promise<number>;
   fetchNotifications?: () => Promise<AppNotification[]>;
   pollIntervalMs?: number;
+  lang?: SupervisorLang;
 }
 
 export function useNotificationPoller({
@@ -20,6 +22,7 @@ export function useNotificationPoller({
   fetchUnreadCount,
   fetchNotifications,
   pollIntervalMs = POLL_INTERVAL_MS,
+  lang,
 }: UseNotificationPollerOptions): void {
   const lastCountRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
@@ -52,13 +55,13 @@ export function useNotificationPoller({
           const items = await fetchNotifications();
           latest = items.find((n) => !n.readAt) || items[0] || null;
         }
-        alertForNewNotifications(previousCount, nextCount, latest);
+        alertForNewNotifications(previousCount, nextCount, latest, lang);
       }
       lastCountRef.current = nextCount;
     } catch {
       /* ignore polling errors */
     }
-  }, [enabled, fetchUnreadCount, fetchNotifications]);
+  }, [enabled, fetchUnreadCount, fetchNotifications, lang]);
 
   useEffect(() => {
     if (!enabled) return;

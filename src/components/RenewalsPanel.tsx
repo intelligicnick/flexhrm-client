@@ -18,6 +18,7 @@ import {
   Renewal,
   RenewalCategory,
   RenewalOwnerType,
+  RenewalPeriod,
 } from "../types";
 import {
   CAR_PAPER_SUBTYPE_LABELS,
@@ -27,12 +28,19 @@ import {
   LICENSE_SUBTYPE_LABELS,
   uploadRenewalDocumentsBulk,
 } from "../lib/renewals";
+import {
+  compareRenewalUrgency,
+  computeNextExpiryDate,
+  isNearingRenewal,
+  renewalPeriodLabel,
+} from "../lib/renewal-helpers";
 import { formatAppDate, matchesIsoDateRange, parseFlexibleDateMs } from "../lib/date-helpers";
 import { DateInput } from "./ui/DateInput";
 import RenewalDocumentsPanel, {
   type RenewalDocumentsPanelHandle,
 } from "./RenewalDocumentsPanel";
 import RenewalBulkUploadModal from "./RenewalBulkUploadModal";
+import RenewalRenewModal from "./RenewalRenewModal";
 
 interface RenewalsPanelProps {
   category: RenewalCategory;
@@ -95,6 +103,7 @@ function emptyForm(category: RenewalCategory): CreateRenewalInput {
     expiryDate: "",
     notes: "",
     entryDate: new Date().toISOString().slice(0, 10),
+    renewalPeriod: "yearly",
   };
 }
 
@@ -126,7 +135,17 @@ function normalizeRenewal(item: Renewal): Renewal {
     hasExpiry: item.hasExpiry !== false,
     issuedOn: item.issuedOn || item.renewalDate || "",
     expiresOn: item.expiresOn || item.expiryDate || "",
+    renewalPeriod: item.renewalPeriod === "monthly" ? "monthly" : "yearly",
   };
+}
+
+function applyAutoExpiry(form: CreateRenewalInput): CreateRenewalInput {
+  if (form.hasExpiry === false || !form.issuedOn.trim()) return form;
+  const expiresOn = computeNextExpiryDate(
+    form.issuedOn,
+    form.renewalPeriod === "monthly" ? "monthly" : "yearly",
+  );
+  return { ...form, expiresOn, expiryDate: expiresOn };
 }
 
 export default function RenewalsPanel({
@@ -143,6 +162,22 @@ export default function RenewalsPanel({
   const Icon = categoryIcon(category);
   const docsPanelRef = useRef<RenewalDocumentsPanelHandle>(null);
 
+  const patchForm = (
+    prev: CreateRenewalInput,
+    updates: Partial<CreateRenewalInput>,
+  ): CreateRenewalInput => {
+    let next: CreateRenewalInput = { ...prev, ...updates };
+    if (category === "car_papers" && updates.title !== undefined) {
+      next = { ...next, title: updates.title.toUpperCase() };
+    }
+    const autoExpiry =
+      updates.issuedOn !== undefined ||
+      updates.renewalPeriod !== undefined ||
+      updates.hasExpiry === true;
+    if (autoExpiry) next = applyAutoExpiry(next);
+    return next;
+  };
+
   const [search, setSearch] = useState("");
   const [subTypeFilter, setSubTypeFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState<"" | RenewalOwnerType>("");
@@ -157,6 +192,7 @@ export default function RenewalsPanel({
   const [hasAmountFilter, setHasAmountFilter] = useState<HasAmountFilter>("");
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [renewingItem, setRenewingItem] = useState<Renewal | null>(null);
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -222,7 +258,7 @@ export default function RenewalsPanel({
     const clientQ = clientFilter.trim().toLowerCase();
     const titleQ = titleFilter.trim().toLowerCase();
 
-    return normalizedRenewals.filter((item) => {
+    const items = normalizedRenewals.filter((item) => {
       if (subTypeFilter && item.subType !== subTypeFilter) return false;
       if (category === "it_renewals" && ownerFilter && item.ownerType !== ownerFilter) {
         return false;
@@ -257,11 +293,18 @@ export default function RenewalsPanel({
       }
       return true;
     });
+
+    return [...items].sort(compareRenewalUrgency);
   }, [
     normalizedRenewals, search, subTypeFilter, ownerFilter, expiryFilter, category,
     docsFilter, docCounts, issuedFrom, issuedTo, expiresFrom, expiresTo,
     clientFilter, titleFilter, hasAmountFilter,
   ]);
+
+  const nearingRenewals = useMemo(
+    () => filtered.filter(isNearingRenewal),
+    [filtered],
+  );
 
   const stats = useMemo(() => {
     let expired = 0;
@@ -298,6 +341,7 @@ export default function RenewalsPanel({
       expiryDate: n.expiresOn,
       notes: n.notes,
       entryDate: n.entryDate,
+      renewalPeriod: n.renewalPeriod,
     });
     setFormError(null);
     setIsFormOpen(true);
@@ -312,6 +356,7 @@ export default function RenewalsPanel({
 
   const buildPayload = (): CreateRenewalInput => ({
     ...form,
+    title: category === "car_papers" ? form.title.toUpperCase() : form.title,
     issuedOn: form.issuedOn,
     expiresOn: form.hasExpiry ? form.expiresOn : "",
     renewalDate: form.issuedOn,
@@ -374,6 +419,25 @@ export default function RenewalsPanel({
     await loadDocCounts();
   };
 
+  const handleRenew = async (payload: {
+    issuedOn: string;
+    expiresOn: string;
+    renewalPeriod: RenewalPeriod;
+  }) => {
+    if (!renewingItem) return;
+    await onUpdate(renewingItem.id, {
+      hasExpiry: true,
+      issuedOn: payload.issuedOn,
+      expiresOn: payload.expiresOn,
+      renewalDate: payload.issuedOn,
+      expiryDate: payload.expiresOn,
+      renewalPeriod: payload.renewalPeriod,
+    });
+    setRenewingItem(null);
+    await onRefresh();
+    await loadDocCounts();
+  };
+
   useEffect(() => {
     setSearch("");
     setSubTypeFilter("");
@@ -417,7 +481,7 @@ export default function RenewalsPanel({
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#ff791a] text-[#ff791a] hover:bg-orange-50 text-xs font-bold rounded-lg shadow-sm transition"
             >
               <Upload size={14} />
-              Bulk Upload
+              Upload
             </button>
             <button
               type="button"
@@ -461,6 +525,72 @@ export default function RenewalsPanel({
           <p className="text-2xl font-bold text-red-800 mt-1">{stats.expired}</p>
         </button>
       </div>
+
+      {nearingRenewals.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Clock size={16} className="text-amber-700" />
+            <h3 className="text-sm font-extrabold text-amber-900">
+              Nearing Renewal ({nearingRenewals.length})
+            </h3>
+          </div>
+          <p className="text-[11px] text-amber-800">
+            Expired or expiring within 60 days — shown first in the list below.
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-amber-100 bg-white">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-amber-50 text-slate-500 uppercase tracking-wide">
+                  <th className="py-2 px-3 font-bold">Type</th>
+                  <th className="py-2 px-3 font-bold">
+                    {category === "car_papers" ? "Vehicle" : "Name / Details"}
+                  </th>
+                  <th className="py-2 px-3 font-bold">Expires On</th>
+                  <th className="py-2 px-3 font-bold">Period</th>
+                  <th className="py-2 px-3 font-bold text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nearingRenewals.map((item) => {
+                  const expiry = expiryMeta(item);
+                  return (
+                    <tr key={`near-${item.id}`} className="border-b border-slate-50 hover:bg-amber-50/40">
+                      <td className="py-2 px-3 font-semibold text-slate-700">
+                        {subtypeLabels[item.subType] || item.subType}
+                      </td>
+                      <td className="py-2 px-3 text-slate-800">{item.title || "—"}</td>
+                      <td className={`py-2 px-3 ${expiry.className}`}>{expiry.label}</td>
+                      <td className="py-2 px-3 text-slate-600">
+                        {renewalPeriodLabel(item.renewalPeriod)}
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <div className="inline-flex gap-1">
+                          {!readOnly && item.hasExpiry !== false && (
+                            <button
+                              type="button"
+                              onClick={() => setRenewingItem(item)}
+                              className="px-2 py-1 rounded bg-orange-50 hover:bg-orange-100 text-[#ff791a] font-bold"
+                            >
+                              Renew
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openEdit(item)}
+                            className="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold"
+                          >
+                            {readOnly ? "View" : "Edit"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -647,6 +777,7 @@ export default function RenewalsPanel({
                   )}
                   <th className="py-2 pr-3 font-bold">Issued On</th>
                   <th className="py-2 pr-3 font-bold">Expires On</th>
+                  <th className="py-2 pr-3 font-bold">Period</th>
                   <th className="py-2 pr-3 font-bold">Docs</th>
                   <th className="py-2 font-bold text-right">Actions</th>
                 </tr>
@@ -673,11 +804,23 @@ export default function RenewalsPanel({
                         {item.issuedOn ? formatAppDate(item.issuedOn) : "—"}
                       </td>
                       <td className={`py-2.5 pr-3 ${expiry.className}`}>{expiry.label}</td>
+                      <td className="py-2.5 pr-3 text-slate-600">
+                        {item.hasExpiry === false ? "—" : renewalPeriodLabel(item.renewalPeriod)}
+                      </td>
                       <td className="py-2.5 pr-3">
                         <DocCount count={docCounts[item.id]} />
                       </td>
                       <td className="py-2.5 text-right">
                         <div className="inline-flex gap-1">
+                          {!readOnly && item.hasExpiry !== false && (
+                            <button
+                              type="button"
+                              onClick={() => setRenewingItem(item)}
+                              className="px-2 py-1 rounded bg-orange-50 hover:bg-orange-100 text-[#ff791a] font-bold"
+                            >
+                              Renew
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => openEdit(item)}
@@ -731,12 +874,110 @@ export default function RenewalsPanel({
                 </select>
               </label>
 
+              <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/50">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">Renewal required?</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Choose whether this item needs periodic renewal tracking.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => patchForm(prev, { hasExpiry: true }))
+                    }
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                      form.hasExpiry
+                        ? "bg-[#ff791a] border-[#ff791a] text-white"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        hasExpiry: false,
+                        expiresOn: "",
+                        expiryDate: "",
+                      }))
+                    }
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                      !form.hasExpiry
+                        ? "bg-slate-700 border-slate-700 text-white"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    No
+                  </button>
+                </div>
+
+                {form.hasExpiry && (
+                  <>
+                    <label className="block text-xs font-bold text-slate-600">
+                      Renewal Period
+                      <select
+                        value={form.renewalPeriod}
+                        onChange={(e) =>
+                          setForm((prev) =>
+                            patchForm(prev, {
+                              renewalPeriod: e.target.value as RenewalPeriod,
+                            }),
+                          )
+                        }
+                        className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+                      >
+                        <option value="monthly">Monthly Renewal</option>
+                        <option value="yearly">Yearly Renewal</option>
+                      </select>
+                    </label>
+
+                    <label className="block text-xs font-bold text-slate-600">
+                      Issued On
+                      <DateInput
+                        value={form.issuedOn}
+                        onChange={(e) =>
+                          setForm((prev) => patchForm(prev, { issuedOn: e.target.value }))
+                        }
+                        className="mt-1 w-full"
+                      />
+                    </label>
+
+                    <label className="block text-xs font-bold text-slate-600">
+                      Expires On
+                      <DateInput
+                        value={form.expiresOn}
+                        onChange={(e) => setForm((prev) => ({ ...prev, expiresOn: e.target.value }))}
+                        className="mt-1 w-full"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1 font-normal">
+                        Auto-filled from Issued On + {renewalPeriodLabel(form.renewalPeriod)}. Override if needed.
+                      </p>
+                    </label>
+                  </>
+                )}
+              </div>
+
               <label className="block text-xs font-bold text-slate-600">
                 {titleLabel(category)}
                 <input
                   value={form.title}
-                  onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+                  onChange={(e) =>
+                    setForm((prev) =>
+                      patchForm(prev, {
+                        title:
+                          category === "car_papers"
+                            ? e.target.value.toUpperCase()
+                            : e.target.value,
+                      }),
+                    )
+                  }
+                  className={`mt-1 w-full px-3 py-2 text-sm border border-slate-200 rounded-lg${
+                    category === "car_papers" ? " uppercase" : ""
+                  }`}
                   placeholder={
                     category === "car_papers"
                       ? "e.g. KA-01-AB-1234"
@@ -790,55 +1031,6 @@ export default function RenewalsPanel({
                   )}
                 </>
               )}
-
-              <label className="block text-xs font-bold text-slate-600">
-                Issued On
-                <DateInput
-                  value={form.issuedOn}
-                  onChange={(e) => setForm((prev) => ({ ...prev, issuedOn: e.target.value }))}
-                  className="mt-1 w-full"
-                />
-              </label>
-
-              <div className="rounded-lg border border-slate-200 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Document expires</p>
-                    <p className="text-[11px] text-slate-500">Turn off for licenses or papers with no expiry date.</p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={form.hasExpiry}
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        hasExpiry: !prev.hasExpiry,
-                        expiresOn: !prev.hasExpiry ? prev.expiresOn : "",
-                      }))
-                    }
-                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition ${
-                      form.hasExpiry ? "bg-[#ff791a]" : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition mt-0.5 ${
-                        form.hasExpiry ? "translate-x-5" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
-                </div>
-                {form.hasExpiry && (
-                  <label className="block text-xs font-bold text-slate-600">
-                    Expires On
-                    <DateInput
-                      value={form.expiresOn}
-                      onChange={(e) => setForm((prev) => ({ ...prev, expiresOn: e.target.value }))}
-                      className="mt-1 w-full"
-                    />
-                  </label>
-                )}
-              </div>
 
               <label className="block text-xs font-bold text-slate-600">
                 Notes
@@ -896,6 +1088,16 @@ export default function RenewalsPanel({
           onCreate={onCreate}
           onClose={() => setIsBulkUploadOpen(false)}
           onComplete={handleBulkComplete}
+        />
+      )}
+
+      {renewingItem && (
+        <RenewalRenewModal
+          item={renewingItem}
+          subtypeLabel={subtypeLabels[renewingItem.subType] || renewingItem.subType}
+          readOnly={readOnly}
+          onClose={() => setRenewingItem(null)}
+          onRenew={handleRenew}
         />
       )}
     </div>

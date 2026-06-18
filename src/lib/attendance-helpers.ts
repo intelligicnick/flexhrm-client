@@ -66,6 +66,19 @@ export function countMonthAttendance(
   return { presents, absents };
 }
 
+export type AttendanceRecordFilter = "all" | "absent" | "present";
+
+export function employeeMatchesAttendanceRecordFilter(
+  presents: number,
+  absents: number,
+  filter: AttendanceRecordFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "absent") return absents > 0;
+  if (filter === "present") return presents > 0 && absents === 0;
+  return true;
+}
+
 /** Working-days denominator for salary proration from the employee's cycle. */
 export function getSalaryProrationDays(workingDaysType: string | undefined): number {
   return getWorkingDaysCount(workingDaysType);

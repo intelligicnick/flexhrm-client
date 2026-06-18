@@ -556,7 +556,7 @@ const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDoc
               className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-[#ff791a] px-4 py-2 text-xs font-bold text-white hover:bg-orange-600"
             >
               <Upload size={14} />
-              Bulk Upload
+              Upload
             </button>
 
             {pendingItems.length > 0 && (

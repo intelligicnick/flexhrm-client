@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
 import {
   Gavel,
@@ -488,6 +488,7 @@ function TypeBadge({ type }: { type: TenderType }) {
 interface TendersPanelProps {
   tenders: Tender[];
   readOnly?: boolean;
+  initialDeadlineFilter?: "all" | "upcoming" | "passed";
   onRefresh: () => Promise<void>;
   onCreate: (payload: CreateTenderInput) => Promise<void>;
   onUpdate: (id: string, payload: Partial<CreateTenderInput>) => Promise<void>;
@@ -498,6 +499,7 @@ interface TendersPanelProps {
 export default function TendersPanel({
   tenders,
   readOnly = false,
+  initialDeadlineFilter = "all",
   onRefresh,
   onCreate,
   onUpdate,
@@ -508,8 +510,12 @@ export default function TendersPanel({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"" | TenderType>("");
   const [statusFilter, setStatusFilter] = useState<"" | TenderStatus>("");
-  const [deadlineFilter, setDeadlineFilter] = useState<"all" | "upcoming" | "passed">("all");
+  const [deadlineFilter, setDeadlineFilter] = useState<"all" | "upcoming" | "passed">(initialDeadlineFilter);
   const [dateRangeField, setDateRangeField] = useState<"endDate" | "filedDate">("endDate");
+
+  useEffect(() => {
+    setDeadlineFilter(initialDeadlineFilter);
+  }, [initialDeadlineFilter]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [endDateIso, setEndDateIso] = useState("");

@@ -18,6 +18,7 @@ import {
 } from "../../lib/supervisor-login";
 import {
   clearSupervisorSession,
+  ensureSupervisorSessionReady,
   getSupervisorToken,
   persistSupervisorSession,
   restoreSupervisorSessionFromNative,
@@ -45,7 +46,7 @@ function getPageTitle(pathname: string, t: (key: string) => string): string {
 function SupervisorLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { t, setLang } = useSupervisorI18n();
+  const { t, setLang, lang } = useSupervisorI18n();
   const token = getSupervisorToken();
   const name = localStorage.getItem("hrms_supervisor_name") || "Supervisor";
   const [valid, setValid] = useState<boolean | null>(null);
@@ -59,6 +60,7 @@ function SupervisorLayoutInner() {
 
   const checkSession = useCallback(async () => {
     restoreSupervisorSessionFromNative();
+    await ensureSupervisorSessionReady();
     const sessionToken = getSupervisorToken();
     if (!sessionToken) {
       setValid(false);
@@ -162,6 +164,7 @@ function SupervisorLayoutInner() {
     unreadCount,
     fetchUnreadCount: fetchSupervisorUnreadCount,
     fetchNotifications: fetchSupervisorNotifications,
+    lang,
   });
 
   useEffect(() => {

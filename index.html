@@ -9,6 +9,21 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet" />
     <title>Flex HRM an Intelligic product</title>
     <script src="/extension-error-guard.js"></script>
+    <script>
+      (function () {
+        try {
+          var bridge = window.FlexHrmAndroid || window.Android;
+          if (!bridge || !bridge.getSupervisorSession) return;
+          var raw = bridge.getSupervisorSession();
+          if (!raw) return;
+          var session = JSON.parse(raw);
+          if (!session || !session.token) return;
+          localStorage.setItem("hrms_supervisor_token", session.token);
+          if (session.name) localStorage.setItem("hrms_supervisor_name", session.name);
+          if (session.supervisorId) localStorage.setItem("hrms_supervisor_id", session.supervisorId);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

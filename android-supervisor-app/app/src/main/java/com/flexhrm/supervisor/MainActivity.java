@@ -360,6 +360,7 @@ public class MainActivity extends AppCompatActivity {
           public void onPageStarted(WebView view, String url, Bitmap favicon) {
             progressBar.setVisibility(View.VISIBLE);
             errorPanel.setVisibility(View.GONE);
+            restoreWebSessionIfNeeded();
           }
 
           @Override
@@ -707,7 +708,7 @@ public class MainActivity extends AppCompatActivity {
     String js =
         "(function(){try{var s="
             + JSONObject.quote(sessionJson)
-            + ";var p=JSON.parse(s);if(p.token){if(!localStorage.getItem('hrms_supervisor_token')){localStorage.setItem('hrms_supervisor_token',p.token);}if(p.name&&!localStorage.getItem('hrms_supervisor_name')){localStorage.setItem('hrms_supervisor_name',p.name);}if(p.supervisorId&&!localStorage.getItem('hrms_supervisor_id')){localStorage.setItem('hrms_supervisor_id',p.supervisorId);}}}catch(e){}})();";
+            + ";var p=JSON.parse(s);if(p.token){localStorage.setItem('hrms_supervisor_token',p.token);if(p.name){localStorage.setItem('hrms_supervisor_name',p.name);}if(p.supervisorId){localStorage.setItem('hrms_supervisor_id',p.supervisorId);}}}catch(e){}})();";
     webView.evaluateJavascript(js, null);
   }
 

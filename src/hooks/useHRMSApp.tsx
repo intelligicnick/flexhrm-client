@@ -130,6 +130,7 @@ import {
   countMonthAttendance,
   getEffectiveAttendanceStatus,
   isWeeklyOffDay,
+  type AttendanceRecordFilter,
 } from "../lib/attendance-helpers";
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
@@ -452,6 +453,7 @@ export function useHRMSApp() {
   const [adminNotificationUnreadCount, setAdminNotificationUnreadCount] = useState(0);
   const [isFetchingAdminNotifications, setIsFetchingAdminNotifications] = useState(false);
   const [fieldTeamView, setFieldTeamView] = useState<FieldTeamView>("visits");
+  const [tenderDeadlineFilter, setTenderDeadlineFilter] = useState<"all" | "upcoming" | "passed">("all");
   const [rawSchoolPartners, setRawSchoolPartners] = useState<SchoolPartner[]>([]);
   const [rawSchoolSupervisors, setRawSchoolSupervisors] = useState<SchoolSupervisor[]>([]);
   const [schoolDistricts, setSchoolDistricts] = useState<SchoolDistrict[]>([]);
@@ -1562,6 +1564,7 @@ export function useHRMSApp() {
   const [bulkWizardStep, setBulkWizardStep] = useState<"employees" | "dates" | "review">("employees");
   const [isBulkWizardOpen, setIsBulkWizardOpen] = useState(false);
   const [attendanceSubView, setAttendanceSubView] = useState<"grid" | "wizard">("grid");
+  const [attendanceRecordFilter, setAttendanceRecordFilter] = useState<AttendanceRecordFilter>("all");
   const [bulkSelLocations, setBulkSelLocations] = useState<string[]>([]);
   const [bulkSelEmployees, setBulkSelEmployees] = useState<string[]>([]);
   const [bulkSelMonths, setBulkSelMonths] = useState<string[]>([]);
@@ -4200,6 +4203,16 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
+    if (isLoggedIn && activeSidebarTab === "Dashboard") {
+      fetchTenders();
+      fetchContracts();
+      fetchRenewals();
+      fetchSchoolWorks();
+      fetchPendingSupervisorRequestCount();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
     if (isLoggedIn && isBidsTab(activeSidebarTab)) {
       fetchTenders();
       fetchContracts();
@@ -6792,6 +6805,7 @@ export function useHRMSApp() {
   // Sidebar navigation options mimicking OrangeHRM layout
   const sidebarItems: SidebarItemDef[] = [
     { name: "Search", icon: Search, badge: "" },
+    { name: "Dashboard", icon: LayoutDashboard, badge: "" },
     { name: "Role & Access", icon: Shield, badge: "" },
     { name: "Employees", icon: Users, badge: "Active" },
     { name: "Salary", icon: Coins, badge: "New" },
@@ -7068,6 +7082,7 @@ export function useHRMSApp() {
     bulkWizardStep,
     isBulkWizardOpen,
     attendanceSubView,
+    attendanceRecordFilter,
     bulkSelLocations,
     bulkSelEmployees,
     bulkSelMonths,
@@ -7328,6 +7343,8 @@ export function useHRMSApp() {
     handleAdminNotificationNavigate,
     fieldTeamView,
     setFieldTeamView,
+    tenderDeadlineFilter,
+    setTenderDeadlineFilter,
     rawSchoolPartners,
     rawSchoolSupervisors,
     isSupervisorFormOpen,
@@ -7517,6 +7534,7 @@ export function useHRMSApp() {
     setBulkWizardStep,
     setIsBulkWizardOpen,
     setAttendanceSubView,
+    setAttendanceRecordFilter,
     setBulkSelLocations,
     setBulkSelEmployees,
     setBulkSelMonths,

@@ -15,6 +15,7 @@ import { supervisorFetch } from "../../lib/supervisor-fetch";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
 import {
   clearSupervisorSession,
+  ensureSupervisorSessionReady,
   getSupervisorToken,
   persistSupervisorSession,
   restoreSupervisorSessionFromNative,
@@ -55,6 +56,7 @@ function LoginForm() {
     let cancelled = false;
     void (async () => {
       restoreSupervisorSessionFromNative();
+      await ensureSupervisorSessionReady();
       const token = getSupervisorToken();
       if (!token) {
         if (!cancelled) setRestoringSession(false);

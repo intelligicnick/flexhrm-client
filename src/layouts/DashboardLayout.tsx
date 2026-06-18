@@ -1420,6 +1420,7 @@ export default function DashboardLayout() {
                   {/* Premium Floating Mobile Bottom Navigation Bar */}
                   <div className="fixed bottom-4 left-4 right-4 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-xl flex items-center justify-around z-40 md:hidden animate-slide-up" id="mobile-bottom-nav">
                     {[
+                      { name: "Dashboard", label: "Home", icon: LayoutDashboard },
                       { name: "Employees", label: "Staff", icon: Users },
                       { name: "Attendance", label: "Records", icon: Clock },
                       { name: "Salary", label: "Payroll", icon: Coins },

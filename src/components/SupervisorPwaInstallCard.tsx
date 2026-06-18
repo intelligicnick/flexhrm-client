@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { Check, Copy, Download, ExternalLink, Share2, Smartphone } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, ExternalLink, Share2, Smartphone } from "lucide-react";
 import { getSupervisorLoginUrl, getSupervisorPwaManifestUrl } from "./id-card/verify-url";
 
 export default function SupervisorPwaInstallCard() {
@@ -13,7 +13,7 @@ export default function SupervisorPwaInstallCard() {
   useEffect(() => {
     let cancelled = false;
     void QRCode.toDataURL(installUrl, {
-      width: 160,
+      width: 128,
       margin: 1,
       errorCorrectionLevel: "M",
       color: { dark: "#0f172a", light: "#ffffff" },
@@ -63,108 +63,112 @@ export default function SupervisorPwaInstallCard() {
   };
 
   return (
-    <section className="rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 via-white to-slate-50 p-4 shadow-xs">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <details className="group rounded-lg border border-slate-200 bg-slate-50/80">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#ff791a] text-white">
+          <Smartphone size={14} />
+        </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#ff791a] text-white shadow-sm">
-              <Smartphone size={18} />
-            </div>
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">Supervisor App (PWA)</h3>
-              <p className="text-[11px] text-slate-500">
-                Installable mobile app for supervisor login only — visits, requests, and commitments.
-              </p>
-            </div>
-          </div>
+          <span className="text-xs font-bold text-slate-800">Supervisor app install link</span>
+          <span className="ml-2 hidden text-[11px] text-slate-500 sm:inline">
+            PWA for supervisor login — visits, requests, commitments
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            void copyText(installUrl, "link");
+          }}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 cursor-pointer hover:bg-slate-50"
+        >
+          {copied === "link" ? <Check size={11} className="text-emerald-600" /> : <Copy size={11} />}
+          {copied === "link" ? "Copied" : "Copy"}
+        </button>
+        <ChevronDown
+          size={14}
+          className="shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+        />
+      </summary>
 
-          <div className="mt-3 rounded-lg border border-orange-100 bg-white/80 px-3 py-2.5">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Install link</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+      <div className="border-t border-slate-200 px-3 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <div className="min-w-0 flex-1 space-y-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               <a
                 href={installUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 break-all text-xs font-semibold text-[#ff791a] hover:underline"
+                className="inline-flex min-w-0 items-center gap-1 break-all text-[11px] font-semibold text-[#ff791a] hover:underline"
               >
                 {installUrl}
-                <ExternalLink size={12} />
+                <ExternalLink size={11} className="shrink-0" />
               </a>
               <button
                 type="button"
-                onClick={() => void copyText(installUrl, "link")}
-                className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 cursor-pointer"
-              >
-                {copied === "link" ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
-                {copied === "link" ? "Copied" : "Copy link"}
-              </button>
-              <button
-                type="button"
                 onClick={() => void shareInstallLink()}
-                className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 cursor-pointer"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 cursor-pointer hover:bg-slate-50"
               >
-                <Share2 size={12} />
+                <Share2 size={11} />
                 Share
               </button>
             </div>
+
+            <ul className="space-y-1 text-[10px] leading-relaxed text-slate-600">
+              <li>
+                <span className="font-semibold text-slate-700">Android:</span> Chrome → menu → Install app / Add to
+                Home screen
+              </li>
+              <li>
+                <span className="font-semibold text-slate-700">iPhone:</span> Safari → Share → Add to Home Screen
+              </li>
+            </ul>
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <a
+                href={manifestUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] font-semibold text-slate-500 hover:text-[#ff791a] hover:underline"
+              >
+                View manifest
+              </a>
+              <button
+                type="button"
+                onClick={() => void copyText(manifestUrl, "manifest")}
+                className="text-[10px] font-semibold text-slate-500 hover:text-[#ff791a] cursor-pointer"
+              >
+                {copied === "manifest" ? "Manifest copied" : "Copy manifest URL"}
+              </button>
+            </div>
+
+            {shareError && <p className="text-[10px] font-semibold text-rose-600">{shareError}</p>}
           </div>
 
-          <ol className="mt-3 space-y-1.5 text-[11px] text-slate-600">
-            <li>
-              <span className="font-bold text-slate-700">Android:</span> Open the link in Chrome, tap menu, then
-              &quot;Install app&quot; or &quot;Add to Home screen&quot;.
-            </li>
-            <li>
-              <span className="font-bold text-slate-700">iPhone:</span> Open in Safari, tap Share, then &quot;Add to
-              Home Screen&quot;.
-            </li>
-          </ol>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <a
-              href={manifestUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[10px] font-semibold text-slate-500 hover:text-[#ff791a] hover:underline"
-            >
-              View app manifest
-            </a>
+          <div className="flex shrink-0 items-center gap-2 self-start rounded-lg border border-slate-200 bg-white p-2 sm:flex-col">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt="QR code for supervisor app install link"
+                className="h-28 w-28 rounded border border-slate-100"
+              />
+            ) : (
+              <div className="flex h-28 w-28 items-center justify-center rounded bg-slate-100 text-[10px] text-slate-400">
+                Generating…
+              </div>
+            )}
             <button
               type="button"
-              onClick={() => void copyText(manifestUrl, "manifest")}
-              className="text-[10px] font-semibold text-slate-500 hover:text-[#ff791a] cursor-pointer"
+              onClick={downloadQr}
+              disabled={!qrDataUrl}
+              className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-700 cursor-pointer disabled:opacity-50"
             >
-              {copied === "manifest" ? "Manifest copied" : "Copy manifest URL"}
+              <Download size={11} />
+              QR
             </button>
           </div>
-
-          {shareError && <p className="mt-2 text-[11px] font-semibold text-rose-600">{shareError}</p>}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Scan to install</p>
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt="QR code for supervisor app install link"
-              className="h-40 w-40 rounded-lg border border-slate-100"
-            />
-          ) : (
-            <div className="flex h-40 w-40 items-center justify-center rounded-lg bg-slate-100 text-[11px] text-slate-400">
-              Generating QR…
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={downloadQr}
-            disabled={!qrDataUrl}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-700 cursor-pointer disabled:opacity-50"
-          >
-            <Download size={12} />
-            Download QR
-          </button>
         </div>
       </div>
-    </section>
+    </details>
   );
 }

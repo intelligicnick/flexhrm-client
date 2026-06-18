@@ -345,20 +345,13 @@ export interface Tender {
   id: string;
   bidNo: string;
   category: string;
-  ministry: string;
-  organisation: string;
-  consigneeOfficer: string;
-  /** @deprecated Use organisation */
   department: string;
-  /** @deprecated Use consigneeOfficer */
   officerName: string;
   address: string;
   tenderType: TenderType;
   quantity: number;
   rate: string;
-  additionalRequirements: string;
   endDate: string;
-  startDate: string;
   filedDate: string;
   preBidAt: string;
   preBidVenue: string;
@@ -440,6 +433,8 @@ export type LicenseSubtype =
 
 export type RenewalOwnerType = "mine" | "client";
 
+export type RenewalPeriod = "monthly" | "yearly";
+
 export interface Renewal {
   id: string;
   category: RenewalCategory;
@@ -457,6 +452,7 @@ export interface Renewal {
   expiryDate: string;
   notes: string;
   entryDate: string;
+  renewalPeriod: RenewalPeriod;
   createdAt?: string;
   updatedAt?: string;
 }

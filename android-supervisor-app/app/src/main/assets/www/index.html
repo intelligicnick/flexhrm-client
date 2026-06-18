@@ -11,8 +11,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet" />
     <title>Flex HRM an Intelligic product</title>
     <script src="/extension-error-guard.js"></script>
-    <script type="module" crossorigin src="/assets/index-Cos3kU9X.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Bom3IWOu.css">
+    <script>
+      (function () {
+        try {
+          var bridge = window.FlexHrmAndroid || window.Android;
+          if (!bridge || !bridge.getSupervisorSession) return;
+          var raw = bridge.getSupervisorSession();
+          if (!raw) return;
+          var session = JSON.parse(raw);
+          if (!session || !session.token) return;
+          localStorage.setItem("hrms_supervisor_token", session.token);
+          if (session.name) localStorage.setItem("hrms_supervisor_name", session.name);
+          if (session.supervisorId) localStorage.setItem("hrms_supervisor_id", session.supervisorId);
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-D-9Os7tk.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-KK0pgY-e.css">
   </head>
   <body>
     <div id="root"></div>

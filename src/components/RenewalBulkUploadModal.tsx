@@ -52,6 +52,7 @@ export default function RenewalBulkUploadModal({
     expiryDate: "",
     notes: "",
     entryDate: new Date().toISOString().slice(0, 10),
+    renewalPeriod: "yearly",
   });
 
   const filteredRecords = renewals.filter((r) => {
@@ -122,7 +123,7 @@ export default function RenewalBulkUploadModal({
         <div className="p-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
           <div className="flex items-center gap-2">
             <Upload size={18} className="text-[#ff791a]" />
-            <h3 className="font-bold text-slate-800">Bulk Upload — {tabLabel}</h3>
+            <h3 className="font-bold text-slate-800">Upload — {tabLabel}</h3>
           </div>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600">
             <X size={18} />

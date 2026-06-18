@@ -123,6 +123,7 @@ import {
   isWeeklyOffDay,
   getBulkAttendanceDisabledDays,
   filterSelectableBulkDays,
+  employeeMatchesAttendanceRecordFilter,
 } from "../lib/attendance-helpers";
 import { getModuleKey, PERMISSION_MODULES, ROLE_PERMISSION_MODULE_ROWS, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
@@ -136,6 +137,7 @@ import BirthdaysTab from "../components/BirthdaysTab";
 import BulkAttendanceDateCalendar from "../components/BulkAttendanceDateCalendar";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
+import AdminDashboardPage from "./AdminDashboardPage";
 export default function ModuleContent() {
   const [isSchoolBulkEditMode, setIsSchoolBulkEditMode] = useState(false);
   const [isSchoolImporterOpen, setIsSchoolImporterOpen] = useState(false);
@@ -295,6 +297,7 @@ export default function ModuleContent() {
     bulkWizardStep,
     isBulkWizardOpen,
     attendanceSubView,
+    attendanceRecordFilter,
     bulkSelLocations,
     bulkSelEmployees,
     bulkSelMonths,
@@ -496,6 +499,7 @@ export default function ModuleContent() {
     pendingSupervisorRequestCount,
     fieldTeamView,
     setFieldTeamView,
+    tenderDeadlineFilter,
     rawSchoolPartners,
     rawSchoolSupervisors,
     isSupervisorFormOpen,
@@ -702,6 +706,7 @@ export default function ModuleContent() {
     setBulkWizardStep,
     setIsBulkWizardOpen,
     setAttendanceSubView,
+    setAttendanceRecordFilter,
     setBulkSelLocations,
     setBulkSelEmployees,
     setBulkSelMonths,
@@ -819,6 +824,8 @@ export default function ModuleContent() {
                               Go to Employees
                             </button>
                           </div>
+                        ) : activeSidebarTab === "Dashboard" ? (
+                          <AdminDashboardPage />
                         ) : activeSidebarTab === "My Info" ? (
                           <div className="max-w-5xl mx-auto space-y-6 animate-fade-in" id="my-info-view-container">
                             {/* Profile hero */}
@@ -5150,7 +5157,24 @@ export default function ModuleContent() {
                                       </select>
                                     </div>
                                   </div>
-          
+
+                                  {attendanceRecordFilter !== "all" && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg border border-[#ff791a]/25 bg-orange-50/80">
+                                      <span className="text-xs font-bold text-orange-900">
+                                        {attendanceRecordFilter === "absent"
+                                          ? `Showing employees with absent days · ${selectedMonth}`
+                                          : `Showing present-only employees (no absents) · ${selectedMonth}`}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAttendanceRecordFilter("all")}
+                                        className="text-[10px] font-bold text-[#ff791a] hover:text-[#e4640c] cursor-pointer"
+                                      >
+                                        Clear filter
+                                      </button>
+                                    </div>
+                                  )}
+
                                   {/* Interactive Grid Table */}
                               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                                 <div className="overflow-x-auto max-w-full">
@@ -5177,14 +5201,34 @@ export default function ModuleContent() {
                                           const skillMatch = employeeMatchesSkillFilters(emp, attendanceSkillFilters);
                                           const q = attendanceSearchQuery.toLowerCase().trim();
                                           const searchMatch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadhar || "").toLowerCase().includes(q);
-                                          return locMatch && searchMatch && roleMatch && skillMatch;
+                                          if (!(locMatch && searchMatch && roleMatch && skillMatch)) return false;
+
+                                          if (attendanceRecordFilter !== "all") {
+                                            const monthData = attendanceDb[selectedMonth] || {};
+                                            const empData = monthData[emp.id] || {};
+                                            const daysCount = getDaysInSelectedMonth(selectedMonth);
+                                            const counts = countMonthAttendance(
+                                              empData,
+                                              daysCount,
+                                              (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+                                              { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+                                            );
+                                            if (!employeeMatchesAttendanceRecordFilter(counts.presents, counts.absents, attendanceRecordFilter)) {
+                                              return false;
+                                            }
+                                          }
+                                          return true;
                                         });
           
                                         if (filtered.length === 0) {
                                           return (
                                             <tr>
                                               <td colSpan={getDaysInSelectedMonth(selectedMonth) + 6} className="px-6 py-10 text-center text-slate-400">
-                                                No onboarded staff detected under active worksite location or search criteria.
+                                                {attendanceRecordFilter === "absent"
+                                                  ? `No employees with absent days in ${selectedMonth}.`
+                                                  : attendanceRecordFilter === "present"
+                                                    ? `No present-only employees in ${selectedMonth}.`
+                                                    : "No onboarded staff detected under active worksite location or search criteria."}
                                               </td>
                                             </tr>
                                           );
@@ -5203,7 +5247,12 @@ export default function ModuleContent() {
                                           );
 
                                           return (
-                                            <tr key={emp.id} className="hover:bg-slate-50/50">
+                                            <tr
+                                              key={emp.id}
+                                              className={`hover:bg-slate-50/50 ${
+                                                attendanceRecordFilter === "absent" && absents > 0 ? "bg-rose-50/40" : ""
+                                              }`}
+                                            >
                                               <td className="px-3 py-2 text-center text-slate-400 font-bold">{index + 1}</td>
                                               <td className="px-3 py-2 font-mono font-bold text-slate-800">{emp.employeeCode}</td>
                                               <td className="px-3 py-2 font-semibold text-slate-700">{emp.nameAsPerAadhar}</td>
@@ -5656,6 +5705,7 @@ export default function ModuleContent() {
                                 <TendersPanel
                                   tenders={rawTenders}
                                   readOnly={!userPermissions.bids?.edit}
+                                  initialDeadlineFilter={tenderDeadlineFilter}
                                   onRefresh={fetchTenders}
                                   onCreate={handleCreateTender}
                                   onUpdate={handleUpdateTender}

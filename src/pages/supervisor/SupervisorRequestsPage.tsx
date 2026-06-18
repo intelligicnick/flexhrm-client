@@ -22,6 +22,7 @@ import {
   setNotificationSoundEnabled,
 } from "../../lib/notification-alerts";
 import { getSupervisorNotificationTarget } from "../../lib/notification-navigation";
+import { localizeSupervisorNotification } from "../../lib/supervisor-notifications-i18n";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 
 type PageTab = "raise" | "mine" | "notifications";
@@ -78,7 +79,7 @@ export default function SupervisorRequestsPage() {
   const { supervisorFetch } = useOutletContext<{ supervisorFetch: typeof fetch }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { t } = useSupervisorI18n();
+  const { t, lang } = useSupervisorI18n();
   const [tab, setTab] = useState<PageTab>("raise");
   const [schools, setSchools] = useState<SchoolWork[]>([]);
   const [requests, setRequests] = useState<SupervisorRequest[]>([]);
@@ -703,6 +704,7 @@ export default function SupervisorRequestsPage() {
           ) : (
             notifications.map((notif) => {
               const unread = !notif.readAt;
+              const localized = localizeSupervisorNotification(notif, lang);
               return (
                 <button
                   key={notif.id}
@@ -722,8 +724,8 @@ export default function SupervisorRequestsPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs font-black text-slate-800">{notif.title}</p>
-                  <p className="text-xs text-slate-600 whitespace-pre-wrap">{notif.message}</p>
+                  <p className="text-xs font-black text-slate-800">{localized.title}</p>
+                  <p className="text-xs text-slate-600 whitespace-pre-wrap">{localized.message}</p>
                   <p className="text-[10px] text-slate-400">{formatWhen(notif.createdAt)}</p>
                 </button>
               );

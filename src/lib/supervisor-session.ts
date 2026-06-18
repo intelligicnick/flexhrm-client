@@ -21,6 +21,7 @@ function getNativeBridge(): NativeSessionBridge | undefined {
 
 export function getSupervisorToken(): string | null {
   if (typeof window === "undefined") return null;
+  restoreSupervisorSessionFromNative();
   const token = localStorage.getItem(TOKEN_KEY);
   return token?.trim() ? token : null;
 }
@@ -63,20 +64,49 @@ export function clearSupervisorSession(): void {
 /** Restore session from native storage when WebView localStorage was cleared. */
 export function restoreSupervisorSessionFromNative(): boolean {
   if (typeof window === "undefined") return false;
-  if (getSupervisorToken()) return true;
 
   try {
     const raw = getNativeBridge()?.getSupervisorSession?.();
-    if (!raw) return false;
+    if (!raw) return !!localStorage.getItem(TOKEN_KEY)?.trim();
     const parsed = JSON.parse(raw) as SupervisorSessionSnapshot;
-    if (!parsed?.token?.trim()) return false;
-    persistSupervisorSession({
-      token: parsed.token,
-      name: parsed.name,
-      supervisorId: parsed.supervisorId,
-    });
+    if (!parsed?.token?.trim()) return !!localStorage.getItem(TOKEN_KEY)?.trim();
+
+    const localToken = localStorage.getItem(TOKEN_KEY)?.trim() || "";
+    if (localToken !== parsed.token.trim()) {
+      persistSupervisorSession({
+        token: parsed.token.trim(),
+        name: parsed.name,
+        supervisorId: parsed.supervisorId,
+      });
+      return true;
+    }
+
+    if (!localToken) {
+      persistSupervisorSession({
+        token: parsed.token.trim(),
+        name: parsed.name,
+        supervisorId: parsed.supervisorId,
+      });
+      return true;
+    }
+
     return true;
   } catch {
-    return false;
+    return !!localStorage.getItem(TOKEN_KEY)?.trim();
   }
+}
+
+/** Wait briefly for native session bridge on cold app start. */
+export async function ensureSupervisorSessionReady(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (restoreSupervisorSessionFromNative()) return true;
+
+  const bridge = getNativeBridge();
+  if (!bridge?.getSupervisorSession) return false;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    if (restoreSupervisorSessionFromNative()) return true;
+  }
+  return false;
 }

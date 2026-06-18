@@ -90,8 +90,6 @@ export default function FieldTeamPanel({
 
   return (
     <div className="space-y-4">
-      <SupervisorPwaInstallCard />
-
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex bg-slate-200/60 p-1 rounded-lg gap-1">
           <button
@@ -189,14 +187,17 @@ export default function FieldTeamPanel({
           readOnly={readOnly}
         />
       ) : (
-        <SchoolSupervisorsTable
-          supervisors={supervisors}
-          schools={schools}
-          onAdd={onAddSupervisor}
-          onEdit={onEditSupervisor}
-          onDelete={onDeleteSupervisor}
-          readOnly={readOnly}
-        />
+        <div className="space-y-4">
+          <SchoolSupervisorsTable
+            supervisors={supervisors}
+            schools={schools}
+            onAdd={onAddSupervisor}
+            onEdit={onEditSupervisor}
+            onDelete={onDeleteSupervisor}
+            readOnly={readOnly}
+          />
+          <SupervisorPwaInstallCard />
+        </div>
       )}
     </div>
   );

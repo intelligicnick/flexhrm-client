@@ -29,6 +29,7 @@ export function isRenewalsTab(tab: string): tab is RenewalsTab {
 }
 
 export const TAB_TO_PATH: Record<string, string> = {
+  "Dashboard": "/dashboard",
   "Employees": "/employees",
   "Role & Access": "/admin",
   "Salary": "/salary",
@@ -55,7 +56,7 @@ export const PATH_TO_TAB: Record<string, string> = Object.fromEntries(
   Object.entries(TAB_TO_PATH).map(([tab, p]) => [p, tab])
 );
 
-export const DEFAULT_PATH = "/employees";
+export const DEFAULT_PATH = "/dashboard";
 
 export function tabToPath(tab: string): string {
   return TAB_TO_PATH[tab] ?? DEFAULT_PATH;
@@ -78,10 +79,11 @@ const LEGACY_PATH_TO_TAB: Record<string, string> = {
 };
 
 export function pathToTab(pathname: string): string {
-  return LEGACY_PATH_TO_TAB[pathname] ?? PATH_TO_TAB[pathname] ?? "Employees";
+  return LEGACY_PATH_TO_TAB[pathname] ?? PATH_TO_TAB[pathname] ?? "Dashboard";
 }
 
 export const APP_ROUTES = [
+  { path: "/dashboard", tab: "Dashboard" },
   { path: "/employees", tab: "Employees" },
   { path: "/admin", tab: "Role & Access" },
   { path: "/audit-logs", tab: "Role & Access" },
