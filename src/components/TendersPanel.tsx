@@ -462,7 +462,7 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
           href: resolveGemBidPdfUrl(tender) ?? resolveGemBidSearchUrl(tender.bidNo),
         },
         { label: "Item category", value: tender.category },
-        { label: "Type", value: tender.tenderType === "travel" ? "Travel Plus" : "Manpower" },
+        { label: "Type", value: tender.tenderType === "travel" ? "Car tenders" : "Manpower" },
         { label: "Quantity", value: tender.quantity ? String(tender.quantity) : "" },
         { label: "Estimated bid value", value: tender.rate },
         { label: "Bid end date", value: formatAppDate(tender.endDate, { withTime: /\d{1,2}:\d{2}/.test(tender.endDate) }) },
@@ -756,7 +756,7 @@ function TypeBadge({ type }: { type: TenderType }) {
           : "bg-sky-100 text-sky-700 ring-1 ring-sky-200/80"
       }`}
     >
-      {isTravel ? "Travel" : "Manpower"}
+      {isTravel ? "Car tenders" : "Manpower"}
     </span>
   );
 }
@@ -1094,7 +1094,7 @@ export default function TendersPanel({
               GeM Tenders
             </h2>
             <p className="text-xs text-slate-500 mt-1 max-w-xl">
-              Manpower &amp; Travel Plus bids — track deadlines, filing and evaluation status
+              Manpower &amp; Car tenders bids — track deadlines, filing and evaluation status
             </p>
           </div>
           {!readOnly && (
@@ -1171,7 +1171,7 @@ export default function TendersPanel({
             >
               <option value="">All types</option>
               <option value="manpower">Manpower</option>
-              <option value="travel">Travel Plus</option>
+              <option value="travel">Car tenders</option>
             </select>
             <select
               value={statusFilter}
@@ -1603,7 +1603,7 @@ export default function TendersPanel({
                   className="w-full border border-slate-200 rounded-lg px-2 py-1.5"
                 >
                   <option value="manpower">Manpower</option>
-                  <option value="travel">Travel Plus</option>
+                  <option value="travel">Car tenders</option>
                 </select>
               </label>
               <label>
