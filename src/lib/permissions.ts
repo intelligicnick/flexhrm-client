@@ -31,6 +31,7 @@ export const getModuleKey = (tabName: string): string => {
     case "Bids":
     case "Tenders":
     case "Contracts":
+    case "BG & DD":
       return "bids";
     case "Renewals":
     case "Car Papers":
@@ -79,7 +80,7 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   {
     key: "bids",
     name: "Bids",
-    includes: "Tenders and contracts",
+    includes: "Tenders, contracts, and BG/DD register",
   },
   {
     key: "renewals",

@@ -65,7 +65,7 @@ import {
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, Renewal, CreateRenewalInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, BankInstrument, CreateBankInstrumentInput, Renewal, CreateRenewalInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   BULK_EDIT_FIELDS,
   buildCustomFieldsAfterEdit,
@@ -455,6 +455,7 @@ export function useHRMSApp() {
   const [rawCommitmentDiary, setRawCommitmentDiary] = useState<CommitmentDiary[]>([]);
   const [rawTenders, setRawTenders] = useState<Tender[]>([]);
   const [rawContracts, setRawContracts] = useState<Contract[]>([]);
+  const [rawBankInstruments, setRawBankInstruments] = useState<BankInstrument[]>([]);
   const [rawRenewals, setRawRenewals] = useState<Renewal[]>([]);
   const [pendingSupervisorRequestCount, setPendingSupervisorRequestCount] = useState(0);
   const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
@@ -3725,6 +3726,16 @@ export function useHRMSApp() {
     }
   };
 
+  const fetchBankInstruments = async () => {
+    try {
+      const res = await fetch("/api/bank-instruments");
+      if (res.ok) setRawBankInstruments(await res.json());
+      else setRawBankInstruments([]);
+    } catch {
+      setRawBankInstruments([]);
+    }
+  };
+
   const fetchRenewals = async () => {
     try {
       const res = await fetch("/api/renewals");
@@ -4262,6 +4273,9 @@ export function useHRMSApp() {
     if (isLoggedIn && isBidsTab(activeSidebarTab)) {
       fetchTenders();
       fetchContracts();
+      if (activeSidebarTab === "BG & DD") {
+        fetchBankInstruments();
+      }
     }
   }, [isLoggedIn, activeSidebarTab]);
 
@@ -6042,6 +6056,42 @@ export function useHRMSApp() {
     };
   };
 
+  const handleCreateBankInstrument = async (
+    payload: CreateBankInstrumentInput,
+  ): Promise<BankInstrument> => {
+    const res = await fetch("/api/bank-instruments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to create BG/DD record.");
+    const created = await res.json();
+    await fetchBankInstruments();
+    triggerSuccess("BG/DD record added.");
+    return created;
+  };
+
+  const handleUpdateBankInstrument = async (
+    id: string,
+    payload: Partial<CreateBankInstrumentInput>,
+  ): Promise<void> => {
+    const res = await fetch(`/api/bank-instruments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to update BG/DD record.");
+    await fetchBankInstruments();
+    triggerSuccess("BG/DD record updated.");
+  };
+
+  const handleDeleteBankInstrument = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/bank-instruments/${id}`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to delete BG/DD record.");
+    await fetchBankInstruments();
+    triggerSuccess("BG/DD record deleted.");
+  };
+
   const handleCreateRenewal = async (payload: CreateRenewalInput): Promise<Renewal> => {
     const res = await fetch("/api/renewals", {
       method: "POST",
@@ -6932,6 +6982,7 @@ export function useHRMSApp() {
       children: [
         { name: "Tenders", tab: "Tenders" },
         { name: "Contracts", tab: "Contracts" },
+        { name: "BG & DD", tab: "BG & DD" },
       ],
     },
     {
@@ -7437,6 +7488,11 @@ export function useHRMSApp() {
     handleUpdateContract,
     handleDeleteContract,
     handleImportContracts,
+    rawBankInstruments,
+    fetchBankInstruments,
+    handleCreateBankInstrument,
+    handleUpdateBankInstrument,
+    handleDeleteBankInstrument,
     rawRenewals,
     fetchRenewals,
     handleCreateRenewal,

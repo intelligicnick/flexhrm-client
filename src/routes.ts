@@ -12,7 +12,7 @@ export function isSchoolWorkTab(tab: string): tab is SchoolWorkTab {
   return (SCHOOL_WORK_TABS as readonly string[]).includes(tab);
 }
 
-export const BIDS_TABS = ["Tenders", "Contracts"] as const;
+export const BIDS_TABS = ["Tenders", "Contracts", "BG & DD"] as const;
 
 export type BidsTab = (typeof BIDS_TABS)[number];
 
@@ -46,6 +46,7 @@ export const TAB_TO_PATH: Record<string, string> = {
   "Saved School Bulk Pay": "/saved-school-bulk-pay",
   "Tenders": "/tenders",
   "Contracts": "/contracts",
+  "BG & DD": "/bg-dd",
   "Car Papers": "/renewals/car-papers",
   "IT Renewals": "/renewals/it-renewals",
   "Licenses": "/renewals/licenses",
@@ -101,6 +102,7 @@ export const APP_ROUTES = [
   { path: "/field-team", tab: "Field Team" },
   { path: "/tenders", tab: "Tenders" },
   { path: "/contracts", tab: "Contracts" },
+  { path: "/bg-dd", tab: "BG & DD" },
   { path: "/renewals/car-papers", tab: "Car Papers" },
   { path: "/renewals/it-renewals", tab: "IT Renewals" },
   { path: "/renewals/licenses", tab: "Licenses" },

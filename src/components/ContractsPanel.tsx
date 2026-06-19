@@ -193,33 +193,194 @@ async function parseContractsWorkbook(buffer: ArrayBuffer): Promise<CreateContra
   return items;
 }
 
-function ContractExpandedDetails({ contract }: { contract: Contract }) {
-  const rows = [
-    { label: "Contract value", value: contract.contractValue },
-    { label: "Linked tender", value: contract.tenderBidNo },
-    { label: "Extension end date", value: contract.extensionEndDate },
-    { label: "BG number", value: contract.bgNumber },
-    { label: "BG amount", value: contract.bgAmount },
-    { label: "BG issuing bank", value: contract.bgIssuingBank },
-    { label: "BG expiry", value: contract.bgExpiryDate },
-    { label: "BG details", value: contract.bgDetails },
-    { label: "DDO name", value: contract.ddoName },
-    { label: "DDO issuing details", value: contract.ddoIssuingDetails },
-    { label: "Notes", value: contract.notes },
-  ].filter((r) => r.value?.trim());
+const CONTRACT_ROW_HEIGHT_PX = 48;
 
-  if (rows.length === 0) {
-    return <p className="text-xs text-slate-400 italic px-2 py-1">No additional details.</p>;
-  }
+const TABLE_COLUMNS = [
+  { key: "expand", label: "", width: 36 },
+  { key: "index", label: "#", width: 44 },
+  { key: "contractNo", label: "Contract No", width: 148 },
+  { key: "officerName", label: "Officer", width: 128 },
+  { key: "officeName", label: "Office", width: 140 },
+  { key: "fromDate", label: "From", width: 96 },
+  { key: "toDate", label: "To / Extended", width: 112 },
+  { key: "companyName", label: "Company", width: 132 },
+  { key: "category", label: "Category", width: 148 },
+  { key: "hasExtension", label: "Ext", width: 52 },
+  { key: "bgApplicable", label: "BG", width: 52 },
+  { key: "status", label: "Status", width: 96 },
+  { key: "actions", label: "Actions", width: 108 },
+] as const;
+
+type ContractColumnKey = (typeof TABLE_COLUMNS)[number]["key"];
+
+function displayValue(value: string | undefined | null): string {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || "—";
+}
+
+function ContractTableCell({
+  children,
+  fullText,
+  onActivate,
+  align = "left",
+  className = "",
+}: {
+  children: React.ReactNode;
+  fullText?: string;
+  onActivate?: () => void;
+  align?: "left" | "center" | "right";
+  className?: string;
+}) {
+  const alignClass =
+    align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
 
   return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 px-2 py-2">
-      {rows.map(({ label, value }) => (
-        <div key={label} className="bg-slate-50 rounded-lg border border-slate-100 px-3 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-          <p className="text-xs text-slate-700 mt-0.5 whitespace-pre-wrap">{value}</p>
+    <td
+      className={`px-2 py-0 align-middle border-r border-slate-100 last:border-r-0 ${alignClass} ${className}`}
+      style={{ height: CONTRACT_ROW_HEIGHT_PX, maxHeight: CONTRACT_ROW_HEIGHT_PX }}
+      title={fullText?.trim() || undefined}
+      onClick={onActivate}
+      role={onActivate ? "button" : undefined}
+      tabIndex={onActivate ? 0 : undefined}
+      onKeyDown={
+        onActivate
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onActivate();
+              }
+            }
+          : undefined
+      }
+    >
+      <div
+        className={`flex h-full items-center overflow-hidden ${
+          align === "center" ? "justify-center" : align === "right" ? "justify-end" : "justify-start"
+        }`}
+      >
+        <div className="w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs leading-tight">
+          {children}
         </div>
-      ))}
+      </div>
+    </td>
+  );
+}
+
+function ContractExpandedDetails({
+  contract,
+  highlightKey,
+}: {
+  contract: Contract;
+  highlightKey?: ContractColumnKey | null;
+}) {
+  const pdfUrl = resolveGemContractPdfUrl(contract);
+  const contractLabel = resolveGemContractNoLabel(contract);
+  const end = effectiveEndDate(contract);
+
+  const rows: Array<{ key: ContractColumnKey | "detail"; label: string; value: React.ReactNode }> = [
+    {
+      key: "contractNo",
+      label: "Contract No",
+      value: pdfUrl ? (
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline break-all"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {contractLabel}
+        </a>
+      ) : (
+        contractLabel
+      ),
+    },
+    { key: "officerName", label: "Officer Name", value: displayValue(contract.officerName) },
+    { key: "officeName", label: "Office Name", value: displayValue(contract.officeName) },
+    {
+      key: "detail",
+      label: "Corresponding Office",
+      value: displayValue(contract.correspondingOffice),
+    },
+    { key: "fromDate", label: "From Date", value: displayValue(formatAppDate(contract.fromDate) || contract.fromDate) },
+    {
+      key: "toDate",
+      label: contract.hasExtension ? "Extended To" : "To Date",
+      value: displayValue(formatAppDate(end) || end),
+    },
+    { key: "companyName", label: "Company Name", value: displayValue(contract.companyName) },
+    { key: "category", label: "Category", value: displayValue(contract.category) },
+    {
+      key: "detail",
+      label: "Contract Type",
+      value: contract.contractType === "travel" ? "Travel Plus" : "Manpower",
+    },
+    { key: "hasExtension", label: "Extension", value: contract.hasExtension ? "Yes" : "No" },
+    {
+      key: "detail",
+      label: "Extension End Date",
+      value: displayValue(formatAppDate(contract.extensionEndDate) || contract.extensionEndDate),
+    },
+    { key: "bgApplicable", label: "BG Applicable", value: contract.bgApplicable ? "Yes" : "No" },
+    { key: "detail", label: "BG Number", value: displayValue(contract.bgNumber) },
+    { key: "detail", label: "BG Amount", value: displayValue(contract.bgAmount) },
+    { key: "detail", label: "BG Issuing Bank", value: displayValue(contract.bgIssuingBank) },
+    {
+      key: "detail",
+      label: "BG Expiry",
+      value: displayValue(formatAppDate(contract.bgExpiryDate) || contract.bgExpiryDate),
+    },
+    { key: "detail", label: "BG Details", value: displayValue(contract.bgDetails) },
+    { key: "detail", label: "DDO Name", value: displayValue(contract.ddoName) },
+    { key: "detail", label: "DDO Issuing Details", value: displayValue(contract.ddoIssuingDetails) },
+    { key: "detail", label: "Tender Bid No", value: displayValue(contract.tenderBidNo) },
+    { key: "detail", label: "Contract Value", value: displayValue(contract.contractValue) },
+    {
+      key: "status",
+      label: "Status",
+      value: STATUS_LABELS[contract.status] || contract.status,
+    },
+    { key: "detail", label: "Entry Date", value: displayValue(formatAppDate(contract.entryDate) || contract.entryDate) },
+    {
+      key: "detail",
+      label: "GeM Contract PDF",
+      value: pdfUrl ? (
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline break-all"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {pdfUrl}
+        </a>
+      ) : (
+        "—"
+      ),
+    },
+    { key: "detail", label: "Notes", value: displayValue(contract.notes) },
+  ];
+
+  return (
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 px-2 py-3">
+      {rows.map(({ key, label, value }) => {
+        const highlighted = highlightKey != null && key === highlightKey;
+        return (
+          <div
+            key={`${label}-${key}`}
+            className={`rounded-lg border px-3 py-2 min-h-[72px] ${
+              highlighted
+                ? "border-orange-300 bg-orange-50 ring-1 ring-orange-200"
+                : "border-slate-100 bg-white"
+            }`}
+          >
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+            <div className="text-xs text-slate-700 mt-1 whitespace-pre-wrap break-words leading-relaxed">
+              {value}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -263,7 +424,32 @@ export default function ContractsPanel({
   const [submitting, setSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedColumnKey, setExpandedColumnKey] = useState<ContractColumnKey | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const visibleColumns = useMemo(
+    () => TABLE_COLUMNS.filter((column) => readOnly ? column.key !== "actions" : true),
+    [readOnly],
+  );
+
+  const tableMinWidth = useMemo(
+    () => visibleColumns.reduce((sum, column) => sum + column.width, 0),
+    [visibleColumns],
+  );
+
+  const toggleContractRow = (contractId: string, columnKey?: ContractColumnKey) => {
+    if (expandedId === contractId) {
+      if (columnKey && columnKey !== "expand" && columnKey !== "actions") {
+        setExpandedColumnKey(columnKey);
+        return;
+      }
+      setExpandedId(null);
+      setExpandedColumnKey(null);
+      return;
+    }
+    setExpandedId(contractId);
+    setExpandedColumnKey(columnKey && columnKey !== "expand" && columnKey !== "actions" ? columnKey : null);
+  };
 
   const wonTenders = useMemo(
     () => tenders.filter((t) => t.status === "won_bid" || /won/i.test(t.outcome)),
@@ -690,22 +876,32 @@ export default function ContractsPanel({
           </div>
         ) : (
           <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-xs min-w-[1100px]">
+            <table
+              className="w-full text-xs table-fixed border-collapse"
+              style={{ minWidth: tableMinWidth }}
+            >
+              <colgroup>
+                {visibleColumns.map((column) => (
+                  <col key={column.key} style={{ width: column.width }} />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="bg-slate-50 text-slate-500 uppercase tracking-wide text-[10px]">
-                  <th className="px-2 py-2 text-left w-8" />
-                  <th className="px-2 py-2 text-left">#</th>
-                  <th className="px-2 py-2 text-left">Contract No</th>
-                  <th className="px-2 py-2 text-left">Officer</th>
-                  <th className="px-2 py-2 text-left">Office</th>
-                  <th className="px-2 py-2 text-left">From</th>
-                  <th className="px-2 py-2 text-left">To / Extended</th>
-                  <th className="px-2 py-2 text-left">Company</th>
-                  <th className="px-2 py-2 text-left">Category</th>
-                  <th className="px-2 py-2 text-center">Ext</th>
-                  <th className="px-2 py-2 text-center">BG</th>
-                  <th className="px-2 py-2 text-left">Status</th>
-                  {!readOnly && <th className="px-2 py-2 text-right">Actions</th>}
+                  {visibleColumns.map((column) => (
+                    <th
+                      key={column.key}
+                      className={`px-2 py-2 border-b border-slate-200 border-r border-slate-100 last:border-r-0 ${
+                        column.key === "hasExtension" || column.key === "bgApplicable"
+                          ? "text-center"
+                          : column.key === "actions"
+                            ? "text-right"
+                            : "text-left"
+                      }`}
+                      style={{ height: CONTRACT_ROW_HEIGHT_PX }}
+                    >
+                      {column.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -713,72 +909,153 @@ export default function ContractsPanel({
                   const end = effectiveEndDate(contract);
                   const endMeta = endDateMeta(end);
                   const isExpanded = expandedId === contract.id;
+                  const pdfUrl = resolveGemContractPdfUrl(contract);
+                  const contractLabel = resolveGemContractNoLabel(contract);
+
+                  const activateCell = (columnKey: ContractColumnKey) => {
+                    if (columnKey === "actions") return;
+                    toggleContractRow(contract.id, columnKey);
+                  };
+
                   return (
                     <React.Fragment key={contract.id}>
-                      <tr className="border-t border-slate-100 hover:bg-orange-50/30">
-                        <td className="px-2 py-2">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedId(isExpanded ? null : contract.id)}
-                            className="text-slate-400 hover:text-slate-600"
-                          >
+                      <tr
+                        className={`border-t border-slate-100 ${
+                          isExpanded ? "bg-orange-50/40" : "hover:bg-orange-50/30"
+                        }`}
+                      >
+                        <ContractTableCell
+                          onActivate={() => toggleContractRow(contract.id, "expand")}
+                          className="cursor-pointer"
+                        >
+                          <span className="inline-flex text-slate-400">
                             {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          </button>
-                        </td>
-                        <td className="px-2 py-2 text-slate-400 font-mono">{index + 1}</td>
-                        <td className="px-2 py-2 font-semibold text-slate-800">
-                          {(() => {
-                            const pdfUrl = resolveGemContractPdfUrl(contract);
-                            const label = resolveGemContractNoLabel(contract);
-                            if (pdfUrl) {
-                              return (
-                                <a
-                                  href={pdfUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
-                                  title={pdfUrl}
-                                >
-                                  {label}
-                                  <ExternalLink size={12} />
-                                </a>
-                              );
-                            }
-                            return label || "—";
-                          })()}
-                        </td>
-                        <td className="px-2 py-2 text-slate-700">{contract.officerName || "—"}</td>
-                        <td className="px-2 py-2 text-slate-700">{contract.officeName || "—"}</td>
-                        <td className="px-2 py-2 text-slate-600">{formatAppDate(contract.fromDate) || "—"}</td>
-                        <td className={`px-2 py-2 ${endMeta.className}`}>
-                          {endMeta.label}
-                          {contract.hasExtension && contract.extensionEndDate && (
-                            <span className="ml-1 text-[10px] text-violet-600 font-bold">EXT</span>
+                          </span>
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={String(index + 1)}
+                          onActivate={() => activateCell("index")}
+                          className="text-slate-400 font-mono cursor-pointer"
+                        >
+                          {index + 1}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={pdfUrl || contractLabel}
+                          onActivate={() => activateCell("contractNo")}
+                          className="font-semibold text-slate-800 cursor-pointer"
+                        >
+                          {pdfUrl ? (
+                            <a
+                              href={pdfUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline max-w-full"
+                              title={pdfUrl}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <span className="truncate">{contractLabel}</span>
+                              <ExternalLink size={12} className="shrink-0" />
+                            </a>
+                          ) : (
+                            contractLabel
                           )}
-                        </td>
-                        <td className="px-2 py-2 text-slate-700">{contract.companyName || "—"}</td>
-                        <td className="px-2 py-2 text-slate-600">{contract.category || "—"}</td>
-                        <td className="px-2 py-2 text-center">
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.officerName}
+                          onActivate={() => activateCell("officerName")}
+                          className="text-slate-700 cursor-pointer"
+                        >
+                          {displayValue(contract.officerName)}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.officeName}
+                          onActivate={() => activateCell("officeName")}
+                          className="text-slate-700 cursor-pointer"
+                        >
+                          {displayValue(contract.officeName)}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={formatAppDate(contract.fromDate) || contract.fromDate}
+                          onActivate={() => activateCell("fromDate")}
+                          className="text-slate-600 cursor-pointer"
+                        >
+                          {formatAppDate(contract.fromDate) || "—"}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={endMeta.label}
+                          onActivate={() => activateCell("toDate")}
+                          className={`${endMeta.className} cursor-pointer`}
+                        >
+                          <span className="inline-flex items-center gap-1 max-w-full">
+                            <span className="truncate">{endMeta.label}</span>
+                            {contract.hasExtension && contract.extensionEndDate && (
+                              <span className="text-[10px] text-violet-600 font-bold shrink-0">EXT</span>
+                            )}
+                          </span>
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.companyName}
+                          onActivate={() => activateCell("companyName")}
+                          className="text-slate-700 cursor-pointer"
+                        >
+                          {displayValue(contract.companyName)}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.category}
+                          onActivate={() => activateCell("category")}
+                          className="text-slate-600 cursor-pointer"
+                        >
+                          {displayValue(contract.category)}
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.hasExtension ? "Yes" : "No"}
+                          onActivate={() => activateCell("hasExtension")}
+                          align="center"
+                          className="cursor-pointer"
+                        >
                           {contract.hasExtension ? (
                             <span className="text-emerald-600 font-bold">Yes</span>
                           ) : (
                             <span className="text-slate-400">No</span>
                           )}
-                        </td>
-                        <td className="px-2 py-2 text-center">
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={contract.bgApplicable ? "Yes" : "No"}
+                          onActivate={() => activateCell("bgApplicable")}
+                          align="center"
+                          className="cursor-pointer"
+                        >
                           {contract.bgApplicable ? (
                             <span className="text-violet-600 font-bold">Yes</span>
                           ) : (
                             <span className="text-slate-400">No</span>
                           )}
-                        </td>
-                        <td className="px-2 py-2">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] font-bold ${STATUS_STYLES[contract.status]}`}>
+                        </ContractTableCell>
+
+                        <ContractTableCell
+                          fullText={STATUS_LABELS[contract.status]}
+                          onActivate={() => activateCell("status")}
+                          className="cursor-pointer"
+                        >
+                          <span
+                            className={`inline-flex max-w-full truncate px-2 py-0.5 rounded-full border text-[10px] font-bold ${STATUS_STYLES[contract.status]}`}
+                          >
                             {STATUS_LABELS[contract.status]}
                           </span>
-                        </td>
+                        </ContractTableCell>
+
                         {!readOnly && (
-                          <td className="px-2 py-2 text-right whitespace-nowrap">
+                          <ContractTableCell align="right" className="whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => openEdit(contract)}
@@ -793,13 +1070,19 @@ export default function ContractsPanel({
                             >
                               <Trash2 size={14} className="inline" />
                             </button>
-                          </td>
+                          </ContractTableCell>
                         )}
                       </tr>
                       {isExpanded && (
-                        <tr className="bg-slate-50/50">
-                          <td colSpan={readOnly ? 12 : 13}>
-                            <ContractExpandedDetails contract={contract} />
+                        <tr className="bg-slate-50/80 border-t border-orange-100">
+                          <td colSpan={visibleColumns.length} className="px-2 py-1">
+                            <p className="px-2 pt-2 text-[10px] font-bold uppercase tracking-wide text-orange-700">
+                              Full contract details
+                            </p>
+                            <ContractExpandedDetails
+                              contract={contract}
+                              highlightKey={expandedColumnKey}
+                            />
                           </td>
                         </tr>
                       )}

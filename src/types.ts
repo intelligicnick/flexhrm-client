@@ -418,6 +418,50 @@ export interface Contract {
 
 export type CreateContractInput = Omit<Contract, "id" | "createdAt" | "updatedAt">;
 
+export type BankInstrumentType = "bg" | "dd";
+
+export type BankInstrumentStatus =
+  | "submitted_to_dept"
+  | "received_from_department"
+  | "returned_to_bank"
+  | "cancelled_received_fd"
+  | "money_credited_back";
+
+export interface BankInstrument {
+  id: string;
+  instrumentType: BankInstrumentType;
+  instrumentNumber: string;
+  beneficiary: string;
+  dateOfIssue: string;
+  expiryDate: string;
+  issuingBank: string;
+  contractId: string;
+  contractNo: string;
+  status: BankInstrumentStatus;
+  notes: string;
+  entryDate: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreateBankInstrumentInput = Omit<
+  BankInstrument,
+  "id" | "createdAt" | "updatedAt"
+>;
+
+export interface BankInstrumentDocument {
+  id: string;
+  instrumentId: string;
+  label: string;
+  mimeType: string;
+  filename: string;
+  originalSizeBytes: number;
+  storedSizeBytes: number;
+  quality?: number;
+  uploadedBy: string;
+  createdAt: string;
+}
+
 export type RenewalCategory = "car_papers" | "it_renewals" | "licenses";
 
 export type CarPaperSubtype =

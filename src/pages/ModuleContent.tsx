@@ -103,6 +103,7 @@ import SchoolExpensesPanel from "../components/SchoolExpensesPanel";
 import FieldTeamPanel from "../components/FieldTeamPanel";
 import TendersPanel from "../components/TendersPanel";
 import ContractsPanel from "../components/ContractsPanel";
+import BgDdPanel from "../components/BgDdPanel";
 import RenewalsPanel from "../components/RenewalsPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
@@ -493,6 +494,11 @@ export default function ModuleContent() {
     handleUpdateContract,
     handleDeleteContract,
     handleImportContracts,
+    rawBankInstruments,
+    fetchBankInstruments,
+    handleCreateBankInstrument,
+    handleUpdateBankInstrument,
+    handleDeleteBankInstrument,
     rawRenewals,
     fetchRenewals,
     handleCreateRenewal,
@@ -5755,6 +5761,18 @@ export default function ModuleContent() {
                                   onUpdate={handleUpdateContract}
                                   onDelete={handleDeleteContract}
                                   onImport={handleImportContracts}
+                                />
+                              )}
+
+                              {activeSidebarTab === "BG & DD" && (
+                                <BgDdPanel
+                                  instruments={rawBankInstruments}
+                                  contracts={rawContracts}
+                                  readOnly={!userPermissions.bids?.edit}
+                                  onRefresh={fetchBankInstruments}
+                                  onCreate={handleCreateBankInstrument}
+                                  onUpdate={handleUpdateBankInstrument}
+                                  onDelete={handleDeleteBankInstrument}
                                 />
                               )}
                             </>
