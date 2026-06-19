@@ -130,7 +130,7 @@ export const getSalaryColumnValue = (
     case "Conveyance Perk":
       return conv;
     case "Net Payable":
-      return Math.round(Math.max(0, netPayableVal));
+      return attendanceDb && presents <= 0 ? 0 : Math.round(Math.max(0, netPayableVal));
     case "Payment Status":
       return ledger?.paymentStatus || "Unpaid";
   }

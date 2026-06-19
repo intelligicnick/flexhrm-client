@@ -410,6 +410,8 @@ export interface Contract {
   status: ContractStatus;
   notes: string;
   entryDate: string;
+  gemContractPdfUrl?: string;
+  gemContractId?: string;
   createdAt?: string;
   updatedAt?: string;
 }

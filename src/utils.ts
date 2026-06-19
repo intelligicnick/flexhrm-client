@@ -402,6 +402,7 @@ export function prorateSalaryByAttendance(
   empMonthAttendance: Record<string | number, string>
 ): number {
   if (workingDaysInCycle <= 0) return rawAmount;
+  if (presents <= 0) return 0;
   const hasRecordedAttendance = Object.values(empMonthAttendance).some(
     (v) => v !== undefined && v !== null && String(v).trim() !== ""
   );

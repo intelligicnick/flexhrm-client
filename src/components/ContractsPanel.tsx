@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Shield,
+  ExternalLink,
 } from "lucide-react";
 import {
   Contract,
@@ -30,6 +31,7 @@ import {
 } from "../lib/date-helpers";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
+import { resolveGemContractNoLabel, resolveGemContractPdfUrl } from "../lib/gem-helpers";
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
@@ -724,7 +726,27 @@ export default function ContractsPanel({
                           </button>
                         </td>
                         <td className="px-2 py-2 text-slate-400 font-mono">{index + 1}</td>
-                        <td className="px-2 py-2 font-semibold text-slate-800">{contract.contractNo}</td>
+                        <td className="px-2 py-2 font-semibold text-slate-800">
+                          {(() => {
+                            const pdfUrl = resolveGemContractPdfUrl(contract);
+                            const label = resolveGemContractNoLabel(contract);
+                            if (pdfUrl) {
+                              return (
+                                <a
+                                  href={pdfUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+                                  title={pdfUrl}
+                                >
+                                  {label}
+                                  <ExternalLink size={12} />
+                                </a>
+                              );
+                            }
+                            return label || "—";
+                          })()}
+                        </td>
                         <td className="px-2 py-2 text-slate-700">{contract.officerName || "—"}</td>
                         <td className="px-2 py-2 text-slate-700">{contract.officeName || "—"}</td>
                         <td className="px-2 py-2 text-slate-600">{formatAppDate(contract.fromDate) || "—"}</td>

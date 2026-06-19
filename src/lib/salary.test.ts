@@ -13,8 +13,15 @@ import {
 } from "../utils";
 
 describe("prorateSalaryByAttendance", () => {
-  it("returns full salary when no attendance recorded", () => {
-    expect(prorateSalaryByAttendance(30000, 26, 0, {})).toBe(30000);
+  it("returns zero when present days are zero", () => {
+    expect(prorateSalaryByAttendance(30000, 26, 0, {})).toBe(0);
+    const allAbsent: Record<number, string> = {};
+    for (let d = 1; d <= 26; d++) allAbsent[d] = "A";
+    expect(prorateSalaryByAttendance(30000, 26, 0, allAbsent)).toBe(0);
+  });
+
+  it("returns full salary when no attendance recorded but presents are positive", () => {
+    expect(prorateSalaryByAttendance(30000, 26, 10, {})).toBe(30000);
   });
 
   it("prorates by present days using working-days cycle (26-day example)", () => {

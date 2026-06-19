@@ -2452,7 +2452,7 @@ export default function ModuleContent() {
                                             food,
                                             acc,
                                             conv,
-                                            Math.round(Math.max(0, netPayableVal)),
+                                            presents <= 0 ? 0 : Math.round(Math.max(0, netPayableVal)),
                                             ledger?.paymentStatus || "Unpaid"
                                           ];
                                         });
@@ -3215,7 +3215,7 @@ export default function ModuleContent() {
                                           
                                               {selectedSalaryColumns.includes("Net Payable") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 bg-emerald-50 text-emerald-800 text-right font-black text-xs">
-                                                  ₹{Math.round(Math.max(0, netPayableValue)).toLocaleString("en-IN")}
+                                                  ₹{(presents <= 0 ? 0 : Math.round(Math.max(0, netPayableValue))).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                               {selectedSalaryColumns.includes("Payment Status") && (
