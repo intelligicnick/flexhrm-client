@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import ExcelJS from "exceljs";
 import {
   Gavel,
@@ -366,6 +366,40 @@ function formatStatusSyncedAt(value?: string): string {
   return formatAppDate(raw, { withTime: true });
 }
 
+function formatStatusSyncNote(value?: string): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "status change found") return "status change found";
+  if (raw === "unchanged") return "unchanged";
+  return "";
+}
+
+function tenderRowBgClass(
+  deleted: boolean,
+  urgentNotParticipated: boolean,
+  idx: number,
+  isExpanded: boolean,
+): string {
+  if (isExpanded) return "bg-orange-50/60";
+  if (deleted) return "bg-slate-100/80";
+  if (urgentNotParticipated) return "bg-amber-50/50";
+  return idx % 2 === 0 ? "bg-white" : "bg-slate-50/40";
+}
+
+/** Opaque backgrounds for horizontally sticky cells (semi-transparent row bg bleeds through scroll). */
+function tenderStickyCellBgClass(
+  deleted: boolean,
+  urgentNotParticipated: boolean,
+  idx: number,
+  isExpanded: boolean,
+): string {
+  if (isExpanded) return "bg-orange-50 group-hover:bg-orange-50";
+  if (deleted) return "bg-slate-100 group-hover:bg-orange-50";
+  if (urgentNotParticipated) return "bg-amber-50 group-hover:bg-orange-50";
+  return idx % 2 === 0
+    ? "bg-white group-hover:bg-orange-50"
+    : "bg-slate-50 group-hover:bg-orange-50";
+}
+
 function normalizeTenderStatus(raw: string): TenderStatus {
   const value = raw.trim().toLowerCase();
   if (value.includes("not participated") || value.includes("not filed")) return "not_filed";
@@ -468,6 +502,9 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
         { label: "Bid end date", value: formatAppDate(tender.endDate, { withTime: /\d{1,2}:\d{2}/.test(tender.endDate) }) },
         { label: "Participation filed", value: tender.filedDate ? formatTenderFiledDate(tender.filedDate) : "" },
         { label: "Last GeM sync", value: formatStatusSyncedAt(tender.statusSyncedAt) },
+        ...(tender.statusSyncNote
+          ? [{ label: "Sync note", value: formatStatusSyncNote(tender.statusSyncNote) || tender.statusSyncNote }]
+          : []),
       ],
     },
     {
@@ -539,6 +576,81 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
 }
 
 const TABLE_COL_SPAN = 19;
+
+/** Fixed pixel widths — sticky `right` offsets are derived from these so columns never overlap. */
+const TENDER_COL = {
+  expand: 32,
+  bidNo: 200,
+  type: 88,
+  category: 150,
+  ministry: 100,
+  organisation: 110,
+  department: 100,
+  address: 110,
+  consignee: 120,
+  qty: 44,
+  addReq: 140,
+  endDate: 148,
+  filed: 132,
+  entry: 88,
+  preBid: 108,
+  preBidVenue: 120,
+  status: 168,
+  lastUpdated: 148,
+  actions: 40,
+} as const;
+
+const TENDER_HEADER_ROW1_HEIGHT = 26;
+
+type TenderStickyCol = {
+  width: number;
+  right: number;
+  zHeader: number;
+  zCell: number;
+};
+
+function tenderTableMinWidth(readOnly: boolean): number {
+  const { actions, ...rest } = TENDER_COL;
+  const base = Object.values(rest).reduce((sum, width) => sum + width, 0);
+  return readOnly ? base : base + actions;
+}
+
+function tenderStickyColumns(readOnly: boolean): {
+  status: TenderStickyCol;
+  lastUpdated: TenderStickyCol;
+  actions: TenderStickyCol | null;
+} {
+  const actionsW = readOnly ? 0 : TENDER_COL.actions;
+  const lastW = TENDER_COL.lastUpdated;
+  const statusW = TENDER_COL.status;
+  return {
+    status: { width: statusW, right: actionsW + lastW, zHeader: 31, zCell: 11 },
+    lastUpdated: { width: lastW, right: actionsW, zHeader: 32, zCell: 12 },
+    actions: readOnly
+      ? null
+      : { width: actionsW, right: 0, zHeader: 33, zCell: 13 },
+  };
+}
+
+function tenderStickyStyle(
+  col: TenderStickyCol,
+  layer: "header" | "cell",
+  top?: number,
+): CSSProperties {
+  return {
+    position: "sticky",
+    right: col.right,
+    width: col.width,
+    minWidth: col.width,
+    maxWidth: col.width,
+    top,
+    zIndex: layer === "header" ? col.zHeader : col.zCell,
+  };
+}
+
+const TENDER_STICKY_SCROLL_EDGE =
+  "border-l border-slate-200/80 shadow-[-4px_0_8px_-6px_rgba(15,23,42,0.18)]";
+const TENDER_STICKY_PIN_EDGE = "border-l border-slate-200/60";
 
 function splitLegacyPreBid(preBidAt: string): { at: string; venue: string } {
   const match = preBidAt.trim().match(/^(.+?)\s+@\s+(.+)$/);
@@ -1073,6 +1185,11 @@ export default function TendersPanel({
   const selectClass =
     "px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:border-orange-300 focus:ring-2 focus:ring-orange-100 outline-none transition";
 
+  const stickyColumns = tenderStickyColumns(readOnly);
+  const tableMinWidth = tenderTableMinWidth(readOnly);
+  const stickyGroupHeaderClass = "sticky top-0 z-20 bg-slate-100";
+  const stickySubHeaderClass = "sticky z-20 bg-white";
+
   return (
     <section className="flex-1 flex flex-col min-h-[400px] min-w-0 bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
       <div className="relative border-b border-slate-100 bg-linear-to-r from-[#fff7f0] via-white to-slate-50 px-5 py-5">
@@ -1290,53 +1407,184 @@ export default function TendersPanel({
         </div>
       ) : (
         <div className="flex-1 min-w-0 min-h-0 px-5 pb-5">
-          <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-20rem)] border border-slate-200/80 rounded-xl shadow-xs scrollbar-thin bg-white">
-            <table className="w-full text-xs min-w-[1760px] table-fixed">
-              <thead className="sticky top-0 z-10 shadow-sm">
-                <tr className="bg-slate-100/90 text-left text-[9px] uppercase tracking-wider text-slate-500 backdrop-blur-sm">
-                  <th className="w-8 px-1 py-1.5" aria-label="Expand" />
-                  <th colSpan={3} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-[#ff791a]">
+          <div className="relative overflow-x-auto overflow-y-auto max-h-[calc(100vh-20rem)] border border-slate-200/80 rounded-xl shadow-xs scrollbar-thin bg-white isolate">
+            <table
+              className="w-full text-xs table-fixed border-separate border-spacing-0"
+              style={{ minWidth: tableMinWidth }}
+            >
+              <colgroup>
+                <col style={{ width: TENDER_COL.expand }} />
+                <col style={{ width: TENDER_COL.bidNo }} />
+                <col style={{ width: TENDER_COL.type }} />
+                <col style={{ width: TENDER_COL.category }} />
+                <col style={{ width: TENDER_COL.ministry }} />
+                <col style={{ width: TENDER_COL.organisation }} />
+                <col style={{ width: TENDER_COL.department }} />
+                <col style={{ width: TENDER_COL.address }} />
+                <col style={{ width: TENDER_COL.consignee }} />
+                <col style={{ width: TENDER_COL.qty }} />
+                <col style={{ width: TENDER_COL.addReq }} />
+                <col style={{ width: TENDER_COL.endDate }} />
+                <col style={{ width: TENDER_COL.filed }} />
+                <col style={{ width: TENDER_COL.entry }} />
+                <col style={{ width: TENDER_COL.preBid }} />
+                <col style={{ width: TENDER_COL.preBidVenue }} />
+                <col style={{ width: TENDER_COL.status }} />
+                <col style={{ width: TENDER_COL.lastUpdated }} />
+                {!readOnly && <col style={{ width: TENDER_COL.actions }} />}
+              </colgroup>
+              <thead>
+                <tr className="bg-slate-100 text-left text-[9px] uppercase tracking-wider text-slate-500">
+                  <th
+                    rowSpan={2}
+                    className={`px-1 py-1.5 ${stickyGroupHeaderClass}`}
+                    style={{ top: 0 }}
+                    aria-label="Expand"
+                  />
+                  <th
+                    colSpan={3}
+                    className={`px-2 py-1.5 font-bold border-l border-slate-200/80 text-[#ff791a] ${stickyGroupHeaderClass}`}
+                    style={{ top: 0 }}
+                  >
                     Bid
                   </th>
-                  <th colSpan={5} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                  <th
+                    colSpan={5}
+                    className={`px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600 ${stickyGroupHeaderClass}`}
+                    style={{ top: 0 }}
+                  >
                     Buyer / Consignee
                   </th>
-                  <th colSpan={2} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                  <th
+                    colSpan={2}
+                    className={`px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600 ${stickyGroupHeaderClass}`}
+                    style={{ top: 0 }}
+                  >
                     Terms
                   </th>
-                  <th colSpan={5} className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">
+                  <th
+                    colSpan={5}
+                    className={`px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600 ${stickyGroupHeaderClass}`}
+                    style={{ top: 0 }}
+                  >
                     Dates & Pre-Bid
                   </th>
-                  <th className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">Status</th>
-                  <th className="px-2 py-1.5 font-bold border-l border-slate-200/80 text-slate-600">Last Updated</th>
-                  {!readOnly && <th className="w-10 px-1 py-1.5 border-l border-slate-200/80" aria-label="Actions" />}
+                  <th
+                    rowSpan={2}
+                    className={`px-2 py-2 font-bold text-slate-600 align-middle overflow-hidden bg-slate-100 ${TENDER_STICKY_SCROLL_EDGE}`}
+                    style={tenderStickyStyle(stickyColumns.status, "header", 0)}
+                  >
+                    Status
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className={`px-2 py-2 font-bold text-slate-600 leading-tight align-middle overflow-hidden bg-slate-100 ${TENDER_STICKY_PIN_EDGE}`}
+                    style={tenderStickyStyle(stickyColumns.lastUpdated, "header", 0)}
+                  >
+                    <span className="block truncate">Last Updated</span>
+                    <span className="block text-[9px] normal-case text-slate-400 truncate">GeM sync</span>
+                  </th>
+                  {stickyColumns.actions && (
+                    <th
+                      rowSpan={2}
+                      className={`px-1 py-1.5 ${TENDER_STICKY_PIN_EDGE} bg-slate-100`}
+                      style={tenderStickyStyle(stickyColumns.actions, "header", 0)}
+                      aria-label="Actions"
+                    />
+                  )}
                 </tr>
                 <tr className="bg-white text-left text-[10px] uppercase tracking-wide text-slate-500 border-b border-slate-200">
-                  <th className="w-8 px-1 py-2.5 font-semibold" aria-label="Expand" />
-                  <th className="min-w-[200px] px-2 py-2.5 font-semibold">Bid No.</th>
-                  <th className="w-[88px] min-w-[88px] px-2 py-2.5 font-semibold">Type</th>
-                  <th className="w-[150px] px-2 py-2.5 font-semibold">Category</th>
-                  <th className="w-[100px] px-2 py-2.5 font-semibold border-l border-slate-100">Ministry</th>
-                  <th className="w-[110px] px-2 py-2.5 font-semibold">Organisation</th>
-                  <th className="w-[100px] px-2 py-2.5 font-semibold">Department</th>
-                  <th className="w-[110px] px-2 py-2.5 font-semibold">Address</th>
-                  <th className="w-[120px] px-2 py-2.5 font-semibold leading-tight normal-case">
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Bid No.
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Type
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Category
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold border-l border-slate-100 overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Ministry
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Organisation
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Department
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Address
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold leading-tight normal-case overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
                     <span className="block text-[9px] uppercase text-slate-400">Consignee</span>
-                    <span className="block font-semibold">Reporting/Officer</span>
+                    <span className="block font-semibold truncate">Reporting/Officer</span>
                   </th>
-                  <th className="w-[44px] px-2 py-2.5 font-semibold text-right border-l border-slate-100">Qty</th>
-                  <th className="w-[140px] px-2 py-2.5 font-semibold">Add. Req.</th>
-                  <th className="min-w-[148px] px-2 py-2.5 font-semibold border-l border-slate-100">End Date</th>
-                  <th className="min-w-[132px] px-2 py-2.5 font-semibold">Filed</th>
-                  <th className="w-[88px] px-2 py-2.5 font-semibold">Entry</th>
-                  <th className="w-[108px] px-2 py-2.5 font-semibold">Pre-Bid</th>
-                  <th className="w-[120px] px-2 py-2.5 font-semibold">Pre-Bid Venue</th>
-                  <th className="w-[132px] px-2 py-2.5 font-semibold border-l border-slate-100">Status</th>
-                  <th className="min-w-[140px] px-2 py-2.5 font-semibold border-l border-slate-100 leading-tight">
-                    <span className="block">Last Updated</span>
-                    <span className="block text-[9px] normal-case text-slate-400">GeM sync</span>
+                  <th
+                    className={`px-2 py-2.5 font-semibold text-right border-l border-slate-100 overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Qty
                   </th>
-                  {!readOnly && <th className="w-10 px-1 py-2.5 font-semibold" />}
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Add. Req.
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold border-l border-slate-100 overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    End Date
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Filed
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Entry
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Pre-Bid
+                  </th>
+                  <th
+                    className={`px-2 py-2.5 font-semibold overflow-hidden ${stickySubHeaderClass}`}
+                    style={{ top: TENDER_HEADER_ROW1_HEIGHT }}
+                  >
+                    Pre-Bid Venue
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1353,18 +1601,19 @@ export default function TendersPanel({
                   const locked = isStatusLocked(tender);
                   const urgentNotParticipated =
                     isNearNotParticipated(tender) || isMissedParticipation(tender);
-                  const rowBg = deleted
-                    ? "bg-slate-100/80"
-                    : urgentNotParticipated
-                      ? "bg-amber-50/50"
-                      : idx % 2 === 0
-                        ? "bg-white"
-                        : "bg-slate-50/40";
+                  const rowBg = tenderRowBgClass(deleted, urgentNotParticipated, idx, isExpanded);
+                  const stickyCellBg = tenderStickyCellBgClass(
+                    deleted,
+                    urgentNotParticipated,
+                    idx,
+                    isExpanded,
+                  );
+                  const syncNote = formatStatusSyncNote(tender.statusSyncNote);
 
                   return (
                     <React.Fragment key={tender.id}>
                     <tr
-                      className={`border-t border-slate-100 hover:bg-orange-50/50 transition-colors ${rowBg} ${isExpanded ? "bg-orange-50/60 ring-1 ring-inset ring-orange-200" : ""}`}
+                      className={`group border-t border-slate-100 hover:bg-orange-50/50 transition-colors ${rowBg} ${isExpanded ? "bg-orange-50/60 ring-1 ring-inset ring-orange-200" : ""}`}
                     >
                       <td className="px-1 py-2 align-middle text-center">
                         <button
@@ -1439,15 +1688,15 @@ export default function TendersPanel({
                           {addReqPreview.preview}
                         </button>
                       </td>
-                      <td className="px-2 py-2 align-middle min-w-[148px] border-l border-slate-100/80">
-                        <span className={`inline-flex items-start gap-1 leading-tight rounded-lg px-2 py-1 text-[11px] ${deadlineCellClass}`}>
+                      <td className="px-2 py-2 align-middle min-w-0 overflow-hidden border-l border-slate-100/80">
+                        <span className={`inline-flex items-start gap-1 leading-tight rounded-lg px-2 py-1 text-[11px] max-w-full ${deadlineCellClass}`}>
                           {deadline.urgent && deadline.label !== "—" && (
                             <Clock size={10} className="shrink-0 mt-0.5" />
                           )}
                           <span className="whitespace-normal break-words">{deadline.label}</span>
                         </span>
                       </td>
-                      <td className="px-2 py-2 align-middle min-w-[132px]">
+                      <td className="px-2 py-2 align-middle min-w-0 overflow-hidden">
                         {tender.filedDate ? (
                           <span className="text-sky-700 font-medium whitespace-normal break-words leading-tight block">
                             {formatTenderFiledDate(tender.filedDate)}
@@ -1472,10 +1721,13 @@ export default function TendersPanel({
                           {venuePreview.preview}
                         </button>
                       </td>
-                      <td className="px-2 py-2 align-middle border-l border-slate-100/80">
+                      <td
+                        className={`px-2 py-2 align-middle overflow-hidden ${TENDER_STICKY_SCROLL_EDGE} ${stickyCellBg}`}
+                        style={tenderStickyStyle(stickyColumns.status, "cell")}
+                      >
                         {readOnly || locked ? (
                           <span
-                            className={`inline-flex max-w-full items-center px-2 py-0.5 rounded-full text-[10px] font-bold border truncate ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
+                            className={`inline-flex max-w-full items-center px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
                             title={
                               isMissedParticipation(tender)
                                 ? "Deadline passed without participation"
@@ -1487,7 +1739,7 @@ export default function TendersPanel({
                             {STATUS_LABELS[isFiledBucket(tender.status) ? "filed" : tender.status]}
                           </span>
                         ) : (
-                          <div className="relative inline-block w-full max-w-[128px]">
+                          <div className="relative w-full min-w-0">
                             <select
                               value={isFiledBucket(tender.status) ? "filed" : tender.status}
                               disabled={updatingStatusId === tender.id}
@@ -1509,22 +1761,41 @@ export default function TendersPanel({
                           </div>
                         )}
                       </td>
-                      <td className="px-2 py-2 align-middle min-w-[140px] border-l border-slate-100/80">
+                      <td
+                        className={`px-2 py-2 align-middle overflow-hidden ${TENDER_STICKY_PIN_EDGE} ${stickyCellBg}`}
+                        style={tenderStickyStyle(stickyColumns.lastUpdated, "cell")}
+                      >
                         <span
                           className={`whitespace-normal break-words leading-tight block ${
                             tender.statusSyncedAt ? "text-violet-800 font-medium" : "text-slate-300"
                           }`}
                           title={
                             tender.statusSyncedAt
-                              ? "Last updated from GeM via FlexHRM Smart Capture"
+                              ? syncNote
+                                ? `${formatStatusSyncedAt(tender.statusSyncedAt)} — ${syncNote}`
+                                : "Last updated from GeM via FlexHRM Smart Capture"
                               : "Not synced yet — use Sync Status on GeM Seller Bids"
                           }
                         >
                           {formatStatusSyncedAt(tender.statusSyncedAt)}
                         </span>
+                        {syncNote && (
+                          <span
+                            className={`mt-0.5 block text-[10px] font-semibold leading-tight ${
+                              syncNote === "status change found"
+                                ? "text-emerald-700"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {syncNote}
+                          </span>
+                        )}
                       </td>
-                      {!readOnly && (
-                        <td className="px-1 py-2 align-middle">
+                      {stickyColumns.actions && (
+                        <td
+                          className={`px-1 py-2 align-middle overflow-hidden ${TENDER_STICKY_PIN_EDGE} ${stickyCellBg}`}
+                          style={tenderStickyStyle(stickyColumns.actions, "cell")}
+                        >
                           {!locked && !deleted && (
                             <button
                               type="button"

@@ -367,6 +367,8 @@ export interface Tender {
   deletedAt?: string;
   /** ISO timestamp when GeM status was last synced via Smart Capture */
   statusSyncedAt?: string;
+  /** Last GeM sync result: "status change found" or "unchanged" */
+  statusSyncNote?: string;
   createdAt?: string;
   updatedAt?: string;
 }
