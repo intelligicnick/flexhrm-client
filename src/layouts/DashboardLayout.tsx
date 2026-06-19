@@ -87,6 +87,7 @@ import { formatAuditLogDetails } from "../utils/formatAuditLogDetails";
 import CsvImporter from "../components/CsvImporter";
 import EmployeeTable from "../components/EmployeeTable";
 import EmployeeFormModal from "../components/EmployeeFormModal";
+import ExitEligibleModal from "../components/ExitEligibleModal";
 import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { parseApiError } from "../api";
@@ -398,6 +399,11 @@ export default function DashboardLayout() {
     handleSaveSchoolSupervisor,
     showFlushAuditModal,
     closeFlushAuditModal,
+    showExitEligibleModal,
+    setShowExitEligibleModal,
+    exitEligibleEmployees,
+    exitEligibilityCheckedMonths,
+    handleBulkMarkExit,
     flushAuditPassword,
     setFlushAuditPassword,
     flushAuditError,
@@ -1256,6 +1262,15 @@ export default function DashboardLayout() {
                         </form>
                       </div>
                     </div>
+                  )}
+
+                  {showExitEligibleModal && exitEligibleEmployees.length > 0 && (
+                    <ExitEligibleModal
+                      employees={exitEligibleEmployees}
+                      checkedMonths={exitEligibilityCheckedMonths}
+                      onClose={() => setShowExitEligibleModal(false)}
+                      onMarkExit={handleBulkMarkExit}
+                    />
                   )}
 
                   {/* Saved Bulk Pay Excel Preview Modal */}

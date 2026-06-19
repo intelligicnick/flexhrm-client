@@ -132,6 +132,10 @@ import {
   isWeeklyOffDay,
   type AttendanceRecordFilter,
 } from "../lib/attendance-helpers";
+import {
+  pickLatestMonthKey,
+  type ExitEligibleEmployee,
+} from "../lib/exit-eligibility-helpers";
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
@@ -406,6 +410,9 @@ export function useHRMSApp() {
   const setActiveSidebarTab = (tab: string) => navigate(tabToPath(tab));
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
   const [employeeListRoleFilter, setEmployeeListRoleFilter] = useState("");
+  const [employeeListStatusFilter, setEmployeeListStatusFilter] = useState<
+    "active" | "exited" | "all" | "eligible_for_exit"
+  >("active");
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
     "School Work": false,
     "Bids": false,
@@ -1544,6 +1551,11 @@ export function useHRMSApp() {
   // Attendance database map: month_string -> employee_id -> day_number -> status
   const [attendanceDb, setAttendanceDb] = useState<Record<string, Record<string, Record<number, string>>>>({});
   const [isFetchingAttendance, setIsFetchingAttendance] = useState(false);
+  const [exitEligibleEmployees, setExitEligibleEmployees] = useState<ExitEligibleEmployee[]>([]);
+  const [exitEligibilityCheckedMonths, setExitEligibilityCheckedMonths] = useState<string[]>([]);
+  const [exitedEmployeesCount, setExitedEmployeesCount] = useState(0);
+  const [isFetchingExitEligibility, setIsFetchingExitEligibility] = useState(false);
+  const [showExitEligibleModal, setShowExitEligibleModal] = useState(false);
 
   const [attendanceLocationFilter, setAttendanceLocationFilter] = useState("All");
   const [attendanceRoleFilters, setAttendanceRoleFilters] = useState<string[]>([]);
@@ -1621,6 +1633,32 @@ export function useHRMSApp() {
     }
   }, []);
 
+  const fetchExitEligibility = useCallback(
+    async (referenceMonth?: string, showModalIfEligible = false) => {
+      const month = referenceMonth || selectedMonth;
+      if (!month || !isLoggedIn) return;
+      setIsFetchingExitEligibility(true);
+      try {
+        const res = await fetch(
+          `/api/attendance/exit-eligibility?referenceMonth=${encodeURIComponent(month)}&months=3`,
+        );
+        if (!res.ok) throw await parseApiError(res, "Failed to fetch exit eligibility.");
+        const data = await res.json();
+        setExitEligibleEmployees(data.eligible || []);
+        setExitEligibilityCheckedMonths(data.checkedMonths || []);
+        setExitedEmployeesCount(data.exitedCount ?? 0);
+        if (showModalIfEligible && (data.eligible?.length ?? 0) > 0) {
+          setShowExitEligibleModal(true);
+        }
+      } catch (err: any) {
+        console.error("Exit eligibility fetch failed:", err.message);
+      } finally {
+        setIsFetchingExitEligibility(false);
+      }
+    },
+    [selectedMonth, isLoggedIn],
+  );
+
   useEffect(() => {
     if (selectedMonth) {
       localStorage.setItem("hrms_selected_month", selectedMonth);
@@ -1628,9 +1666,10 @@ export function useHRMSApp() {
       setBulkCalendarMonth(selectedMonth);
       if (isLoggedIn) {
         fetchAttendanceForMonth(selectedMonth);
+        fetchExitEligibility(selectedMonth, false);
       }
     }
-  }, [selectedMonth, isLoggedIn, fetchAttendanceForMonth]);
+  }, [selectedMonth, isLoggedIn, fetchAttendanceForMonth, fetchExitEligibility]);
 
   useEffect(() => {
     if (!MONTHS_LIST.length) return;
@@ -1697,6 +1736,7 @@ export function useHRMSApp() {
           }
         };
       });
+      await fetchExitEligibility(selectedMonth, false);
     } catch (err: any) {
       setErrorMessage(err.message || `Failed to mark attendance for ${empName}.`);
     }
@@ -1779,6 +1819,7 @@ export function useHRMSApp() {
       });
 
       triggerSuccess(`Bulk marked ${filtered.length} employees as "${bulkStatus}" from Day ${start} to ${end} for ${selectedMonth}.`);
+      await fetchExitEligibility(selectedMonth, true);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply bulk attendance.");
     }
@@ -1878,6 +1919,8 @@ export function useHRMSApp() {
       setBulkConfirm2(false);
       setIsBulkWizardOpen(false);
       setAttendanceSubView("grid"); // Go back to daily grid sheet screen!
+      const refMonth = pickLatestMonthKey(bulkSelMonths.length > 0 ? bulkSelMonths : [selectedMonth]);
+      await fetchExitEligibility(refMonth, true);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply wizard attendance.");
     }
@@ -5086,6 +5129,7 @@ export function useHRMSApp() {
       triggerSuccess(
         `Marked ${report.count ?? ids.length} employee(s) as exited effective ${trimmedDate}.`,
       );
+      await fetchExitEligibility(selectedMonth, false);
     } catch (err: any) {
       setErrorMessage("Bulk Mark Exit Failed: " + err.message);
     }
@@ -7008,6 +7052,15 @@ export function useHRMSApp() {
     roleSuccess,
     activePimSubTab,
     employeeListRoleFilter,
+    employeeListStatusFilter,
+    setEmployeeListStatusFilter,
+    exitEligibleEmployees,
+    exitEligibilityCheckedMonths,
+    exitedEmployeesCount,
+    isFetchingExitEligibility,
+    showExitEligibleModal,
+    setShowExitEligibleModal,
+    fetchExitEligibility,
     sidebarSearch,
     isSidebarCollapsed,
     isProfileOpen,

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Users,
   IndianRupee,
@@ -24,6 +24,8 @@ import {
   ClipboardList,
   MessageSquare,
   BookOpen,
+  LogOut,
+  UserMinus,
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import type { FieldTeamView } from "../lib/notification-navigation";
@@ -35,6 +37,13 @@ import { getSalaryColumnValue } from "../lib/salary-columns";
 import { expiryBand } from "../lib/renewal-helpers";
 import { Tender } from "../types";
 import SupervisorMapPanel from "../components/SupervisorMapPanel";
+import DashboardDraggableSection from "../components/DashboardDraggableSection";
+import {
+  loadDashboardWidgetOrder,
+  reorderDashboardWidgets,
+  saveDashboardWidgetOrder,
+  type DashboardWidgetId,
+} from "../lib/dashboard-section-order";
 
 function isTenderDeleted(tender: Tender): boolean {
   return Boolean(tender.deletedAt?.trim());
@@ -206,7 +215,13 @@ export default function AdminDashboardPage() {
     setAttendanceRecordFilter,
     setAttendanceSubView,
     setEmployeeListRoleFilter,
+    setEmployeeListStatusFilter,
     setActivePimSubTab,
+    exitEligibleEmployees,
+    exitEligibilityCheckedMonths,
+    exitedEmployeesCount,
+    isFetchingExitEligibility,
+    setShowExitEligibleModal,
     userPermissions,
     companyBranch,
     rawSchoolVisits,
@@ -226,6 +241,21 @@ export default function AdminDashboardPage() {
 
   const openEmployeesByRole = (role: string) => {
     setEmployeeListRoleFilter(role);
+    setActivePimSubTab("Employee List");
+    navigateToTab("Employees");
+  };
+
+  const openEligibleForExit = () => {
+    setEmployeeListStatusFilter("eligible_for_exit");
+    setActivePimSubTab("Employee List");
+    navigateToTab("Employees");
+    if (exitEligibleEmployees.length > 0) {
+      setShowExitEligibleModal(true);
+    }
+  };
+
+  const openExitedEmployees = () => {
+    setEmployeeListStatusFilter("exited");
     setActivePimSubTab("Employee List");
     navigateToTab("Employees");
   };
@@ -336,7 +366,14 @@ export default function AdminDashboardPage() {
   }, [rawRenewals]);
 
   const pendingActions = useMemo(() => {
-    const items: { label: string; count: number; tab: string; icon: React.ReactNode; urgent?: boolean }[] = [];
+    const items: {
+      label: string;
+      count: number;
+      tab: string;
+      icon: React.ReactNode;
+      urgent?: boolean;
+      onClick?: () => void;
+    }[] = [];
     if (pendingChangeCount > 0 && canView("Employees")) {
       items.push({
         label: "Employee bulk edits awaiting approval",
@@ -372,12 +409,23 @@ export default function AdminDashboardPage() {
         urgent: renewalStats.expired > 0,
       });
     }
+    if (exitEligibleEmployees.length > 0 && canView("Employees")) {
+      items.push({
+        label: "Employees eligible for exit (no present in 3 months)",
+        count: exitEligibleEmployees.length,
+        tab: "Employees",
+        icon: <LogOut size={16} />,
+        urgent: true,
+        onClick: openEligibleForExit,
+      });
+    }
     return items;
   }, [
     pendingChangeCount,
     pendingSupervisorRequestCount,
     adminNotificationUnreadCount,
     renewalStats,
+    exitEligibleEmployees.length,
     userPermissions,
   ]);
 
@@ -403,6 +451,473 @@ export default function AdminDashboardPage() {
   const locMax = locationChart[0]?.[1] ?? 1;
   const roleMax = roleChart[0]?.[1] ?? 1;
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+  const [widgetOrder, setWidgetOrder] = useState<DashboardWidgetId[]>(loadDashboardWidgetOrder);
+
+  const handleWidgetReorder = useCallback((draggedId: DashboardWidgetId, targetId: DashboardWidgetId) => {
+    setWidgetOrder((current) => {
+      const next = reorderDashboardWidgets(current, draggedId, targetId);
+      saveDashboardWidgetOrder(next);
+      return next;
+    });
+  }, []);
+
+  const widgetVisibility = useMemo<Record<DashboardWidgetId, boolean>>(
+    () => ({
+      "kpi-total-employees": canView("Employees"),
+      "kpi-net-payroll": canView("Salary"),
+      "kpi-attendance-rate": canView("Attendance"),
+      "kpi-esic-covered": canView("Employees"),
+      "kpi-worksite-locations": canView("Employees"),
+      "kpi-schools": canView("Schools"),
+      "kpi-active-tenders": canView("Tenders"),
+      "kpi-renewals-alert": canView("Car Papers"),
+      "kpi-eligible-exit": canView("Employees"),
+      "kpi-exited-employees": canView("Employees"),
+      charts: canView("Attendance") || canView("Employees"),
+      map: canView("Field Team"),
+      payroll: canView("Salary") || canView("Schools"),
+      actions: pendingActions.length > 0,
+      birthdays: canView("Birthdays") && birthdayTodayList.length > 0,
+      quicklinks: quickLinks.length > 0,
+    }),
+    [pendingActions.length, birthdayTodayList.length, quickLinks.length, userPermissions],
+  );
+
+  const renderDashboardWidget = (widgetId: DashboardWidgetId) => {
+    switch (widgetId) {
+      case "kpi-total-employees":
+        return (
+          <KpiCard
+            label="Total Employees"
+            value={isLoading ? "..." : String(dashboardStats.totalCount)}
+            sub="Active registry records"
+            icon={<Users size={20} className="text-[#ff791a]" />}
+            iconBg="bg-orange-50"
+            onClick={() => navigateToTab("Employees")}
+            cta="Open employee list"
+          />
+        );
+
+      case "kpi-net-payroll":
+        return (
+          <KpiCard
+            label="Net Payroll"
+            value={isLoading ? "..." : `₹${payrollNet.toLocaleString("en-IN")}`}
+            sub={`${selectedMonth} · after deductions`}
+            icon={<IndianRupee size={20} className="text-green-600" />}
+            iconBg="bg-green-50/70"
+            onClick={() => navigateToTab("Salary")}
+            cta="View salary sheet"
+          />
+        );
+
+      case "kpi-attendance-rate":
+        return (
+          <KpiCard
+            label="Attendance Rate"
+            value={isLoading ? "..." : `${attendanceSummary.presentPct}%`}
+            sub={`${selectedMonth} · ${attendanceSummary.presents} presents`}
+            icon={<TrendingUp size={20} className="text-blue-600" />}
+            iconBg="bg-blue-50"
+            onClick={() => openAttendance("all")}
+            cta="Review attendance"
+          />
+        );
+
+      case "kpi-esic-covered":
+        return (
+          <KpiCard
+            label="ESIC Covered"
+            value={isLoading ? "..." : String(dashboardStats.esicCoveredCount)}
+            sub={`of ${dashboardStats.totalCount} employees`}
+            icon={<Heart size={20} className="text-purple-600" />}
+            iconBg="bg-purple-50"
+            onClick={() => navigateToTab("Employees")}
+            cta="View roster"
+          />
+        );
+
+      case "kpi-worksite-locations":
+        return (
+          <KpiCard
+            label="Worksite Locations"
+            value={String(dashboardStats.uniqueLocsCount)}
+            sub="Distinct mapped sites"
+            icon={<Map size={20} className="text-blue-600" />}
+            iconBg="bg-blue-50"
+            onClick={() => navigateToTab("Employees")}
+            cta="Manage locations"
+          />
+        );
+
+      case "kpi-schools":
+        return (
+          <KpiCard
+            label="Schools"
+            value={String(schoolDashboardStats.totalCount)}
+            sub={`${schoolDashboardStats.uniqueDistricts} districts · ${schoolDashboardStats.totalToilets} toilets`}
+            icon={<School size={20} className="text-indigo-600" />}
+            iconBg="bg-indigo-50"
+            onClick={() => navigateToTab("Schools")}
+            cta="Open schools"
+          />
+        );
+
+      case "kpi-active-tenders":
+        return (
+          <KpiCard
+            label="Active Tenders"
+            value={String(tenderStats.total)}
+            sub={`${tenderStats.upcoming} upcoming deadlines`}
+            icon={<Gavel size={20} className="text-amber-700" />}
+            iconBg="bg-amber-50"
+            onClick={() => navigateToTab("Tenders")}
+            cta="View bid pipeline"
+          />
+        );
+
+      case "kpi-renewals-alert":
+        return (
+          <KpiCard
+            label="Renewals Alert"
+            value={String(renewalStats.soon + renewalStats.expired)}
+            sub={`${renewalStats.expired} expired · ${renewalStats.soon} due soon`}
+            icon={<RotateCw size={20} className="text-rose-600" />}
+            iconBg="bg-rose-50"
+            onClick={() => navigateToTab("Car Papers")}
+            cta="Review renewals"
+            highlight={renewalStats.expired > 0}
+          />
+        );
+
+      case "kpi-eligible-exit":
+        return (
+          <KpiCard
+            label="Eligible for Exit"
+            value={isFetchingExitEligibility ? "..." : String(exitEligibleEmployees.length)}
+            sub={
+              exitEligibilityCheckedMonths.length >= 2
+                ? `No present in ${exitEligibilityCheckedMonths[0]} – ${exitEligibilityCheckedMonths[exitEligibilityCheckedMonths.length - 1]}`
+                : "No present in last 3 months"
+            }
+            icon={<LogOut size={20} className="text-rose-700" />}
+            iconBg="bg-rose-50"
+            onClick={openEligibleForExit}
+            cta="Review & mark exit"
+            highlight={exitEligibleEmployees.length > 0}
+          />
+        );
+
+      case "kpi-exited-employees":
+        return (
+          <KpiCard
+            label="Exited Employees"
+            value={isFetchingExitEligibility ? "..." : String(exitedEmployeesCount)}
+            sub="Marked as exited / left"
+            icon={<UserMinus size={20} className="text-slate-600" />}
+            iconBg="bg-slate-100"
+            onClick={openExitedEmployees}
+            cta="View exited roster"
+          />
+        );
+
+      case "charts":
+        return (
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {canView("Attendance") && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left lg:col-span-1">
+                <div className="flex items-center justify-between mb-4">
+                  <button
+                    type="button"
+                    onClick={() => openAttendance("all")}
+                    className="text-sm font-extrabold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-[#ff791a] transition"
+                  >
+                    <Clock size={16} className="text-[#ff791a]" />
+                    Attendance — {selectedMonth}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAttendance("all")}
+                    className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
+                  >
+                    Open <ChevronRight size={12} />
+                  </button>
+                </div>
+                <AttendanceRing
+                  presentPct={attendanceSummary.presentPct}
+                  presents={attendanceSummary.presents}
+                  absents={attendanceSummary.absents}
+                  absentEmployeeCount={attendanceSummary.absentEmployeeCount}
+                  presentOnlyEmployeeCount={attendanceSummary.presentOnlyEmployeeCount}
+                  onOpenAll={() => openAttendance("all")}
+                  onOpenPresent={() => openAttendance("present")}
+                  onOpenAbsent={() => openAttendance("absent")}
+                />
+              </div>
+            )}
+
+            {canView("Employees") && (
+              <button
+                type="button"
+                onClick={() => navigateToTab("Employees")}
+                className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                    <BarChart3 size={16} className="text-blue-500" />
+                    Top Locations
+                  </h3>
+                  <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
+                    View all <ChevronRight size={12} />
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {locationChart.length === 0 ? (
+                    <p className="text-xs text-slate-400">No location data yet.</p>
+                  ) : (
+                    locationChart.map(([loc, count]) => (
+                      <BarRow key={loc} label={loc} value={count} max={locMax} color="bg-blue-500" />
+                    ))
+                  )}
+                </div>
+              </button>
+            )}
+
+            {canView("Employees") && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left">
+                <div className="flex items-center justify-between mb-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmployeeListRoleFilter("");
+                      setActivePimSubTab("Employee List");
+                      navigateToTab("Employees");
+                    }}
+                    className="text-sm font-extrabold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-[#ff791a] transition"
+                  >
+                    <Users size={16} className="text-purple-500" />
+                    Top Roles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmployeeListRoleFilter("");
+                      setActivePimSubTab("Employee List");
+                      navigateToTab("Employees");
+                    }}
+                    className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
+                  >
+                    View roster <ChevronRight size={12} />
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {roleChart.length === 0 ? (
+                    <p className="text-xs text-slate-400">No role data yet.</p>
+                  ) : (
+                    roleChart.map(([role, count]) => (
+                      <BarRow
+                        key={role}
+                        label={role}
+                        value={count}
+                        max={roleMax}
+                        color="bg-purple-500"
+                        onClick={() => openEmployeesByRole(role)}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        );
+
+      case "map":
+        return (
+          <section>
+            <SupervisorMapPanel
+              supervisors={rawSchoolSupervisors}
+              visits={rawSchoolVisits}
+              onOpenFieldTeam={() => goToFieldTeam("supervisors")}
+              layoutRevision={widgetOrder.join("-")}
+            />
+          </section>
+        );
+
+      case "payroll":
+        return (
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {canView("Salary") && (
+              <button
+                type="button"
+                onClick={() => navigateToTab("Salary")}
+                className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                    <Coins size={16} className="text-[#ff791a]" />
+                    Payroll Overview — {selectedMonth}
+                  </h3>
+                  <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
+                    Open salary <ChevronRight size={12} />
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Gross Payroll</span>
+                    <span className="text-lg font-black text-slate-800">
+                      ₹{dashboardStats.totalGrossPayroll.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3">
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase block">Net Payable</span>
+                    <span className="text-lg font-black text-emerald-800">₹{payrollNet.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="rounded-xl bg-orange-50 border border-orange-100 p-3 col-span-2">
+                    <span className="text-[10px] font-bold text-orange-600 uppercase block">Employees on sheet</span>
+                    <span className="text-lg font-black text-orange-800">{filteredSalaryEmployees.length}</span>
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {canView("Schools") && (
+              <button
+                type="button"
+                onClick={() => navigateToTab("Schools")}
+                className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                    <School size={16} className="text-indigo-500" />
+                    School Work Summary
+                  </h3>
+                  <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
+                    Open schools <ChevronRight size={12} />
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3">
+                    <span className="text-[10px] font-bold text-indigo-600 uppercase block">Schools</span>
+                    <span className="text-lg font-black text-indigo-800">{schoolDashboardStats.totalCount}</span>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Districts</span>
+                    <span className="text-lg font-black text-slate-800">{schoolDashboardStats.uniqueDistricts}</span>
+                  </div>
+                  <div className="rounded-xl bg-teal-50 border border-teal-100 p-3">
+                    <span className="text-[10px] font-bold text-teal-600 uppercase block">Toilets</span>
+                    <span className="text-lg font-black text-teal-800">{schoolDashboardStats.totalToilets}</span>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                    <span className="text-[10px] font-bold text-amber-700 uppercase block">Partner Pay/mo</span>
+                    <span className="text-lg font-black text-amber-900">
+                      ₹{schoolDashboardStats.totalPartnerPay.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            )}
+          </section>
+        );
+
+      case "actions":
+        return (
+          <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2 mb-4">
+              <AlertTriangle size={16} className="text-amber-500" />
+              Action Required
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {pendingActions.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => (item.onClick ? item.onClick() : navigateToTab(item.tab))}
+                  className={`flex items-center justify-between gap-3 p-4 rounded-xl border text-left cursor-pointer transition hover:shadow-md ${
+                    item.urgent
+                      ? "border-amber-200 bg-amber-50/50 hover:border-amber-300"
+                      : "border-slate-200 bg-slate-50/50 hover:border-[#ff791a]/30"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`p-2 rounded-lg shrink-0 ${item.urgent ? "bg-amber-100 text-amber-700" : "bg-white text-slate-600 border border-slate-200"}`}>
+                      {item.icon}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-slate-800 block truncate">{item.label}</span>
+                      <span className="text-[10px] text-slate-500">Tap to review</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-lg font-black ${item.urgent ? "text-amber-700" : "text-[#ff791a]"}`}>
+                      {item.count}
+                    </span>
+                    <ChevronRight size={16} className="text-slate-400" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+        );
+
+      case "birthdays":
+        return (
+          <button
+            type="button"
+            onClick={() => navigateToTab("Birthdays")}
+            className="w-full bg-gradient-to-r from-pink-50 to-orange-50 border border-pink-200 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:shadow-md transition group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white rounded-xl text-pink-500 shadow-sm">
+                <Cake size={20} />
+              </div>
+              <div className="text-left">
+                <span className="text-sm font-extrabold text-slate-800">
+                  {birthdayTodayList.length} birthday{birthdayTodayList.length !== 1 ? "s" : ""} today
+                </span>
+                <span className="text-xs text-slate-500 block">
+                  {birthdayTodayList.slice(0, 3).map((e) => e.nameAsPerAadhar || e.employeeCode).join(", ")}
+                  {birthdayTodayList.length > 3 ? "…" : ""}
+                </span>
+              </div>
+            </div>
+            <span className="text-xs font-bold text-[#ff791a] flex items-center gap-1 group-hover:gap-2 transition-all">
+              Celebrate <ChevronRight size={14} />
+            </span>
+          </button>
+        );
+
+      case "quicklinks":
+        return (
+          <section>
+            <h3 className="text-sm font-extrabold text-slate-800 mb-3">Quick Links</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {quickLinks.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <button
+                    key={link.tab}
+                    type="button"
+                    onClick={() => navigateToTab(link.tab)}
+                    className="bg-white border border-slate-200 rounded-xl p-4 text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
+                  >
+                    <div className="p-2 rounded-lg bg-orange-50 text-[#ff791a] w-fit mb-2 group-hover:bg-[#ff791a] group-hover:text-white transition">
+                      <Icon size={18} />
+                    </div>
+                    <span className="text-xs font-extrabold text-slate-800 block">{link.label}</span>
+                    <span className="text-[10px] text-slate-500">{link.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="admin-dashboard-view">
@@ -492,387 +1007,21 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* Primary KPIs */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="dashboard-kpi-grid">
-        {canView("Employees") && (
-          <KpiCard
-            label="Total Employees"
-            value={isLoading ? "..." : String(dashboardStats.totalCount)}
-            sub="Active registry records"
-            icon={<Users size={20} className="text-[#ff791a]" />}
-            iconBg="bg-orange-50"
-            onClick={() => navigateToTab("Employees")}
-            cta="Open employee list"
-          />
-        )}
-        {canView("Salary") && (
-          <KpiCard
-            label="Net Payroll"
-            value={isLoading ? "..." : `₹${payrollNet.toLocaleString("en-IN")}`}
-            sub={`${selectedMonth} · after deductions`}
-            icon={<IndianRupee size={20} className="text-green-600" />}
-            iconBg="bg-green-50/70"
-            onClick={() => navigateToTab("Salary")}
-            cta="View salary sheet"
-          />
-        )}
-        {canView("Attendance") && (
-          <KpiCard
-            label="Attendance Rate"
-            value={isLoading ? "..." : `${attendanceSummary.presentPct}%`}
-            sub={`${selectedMonth} · ${attendanceSummary.presents} presents`}
-            icon={<TrendingUp size={20} className="text-blue-600" />}
-            iconBg="bg-blue-50"
-            onClick={() => openAttendance("all")}
-            cta="Review attendance"
-          />
-        )}
-        {canView("Employees") && (
-          <KpiCard
-            label="ESIC Covered"
-            value={isLoading ? "..." : String(dashboardStats.esicCoveredCount)}
-            sub={`of ${dashboardStats.totalCount} employees`}
-            icon={<Heart size={20} className="text-purple-600" />}
-            iconBg="bg-purple-50"
-            onClick={() => navigateToTab("Employees")}
-            cta="View roster"
-          />
-        )}
-      </section>
-
-      {/* Secondary KPIs */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {canView("Employees") && (
-          <KpiCard
-            label="Worksite Locations"
-            value={String(dashboardStats.uniqueLocsCount)}
-            sub="Distinct mapped sites"
-            icon={<Map size={20} className="text-blue-600" />}
-            iconBg="bg-blue-50"
-            onClick={() => navigateToTab("Employees")}
-            cta="Manage locations"
-          />
-        )}
-        {canView("Schools") && (
-          <KpiCard
-            label="Schools"
-            value={String(schoolDashboardStats.totalCount)}
-            sub={`${schoolDashboardStats.uniqueDistricts} districts · ${schoolDashboardStats.totalToilets} toilets`}
-            icon={<School size={20} className="text-indigo-600" />}
-            iconBg="bg-indigo-50"
-            onClick={() => navigateToTab("Schools")}
-            cta="Open schools"
-          />
-        )}
-        {canView("Tenders") && (
-          <KpiCard
-            label="Active Tenders"
-            value={String(tenderStats.total)}
-            sub={`${tenderStats.upcoming} upcoming deadlines`}
-            icon={<Gavel size={20} className="text-amber-700" />}
-            iconBg="bg-amber-50"
-            onClick={() => navigateToTab("Tenders")}
-            cta="View bid pipeline"
-          />
-        )}
-        {canView("Car Papers") && (
-          <KpiCard
-            label="Renewals Alert"
-            value={String(renewalStats.soon + renewalStats.expired)}
-            sub={`${renewalStats.expired} expired · ${renewalStats.soon} due soon`}
-            icon={<RotateCw size={20} className="text-rose-600" />}
-            iconBg="bg-rose-50"
-            onClick={() => navigateToTab("Car Papers")}
-            cta="Review renewals"
-            highlight={renewalStats.expired > 0}
-          />
-        )}
-      </section>
-
-      {/* Charts row */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {canView("Attendance") && (
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left lg:col-span-1">
-            <div className="flex items-center justify-between mb-4">
-              <button
-                type="button"
-                onClick={() => openAttendance("all")}
-                className="text-sm font-extrabold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-[#ff791a] transition"
-              >
-                <Clock size={16} className="text-[#ff791a]" />
-                Attendance — {selectedMonth}
-              </button>
-              <button
-                type="button"
-                onClick={() => openAttendance("all")}
-                className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
-              >
-                Open <ChevronRight size={12} />
-              </button>
-            </div>
-            <AttendanceRing
-              presentPct={attendanceSummary.presentPct}
-              presents={attendanceSummary.presents}
-              absents={attendanceSummary.absents}
-              absentEmployeeCount={attendanceSummary.absentEmployeeCount}
-              presentOnlyEmployeeCount={attendanceSummary.presentOnlyEmployeeCount}
-              onOpenAll={() => openAttendance("all")}
-              onOpenPresent={() => openAttendance("present")}
-              onOpenAbsent={() => openAttendance("absent")}
-            />
-          </div>
-        )}
-
-        {canView("Employees") && (
-          <button
-            type="button"
-            onClick={() => navigateToTab("Employees")}
-            className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <BarChart3 size={16} className="text-blue-500" />
-                Top Locations
-              </h3>
-              <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
-                View all <ChevronRight size={12} />
-              </span>
-            </div>
-            <div className="space-y-3">
-              {locationChart.length === 0 ? (
-                <p className="text-xs text-slate-400">No location data yet.</p>
-              ) : (
-                locationChart.map(([loc, count]) => (
-                  <BarRow key={loc} label={loc} value={count} max={locMax} color="bg-blue-500" />
-                ))
-              )}
-            </div>
-          </button>
-        )}
-
-        {canView("Employees") && (
-          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left">
-            <div className="flex items-center justify-between mb-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmployeeListRoleFilter("");
-                  setActivePimSubTab("Employee List");
-                  navigateToTab("Employees");
-                }}
-                className="text-sm font-extrabold text-slate-800 flex items-center gap-2 cursor-pointer hover:text-[#ff791a] transition"
-              >
-                <Users size={16} className="text-purple-500" />
-                Top Roles
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmployeeListRoleFilter("");
-                  setActivePimSubTab("Employee List");
-                  navigateToTab("Employees");
-                }}
-                className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
-              >
-                View roster <ChevronRight size={12} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {roleChart.length === 0 ? (
-                <p className="text-xs text-slate-400">No role data yet.</p>
-              ) : (
-                roleChart.map(([role, count]) => (
-                  <BarRow
-                    key={role}
-                    label={role}
-                    value={count}
-                    max={roleMax}
-                    color="bg-purple-500"
-                    onClick={() => openEmployeesByRole(role)}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Supervisor map */}
-      {canView("Field Team") && (
-        <section>
-          <SupervisorMapPanel
-            supervisors={rawSchoolSupervisors}
-            visits={rawSchoolVisits}
-            onOpenFieldTeam={() => goToFieldTeam("supervisors")}
-          />
-        </section>
-      )}
-
-      {/* Payroll & school summary */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {canView("Salary") && (
-          <button
-            type="button"
-            onClick={() => navigateToTab("Salary")}
-            className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Coins size={16} className="text-[#ff791a]" />
-                Payroll Overview — {selectedMonth}
-              </h3>
-              <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
-                Open salary <ChevronRight size={12} />
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                <span className="text-[10px] font-bold text-slate-500 uppercase block">Gross Payroll</span>
-                <span className="text-lg font-black text-slate-800">
-                  ₹{dashboardStats.totalGrossPayroll.toLocaleString("en-IN")}
-                </span>
-              </div>
-              <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3">
-                <span className="text-[10px] font-bold text-emerald-600 uppercase block">Net Payable</span>
-                <span className="text-lg font-black text-emerald-800">₹{payrollNet.toLocaleString("en-IN")}</span>
-              </div>
-              <div className="rounded-xl bg-orange-50 border border-orange-100 p-3 col-span-2">
-                <span className="text-[10px] font-bold text-orange-600 uppercase block">Employees on sheet</span>
-                <span className="text-lg font-black text-orange-800">{filteredSalaryEmployees.length}</span>
-              </div>
-            </div>
-          </button>
-        )}
-
-        {canView("Schools") && (
-          <button
-            type="button"
-            onClick={() => navigateToTab("Schools")}
-            className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <School size={16} className="text-indigo-500" />
-                School Work Summary
-              </h3>
-              <span className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 group-hover:gap-1 transition-all">
-                Open schools <ChevronRight size={12} />
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3">
-                <span className="text-[10px] font-bold text-indigo-600 uppercase block">Schools</span>
-                <span className="text-lg font-black text-indigo-800">{schoolDashboardStats.totalCount}</span>
-              </div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                <span className="text-[10px] font-bold text-slate-500 uppercase block">Districts</span>
-                <span className="text-lg font-black text-slate-800">{schoolDashboardStats.uniqueDistricts}</span>
-              </div>
-              <div className="rounded-xl bg-teal-50 border border-teal-100 p-3">
-                <span className="text-[10px] font-bold text-teal-600 uppercase block">Toilets</span>
-                <span className="text-lg font-black text-teal-800">{schoolDashboardStats.totalToilets}</span>
-              </div>
-              <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
-                <span className="text-[10px] font-bold text-amber-700 uppercase block">Partner Pay/mo</span>
-                <span className="text-lg font-black text-amber-900">
-                  ₹{schoolDashboardStats.totalPartnerPay.toLocaleString("en-IN")}
-                </span>
-              </div>
-            </div>
-          </button>
-        )}
-      </section>
-
-      {/* Action center */}
-      {pendingActions.length > 0 && (
-        <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
-          <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2 mb-4">
-            <AlertTriangle size={16} className="text-amber-500" />
-            Action Required
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {pendingActions.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => navigateToTab(item.tab)}
-                className={`flex items-center justify-between gap-3 p-4 rounded-xl border text-left cursor-pointer transition hover:shadow-md ${
-                  item.urgent
-                    ? "border-amber-200 bg-amber-50/50 hover:border-amber-300"
-                    : "border-slate-200 bg-slate-50/50 hover:border-[#ff791a]/30"
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`p-2 rounded-lg shrink-0 ${item.urgent ? "bg-amber-100 text-amber-700" : "bg-white text-slate-600 border border-slate-200"}`}>
-                    {item.icon}
-                  </div>
-                  <div className="min-w-0">
-                    <span className="text-xs font-bold text-slate-800 block truncate">{item.label}</span>
-                    <span className="text-[10px] text-slate-500">Tap to review</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-lg font-black ${item.urgent ? "text-amber-700" : "text-[#ff791a]"}`}>
-                    {item.count}
-                  </span>
-                  <ChevronRight size={16} className="text-slate-400" />
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Birthdays today */}
-      {canView("Birthdays") && birthdayTodayList.length > 0 && (
-        <button
-          type="button"
-          onClick={() => navigateToTab("Birthdays")}
-          className="w-full bg-gradient-to-r from-pink-50 to-orange-50 border border-pink-200 rounded-xl p-4 flex items-center justify-between cursor-pointer hover:shadow-md transition group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-white rounded-xl text-pink-500 shadow-sm">
-              <Cake size={20} />
-            </div>
-            <div className="text-left">
-              <span className="text-sm font-extrabold text-slate-800">
-                {birthdayTodayList.length} birthday{birthdayTodayList.length !== 1 ? "s" : ""} today
-              </span>
-              <span className="text-xs text-slate-500 block">
-                {birthdayTodayList.slice(0, 3).map((e) => e.nameAsPerAadhar || e.employeeCode).join(", ")}
-                {birthdayTodayList.length > 3 ? "…" : ""}
-              </span>
-            </div>
-          </div>
-          <span className="text-xs font-bold text-[#ff791a] flex items-center gap-1 group-hover:gap-2 transition-all">
-            Celebrate <ChevronRight size={14} />
-          </span>
-        </button>
-      )}
-
-      {/* Quick links */}
-      <section>
-        <h3 className="text-sm font-extrabold text-slate-800 mb-3">Quick Links</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {quickLinks.map((link) => {
-            const Icon = link.icon;
-            return (
-              <button
-                key={link.tab}
-                type="button"
-                onClick={() => navigateToTab(link.tab)}
-                className="bg-white border border-slate-200 rounded-xl p-4 text-left cursor-pointer hover:border-[#ff791a]/40 hover:shadow-md transition group"
-              >
-                <div className="p-2 rounded-lg bg-orange-50 text-[#ff791a] w-fit mb-2 group-hover:bg-[#ff791a] group-hover:text-white transition">
-                  <Icon size={18} />
-                </div>
-                <span className="text-xs font-extrabold text-slate-800 block">{link.label}</span>
-                <span className="text-[10px] text-slate-500">{link.desc}</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      {/* Draggable dashboard widgets */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {widgetOrder.map((widgetId) => {
+          if (!widgetVisibility[widgetId]) return null;
+          return (
+            <DashboardDraggableSection
+              key={widgetId}
+              widgetId={widgetId}
+              onReorder={handleWidgetReorder}
+            >
+              {renderDashboardWidget(widgetId)}
+            </DashboardDraggableSection>
+          );
+        })}
+      </div>
 
       {/* Footer stats strip */}
       <div className="flex flex-wrap gap-4 text-xs text-slate-500 border-t border-slate-200 pt-4">

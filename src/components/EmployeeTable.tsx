@@ -8,6 +8,7 @@ import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud,
 import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
 import EmployeeViewModal from "./EmployeeViewModal";
+import { formatLastPresentDate } from "../lib/exit-eligibility-helpers";
 
 interface EmployeeTableProps {
   employees: Employee[];
@@ -22,9 +23,13 @@ interface EmployeeTableProps {
   readOnly?: boolean;
   roleFilter?: string;
   onRoleFilterChange?: (role: string) => void;
+  statusFilter?: "active" | "exited" | "all" | "eligible_for_exit";
+  onStatusFilterChange?: (status: "active" | "exited" | "all" | "eligible_for_exit") => void;
+  exitEligibleLastPresent?: Record<string, string | null>;
 }
 
 type ViewMode = "all" | "identity" | "salary" | "nominee";
+type StatusFilter = "active" | "exited" | "all" | "eligible_for_exit";
 
 const BULK_EXIT_REASON_OPTIONS = [
   "Resignation",
@@ -54,6 +59,9 @@ export default function EmployeeTable({
   readOnly = false,
   roleFilter: roleFilterProp,
   onRoleFilterChange,
+  statusFilter: statusFilterProp,
+  onStatusFilterChange,
+  exitEligibleLastPresent = {},
 }: EmployeeTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
@@ -61,7 +69,9 @@ export default function EmployeeTable({
   const roleFilter = onRoleFilterChange !== undefined ? (roleFilterProp ?? "") : localRoleFilter;
   const setRoleFilter = onRoleFilterChange ?? setLocalRoleFilter;
   const [esicFilter, setEsicFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"active" | "exited" | "all">("active");
+  const [localStatusFilter, setLocalStatusFilter] = useState<StatusFilter>("active");
+  const statusFilter = onStatusFilterChange !== undefined ? (statusFilterProp ?? "active") : localStatusFilter;
+  const setStatusFilter = onStatusFilterChange ?? setLocalStatusFilter;
   const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [viewEmployee, setViewEmployee] = useState<Employee | null>(null);
   const [showBulkExitDialog, setShowBulkExitDialog] = useState(false);
@@ -128,6 +138,9 @@ export default function EmployeeTable({
         }
         return false;
       });
+    } else if (statusFilter === "eligible_for_exit") {
+      const eligibleIds = new Set(Object.keys(exitEligibleLastPresent));
+      result = result.filter((emp) => eligibleIds.has(emp.id));
     }
 
     // Substring Search
@@ -175,7 +188,7 @@ export default function EmployeeTable({
     });
 
     return result;
-  }, [employees, searchTerm, locationFilter, roleFilter, esicFilter, statusFilter, sortField, sortAsc]);
+  }, [employees, searchTerm, locationFilter, roleFilter, esicFilter, statusFilter, sortField, sortAsc, exitEligibleLastPresent]);
 
   // Handle select-all checkbox
   const isAllSelected = useMemo(() => {
@@ -236,11 +249,12 @@ export default function EmployeeTable({
               <ShieldAlert size={16} className="text-slate-400 mr-1 shrink-0" />
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
                 className="py-2 pr-4 bg-transparent border-0 text-xs font-semibold text-slate-700 focus:ring-0 focus:outline-none cursor-pointer"
                 id="status-filter-dd"
               >
                 <option value="active">Active Staff (Current)</option>
+                <option value="eligible_for_exit">Eligible for Exit (3 mo.)</option>
                 <option value="exited">Exited Staff (Old List)</option>
                 <option value="all">All Personnel</option>
               </select>
@@ -308,6 +322,14 @@ export default function EmployeeTable({
             )}
           </div>
         </div>
+
+        {statusFilter === "eligible_for_exit" && filteredEmployees.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <span className="font-bold">{filteredEmployees.length} employee(s)</span> with no present mark in the
+            last 3 months. Last presence dates are shown when you open the exit review dialog from Attendance or
+            Dashboard. Select rows and use <span className="font-bold">Mark Exit</span> below.
+          </div>
+        )}
 
         {/* Column Group View Tabs */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between border-t border-slate-200 pt-3 gap-3">

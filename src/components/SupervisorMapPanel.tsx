@@ -16,6 +16,7 @@ type SupervisorMapPanelProps = {
   supervisors: SchoolSupervisor[];
   visits: SchoolVisit[];
   onOpenFieldTeam?: () => void;
+  layoutRevision?: string;
 };
 
 function escapeHtml(value: string): string {
@@ -118,6 +119,7 @@ export default function SupervisorMapPanel({
   supervisors,
   visits,
   onOpenFieldTeam,
+  layoutRevision,
 }: SupervisorMapPanelProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -125,6 +127,7 @@ export default function SupervisorMapPanel({
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
+  const [mapWheelActive, setMapWheelActive] = useState(false);
 
   const paths = useMemo(() => buildSupervisorPaths(supervisors, visits), [supervisors, visits]);
   const visiblePaths = useMemo(
@@ -154,7 +157,7 @@ export default function SupervisorMapPanel({
     const map = L.map(mapContainerRef.current, {
       center: INDIA_CENTER,
       zoom: DEFAULT_ZOOM,
-      scrollWheelZoom: true,
+      scrollWheelZoom: false,
     });
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -166,13 +169,45 @@ export default function SupervisorMapPanel({
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
+    const container = map.getContainer();
+    container.tabIndex = 0;
+
+    const activateWheelZoom = () => {
+      map.scrollWheelZoom.enable();
+      setMapWheelActive(true);
+    };
+
+    const deactivateWheelZoom = () => {
+      map.scrollWheelZoom.disable();
+      setMapWheelActive(false);
+    };
+
+    container.addEventListener("click", activateWheelZoom);
+    container.addEventListener("focus", activateWheelZoom);
+    container.addEventListener("blur", deactivateWheelZoom);
+
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (!container.contains(event.target as Node)) {
+        deactivateWheelZoom();
+      }
+    };
+    document.addEventListener("pointerdown", handleDocumentPointerDown);
+
     return () => {
+      document.removeEventListener("pointerdown", handleDocumentPointerDown);
       map.remove();
       mapRef.current = null;
       pathsLayerRef.current = null;
       markersLayerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const timer = window.setTimeout(() => map.invalidateSize(), 120);
+    return () => window.clearTimeout(timer);
+  }, [visiblePaths.length, showPaths, layoutRevision]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -342,11 +377,22 @@ export default function SupervisorMapPanel({
         </div>
       )}
 
-      <div
-        ref={mapContainerRef}
-        className="h-80 md:h-[28rem] w-full rounded-xl overflow-hidden border border-slate-200 z-0"
-        aria-label="Supervisor traversed paths map"
-      />
+      <div className="relative">
+        <div
+          ref={mapContainerRef}
+          className={`h-80 md:h-[28rem] w-full rounded-xl overflow-hidden border z-0 transition ${
+            mapWheelActive
+              ? "border-[#ff791a]/50 ring-2 ring-[#ff791a]/20"
+              : "border-slate-200"
+          }`}
+          aria-label="Supervisor traversed paths map"
+        />
+        {!mapWheelActive && (
+          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] font-semibold text-white shadow-sm">
+            Click map to zoom with scroll wheel
+          </p>
+        )}
+      </div>
 
       {paths.length === 0 ? (
         <p className="text-xs text-slate-400 mt-3">

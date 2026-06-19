@@ -152,6 +152,8 @@ export default function EmployeesPage() {
     roleSuccess,
     activePimSubTab,
     employeeListRoleFilter,
+    employeeListStatusFilter,
+    exitEligibleEmployees,
     sidebarSearch,
     isSidebarCollapsed,
     isProfileOpen,
@@ -625,6 +627,7 @@ export default function EmployeesPage() {
     setReportSkillFilters,
     setReportRoleFilters,
     setEmployeeListRoleFilter,
+    setEmployeeListStatusFilter,
     setIsReportLocDropdownOpen,
     setIsSkillDropdownOpen,
     setIsRoleDropdownOpen,
@@ -877,6 +880,11 @@ export default function EmployeesPage() {
                                         readOnly={!userPermissions.employees?.edit}
                                         roleFilter={employeeListRoleFilter}
                                         onRoleFilterChange={setEmployeeListRoleFilter}
+                                        statusFilter={employeeListStatusFilter}
+                                        onStatusFilterChange={setEmployeeListStatusFilter}
+                                        exitEligibleLastPresent={Object.fromEntries(
+                                          exitEligibleEmployees.map((e) => [e.employeeId, e.lastPresentDate]),
+                                        )}
                                       />
                                     )}
                                   </section>
