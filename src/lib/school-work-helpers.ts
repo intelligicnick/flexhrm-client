@@ -362,6 +362,16 @@ export function validateSchoolWork(row: Partial<SchoolWork>): Record<string, str
     errors.govtUnitRate = "Govt unit rate must be 0 or greater.";
   }
 
+  const materialCost = Number(row.materialCost);
+  if (row.materialCost !== undefined && (!Number.isFinite(materialCost) || materialCost < 0)) {
+    errors.materialCost = "Material cost must be 0 or greater.";
+  }
+
+  const rates = Number(row.rates);
+  if (row.rates !== undefined && (!Number.isFinite(rates) || rates < 0)) {
+    errors.rates = "Rates must be 0 or greater.";
+  }
+
   const accountNumber = row.accountNumber?.trim() || "";
   const ifscCode = row.ifscCode?.trim() || "";
   if (accountNumber && !ifscCode) {

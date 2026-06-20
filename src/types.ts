@@ -52,6 +52,8 @@ export interface Employee {
   skillCategory?: string; // Highly Skilled / Skilled / Semi Skilled / Unskilled
   role?: string;
   dailyWage?: number;
+  /** Whether payroll uses a fixed monthly gross or a per-day daily wage */
+  salaryWageMode?: "monthly" | "daily";
   employeeMobile?: string;
   nomineeMobile?: string;
   familyMember1Mobile?: string;
@@ -124,6 +126,8 @@ export const EXCEL_ROW_HEADERS = [
   "Skill Category",
   "Job Role",
   "Working Days Cycle",
+  "Salary Wage Mode",
+  "Daily Wage",
   "Gross Salary***",
   "Basic Salary***",
   "ESIC",
@@ -158,12 +162,22 @@ export const EXCEL_ROW_HEADERS = [
   "Family Member Name (3)",
   "Family Member DOB (3)",
   "Family Member Relation (3)",
-  "Daily Wage",
   "Employee Mobile",
   "Nominee Mobile",
   "Family Member Mobile (1)",
   "Family Member Mobile (2)",
-  "Family Member Mobile (3)"
+  "Family Member Mobile (3)",
+  "PF/ESIC Compliance **",
+  "Professional Tax (PT) **",
+  "PF Calculation Mode",
+  "EXIT/LEAVING DATE",
+  "REASON FOR EXIT",
+  "Advance",
+  "Penalty",
+  "Uniform",
+  "Food Perk",
+  "Accommodation Perk",
+  "Conveyance Perk",
 ];
 
 export interface SchoolMaterialItem {
@@ -369,6 +383,8 @@ export interface Tender {
   statusSyncedAt?: string;
   /** Last GeM sync result: "status change found" or "unchanged" */
   statusSyncNote?: string;
+  /** Previous status before the most recent GeM sync update */
+  statusBeforeSync?: TenderStatus;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -417,50 +433,6 @@ export interface Contract {
 }
 
 export type CreateContractInput = Omit<Contract, "id" | "createdAt" | "updatedAt">;
-
-export type BankInstrumentType = "bg" | "dd";
-
-export type BankInstrumentStatus =
-  | "submitted_to_dept"
-  | "received_from_department"
-  | "returned_to_bank"
-  | "cancelled_received_fd"
-  | "money_credited_back";
-
-export interface BankInstrument {
-  id: string;
-  instrumentType: BankInstrumentType;
-  instrumentNumber: string;
-  beneficiary: string;
-  dateOfIssue: string;
-  expiryDate: string;
-  issuingBank: string;
-  contractId: string;
-  contractNo: string;
-  status: BankInstrumentStatus;
-  notes: string;
-  entryDate: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export type CreateBankInstrumentInput = Omit<
-  BankInstrument,
-  "id" | "createdAt" | "updatedAt"
->;
-
-export interface BankInstrumentDocument {
-  id: string;
-  instrumentId: string;
-  label: string;
-  mimeType: string;
-  filename: string;
-  originalSizeBytes: number;
-  storedSizeBytes: number;
-  quality?: number;
-  uploadedBy: string;
-  createdAt: string;
-}
 
 export type RenewalCategory = "car_papers" | "it_renewals" | "licenses";
 
@@ -512,6 +484,48 @@ export type CreateRenewalInput = Omit<Renewal, "id" | "createdAt" | "updatedAt">
 export interface RenewalDocument {
   id: string;
   renewalId: string;
+  label: string;
+  mimeType: string;
+  filename: string;
+  originalSizeBytes: number;
+  storedSizeBytes: number;
+  quality?: number;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export type BgDdInstrumentType = "bg" | "dd";
+
+export type BgDdStatus =
+  | "submitted_to_dept"
+  | "received_from_department"
+  | "returned_to_bank"
+  | "cancelled"
+  | "received_fd"
+  | "money_credited_back";
+
+export interface BgDdRecord {
+  id: string;
+  instrumentType: BgDdInstrumentType;
+  number: string;
+  beneficiary: string;
+  dateOfIssue: string;
+  expiryDate: string;
+  issuingBank: string;
+  contractId: string;
+  status: BgDdStatus;
+  amount: string;
+  notes: string;
+  entryDate: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CreateBgDdInput = Omit<BgDdRecord, "id" | "createdAt" | "updatedAt">;
+
+export interface BgDdDocument {
+  id: string;
+  bgDdId: string;
   label: string;
   mimeType: string;
   filename: string;

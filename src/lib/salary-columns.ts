@@ -1,25 +1,19 @@
 import { Employee } from "../types";
 import {
   normalizeSkillCategory,
-  prorateSalaryByAttendance,
+  computeProratedGrossAndBasic,
   isEmployeeEsicCovered,
   calculatePfAmounts,
   calculateProfessionalTax,
   isPfEsicCompliant,
   isProfessionalTaxApplicable,
+  resolveFullMonthSalary,
 } from "../utils";
 import { safeNumber, getDaysInMonthStatic } from "./date-helpers";
 import { isEmployeeExitedOnDayStatic } from "./employee-helpers";
-import { countMonthAttendance, getSalaryProrationDays } from "./attendance-helpers";
+import { countMonthAttendance } from "./attendance-helpers";
 
-export function resolveEmployeeDailyWage(emp: Employee): number {
-  const stored = safeNumber(emp.dailyWage);
-  if (stored > 0) return stored;
-  const gross = safeNumber(emp.grossSalary);
-  if (gross <= 0) return 0;
-  const days = getSalaryProrationDays(emp.workingDaysType);
-  return days > 0 ? parseFloat((gross / days).toFixed(2)) : 0;
-}
+export { resolveEmployeeDailyWage } from "../utils";
 
 export const getSalaryColumnValue = (
   emp: Employee,
@@ -31,7 +25,6 @@ export const getSalaryColumnValue = (
   locationPtEnabledMap: Record<string, boolean> = {},
 ) => {
   let presents = 0;
-  const workingDaysInCycle = getSalaryProrationDays(emp.workingDaysType);
 
   if (attendanceDb && month) {
     const daysInMonth = getDaysInMonthStatic(month);
@@ -49,12 +42,9 @@ export const getSalaryColumnValue = (
   const rawBasic = safeNumber(emp.basicSalary);
   const empMonthAttendance = attendanceDb && month ? (attendanceDb[month]?.[emp.id] || {}) : {};
 
-  const gross = attendanceDb
-    ? prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empMonthAttendance)
-    : rawGross;
-  const basic = attendanceDb
-    ? prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empMonthAttendance)
-    : rawBasic;
+  const { gross, basic } = attendanceDb && month
+    ? computeProratedGrossAndBasic(emp, presents, empMonthAttendance, month)
+    : { gross: rawGross, basic: rawBasic };
 
   const isCompliant = isPfEsicCompliant(emp, locationComplianceMap);
   const isPtEnabled = isProfessionalTaxApplicable(emp, locationPtEnabledMap);
@@ -98,7 +88,7 @@ export const getSalaryColumnValue = (
     case "Daily Wage":
       return resolveEmployeeDailyWage(emp);
     case "Total Salary":
-      return rawGross;
+      return month ? resolveFullMonthSalary(emp, month) : rawGross;
     case "Gross Salary (Monthly)":
       return gross;
     case "Basic Salary":

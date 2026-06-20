@@ -1,5 +1,7 @@
 export type SalaryAnchor = "gross" | "daily" | "basic";
 
+export type SalaryWageMode = "monthly" | "daily";
+
 export type SalaryCascadeField =
   | "grossSalary"
   | "dailyWage"
@@ -43,6 +45,10 @@ export function getWorkingDaysCount(cycle: string | undefined): number {
 
 export function computeEsic(gross: number, esicLimit: number): string {
   return gross > 0 && gross <= esicLimit ? "Yes" : "No";
+}
+
+export function wageModeToAnchor(mode: SalaryWageMode): Exclude<SalaryAnchor, "basic"> {
+  return mode === "daily" ? "daily" : "gross";
 }
 
 export function deriveSalaryFromAnchor(
@@ -94,6 +100,15 @@ export function inferSalaryAnchor(values: SalaryFieldValues): SalaryAnchor {
   return "gross";
 }
 
+export function inferSalaryWageMode(
+  source: Partial<SalaryFieldValues> & { salaryWageMode?: string },
+): SalaryWageMode {
+  if (source.salaryWageMode === "monthly" || source.salaryWageMode === "daily") {
+    return source.salaryWageMode;
+  }
+  return inferSalaryAnchor(toSalaryFieldValues(source)) === "daily" ? "daily" : "monthly";
+}
+
 export function toSalaryFieldValues(
   source: Partial<SalaryFieldValues>,
   defaults?: Partial<SalaryFieldValues>,
@@ -108,27 +123,63 @@ export function toSalaryFieldValues(
   };
 }
 
+export function applyWageModeSwitch(
+  current: SalaryFieldValues,
+  newMode: SalaryWageMode,
+  basicPercent: number,
+  esicLimit: number,
+): SalaryFieldValues {
+  const anchor = wageModeToAnchor(newMode);
+  let anchorValue = getAnchorValue(current, anchor);
+
+  if (anchorValue <= 0) {
+    const fallbackAnchor = anchor === "gross" ? "daily" : "gross";
+    const fallbackValue = getAnchorValue(current, fallbackAnchor);
+    if (fallbackValue > 0) {
+      const interim = deriveSalaryFromAnchor(
+        fallbackAnchor,
+        fallbackValue,
+        current.workingDaysType,
+        basicPercent,
+        esicLimit,
+      );
+      anchorValue = getAnchorValue(interim, anchor);
+    }
+  }
+
+  const derived = deriveSalaryFromAnchor(
+    anchor,
+    anchorValue,
+    current.workingDaysType,
+    basicPercent,
+    esicLimit,
+  );
+
+  return { ...current, ...derived, esic: current.esic };
+}
+
 /**
- * Apply a salary-field edit while preserving the first-entered anchor value.
- * - First edit among gross/daily/basic sets the anchor and derives the others.
- * - Later edits to the anchor field update derived fields.
- * - Edits to non-anchor salary fields only change that field.
- * - Working-days changes keep the anchor and recalculate derived fields.
+ * Apply a salary-field edit using the explicit monthly/daily wage mode.
+ * - Monthly mode: gross is the source field; daily and basic are derived.
+ * - Daily mode: daily is the source field; gross and basic are derived.
+ * - Basic can always be overridden manually.
+ * - Working-days changes recalculate derived fields from the active mode.
  */
 export function applySalaryFieldChange(
   current: SalaryFieldValues,
-  anchor: SalaryAnchor | null,
+  wageMode: SalaryWageMode,
   field: SalaryCascadeField,
   rawValue: string,
   basicPercent: number,
   esicLimit: number,
-): { values: SalaryFieldValues; anchor: SalaryAnchor } {
+): { values: SalaryFieldValues; wageMode: SalaryWageMode } {
+  const anchor = wageModeToAnchor(wageMode);
+
   if (field === "workingDaysType") {
     const cycle = rawValue || "26 Days (Sun Off)";
-    const resolvedAnchor = anchor ?? inferSalaryAnchor(current);
-    const anchorValue = getAnchorValue(current, resolvedAnchor);
+    const anchorValue = getAnchorValue(current, anchor);
     const derived = deriveSalaryFromAnchor(
-      resolvedAnchor,
+      anchor,
       anchorValue,
       cycle,
       basicPercent,
@@ -141,26 +192,12 @@ export function applySalaryFieldChange(
         ...derived,
         esic: current.esic,
       },
-      anchor: resolvedAnchor,
+      wageMode,
     };
   }
 
   const editedAnchor = FIELD_TO_ANCHOR[field];
-  const numValue = Number(rawValue) || 0;
-
-  if (anchor === null) {
-    const derived = deriveSalaryFromAnchor(
-      editedAnchor,
-      numValue,
-      current.workingDaysType,
-      basicPercent,
-      esicLimit,
-    );
-    return {
-      values: { ...current, ...derived },
-      anchor: editedAnchor,
-    };
-  }
+  const numValue = Math.max(0, Number(rawValue) || 0);
 
   if (editedAnchor === anchor) {
     const derived = deriveSalaryFromAnchor(
@@ -172,7 +209,7 @@ export function applySalaryFieldChange(
     );
     return {
       values: { ...current, ...derived, esic: current.esic },
-      anchor,
+      wageMode,
     };
   }
 
@@ -185,5 +222,5 @@ export function applySalaryFieldChange(
     updated.basicSalary = numValue;
   }
 
-  return { values: updated, anchor };
+  return { values: updated, wageMode };
 }

@@ -4,6 +4,7 @@ import { Employee } from "../types";
 import EmployeePhoto from "./EmployeePhoto";
 import {
   MONTH_NAME_LIST,
+  FISCAL_MONTH_NAME_LIST,
   getOrdinalDay,
   parseDateOfBirth,
   formatEmployeeBirthDate,
@@ -326,7 +327,7 @@ export default function BirthdaysTab({
           <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Select month</span>
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-          {MONTH_NAME_LIST.map((m) => {
+          {FISCAL_MONTH_NAME_LIST.map((m) => {
             const active = m === birthdaySearchMonth;
             const count =
               m === birthdaySearchMonth

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.5
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, Check, Calculator, UserCheck, CreditCard, Users, Link, MapPin, Plus, Camera, Trash2, Edit3, UserPlus, FolderOpen } from "lucide-react";
 import { Employee } from "../types";
@@ -21,9 +21,10 @@ import {
 } from "../utils";
 import {
   applySalaryFieldChange,
-  inferSalaryAnchor,
+  applyWageModeSwitch,
+  inferSalaryWageMode,
   toSalaryFieldValues,
-  type SalaryAnchor,
+  type SalaryWageMode,
 } from "../lib/salary-calc";
 import { CARD_PHOTO, prepareCardPhoto } from "./id-card";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
@@ -154,6 +155,7 @@ export default function EmployeeFormModal({
     familyMember3Dob: "",
     familyMember3Relation: "",
     workingDaysType: "26 Days (Sun Off)",
+    salaryWageMode: "monthly",
     skillCategory: "Skilled",
     role: "",
     dailyWage: 0,
@@ -165,7 +167,6 @@ export default function EmployeeFormModal({
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const salaryAnchorRef = useRef<SalaryAnchor | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoRemoved, setPhotoRemoved] = useState(false);
@@ -278,13 +279,12 @@ export default function EmployeeFormModal({
         ...employee,
         skillCategory: normalizeSkillCategory(employee.skillCategory) || "Skilled",
         pfCalculationMode: employee.pfCalculationMode || "ceiling_15000",
+        salaryWageMode: inferSalaryWageMode(employee),
       });
-      salaryAnchorRef.current = inferSalaryAnchor(toSalaryFieldValues(employee));
       setPhotoPreview(null);
       setPhotoRemoved(false);
       setPhotoRemoveConfirm(false);
     } else {
-      salaryAnchorRef.current = null;
       setPhotoPreview(null);
       setPhotoRemoved(false);
       setPhotoRemoveConfirm(false);
@@ -362,15 +362,15 @@ export default function EmployeeFormModal({
   ) => {
     setFormData((prev) => {
       const currentSalary = toSalaryFieldValues(prev);
-      const { values, anchor } = applySalaryFieldChange(
+      const wageMode = inferSalaryWageMode(prev);
+      const { values, wageMode: nextMode } = applySalaryFieldChange(
         currentSalary,
-        salaryAnchorRef.current,
+        wageMode,
         field,
         value,
         basicSalaryPercent,
         esicEligibilityLimit,
       );
-      salaryAnchorRef.current = anchor;
 
       return {
         ...prev,
@@ -379,6 +379,7 @@ export default function EmployeeFormModal({
         basicSalary: values.basicSalary,
         workingDaysType: values.workingDaysType,
         esic: values.esic,
+        salaryWageMode: nextMode,
       };
     });
 
@@ -407,6 +408,30 @@ export default function EmployeeFormModal({
   const handleWorkingDaysChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     applySalaryUpdate("workingDaysType", e.target.value);
   };
+
+  const handleWageModeChange = (mode: SalaryWageMode) => {
+    setFormData((prev) => {
+      if (inferSalaryWageMode(prev) === mode) return prev;
+      const currentSalary = toSalaryFieldValues(prev);
+      const values = applyWageModeSwitch(
+        currentSalary,
+        mode,
+        basicSalaryPercent,
+        esicEligibilityLimit,
+      );
+      return {
+        ...prev,
+        grossSalary: values.grossSalary,
+        dailyWage: values.dailyWage,
+        basicSalary: values.basicSalary,
+        workingDaysType: values.workingDaysType,
+        salaryWageMode: mode,
+      };
+    });
+  };
+
+  const salaryWageMode = inferSalaryWageMode(formData);
+  const isMonthlyWage = salaryWageMode === "monthly";
 
   // Toggle present/permanent address copy
   const handleCopyAddress = (e: React.MouseEvent) => {
@@ -988,6 +1013,40 @@ export default function EmployeeFormModal({
                 <span className="text-[11px] font-black text-slate-800 tracking-wider uppercase mb-3 block flex items-center gap-1.5">
                   Financial & Insurance Structure
                 </span>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-slate-600">Salary Basis:</span>
+                  <div className="inline-flex rounded-lg border border-slate-250 overflow-hidden bg-white">
+                    <button
+                      type="button"
+                      onClick={() => handleWageModeChange("monthly")}
+                      className={`px-3 py-1.5 text-xs font-bold transition ${
+                        isMonthlyWage
+                          ? "bg-blue-600 text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      id="btn-wage-mode-monthly"
+                    >
+                      Monthly Wage
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleWageModeChange("daily")}
+                      className={`px-3 py-1.5 text-xs font-bold transition border-l border-slate-250 ${
+                        !isMonthlyWage
+                          ? "bg-blue-600 text-white"
+                          : "bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      id="btn-wage-mode-daily"
+                    >
+                      Daily Wage
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium">
+                    {isMonthlyWage
+                      ? "Enter monthly gross; daily wage is auto-calculated from working-days cycle."
+                      : "Enter daily wage; monthly gross is auto-calculated from working-days cycle."}
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                   <div>
                     <label className="text-xs font-bold text-slate-600 flex items-end h-10 mb-1">
@@ -997,11 +1056,16 @@ export default function EmployeeFormModal({
                       <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-bold">Rs.</span>
                       <input
                         type="number"
+                        min={0}
+                        step="any"
                         name="grossSalary"
                         value={formData.grossSalary || ""}
                         onChange={handleSalaryChange}
+                        readOnly={!isMonthlyWage}
                         placeholder="e.g. 25000"
-                        className="w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition"
+                        className={`w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition ${
+                          !isMonthlyWage ? "bg-slate-100 cursor-default" : ""
+                        }`}
                         id="field-gross-salary"
                       />
                     </div>
@@ -1018,11 +1082,16 @@ export default function EmployeeFormModal({
                       <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-bold">Rs.</span>
                       <input
                         type="number"
+                        min={0}
+                        step="any"
                         name="dailyWage"
                         value={formData.dailyWage || ""}
                         onChange={handleDailyWageChange}
-                        placeholder="Auto-calculated"
-                        className="w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition font-mono font-medium"
+                        readOnly={isMonthlyWage}
+                        placeholder={isMonthlyWage ? "Auto-calculated" : "e.g. 500"}
+                        className={`w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition font-mono font-medium ${
+                          isMonthlyWage ? "bg-slate-100 cursor-default" : ""
+                        }`}
                         id="field-daily-wage"
                       />
                     </div>
@@ -1036,6 +1105,8 @@ export default function EmployeeFormModal({
                       <span className="absolute left-2.5 top-1.5 text-xs text-slate-400 font-bold">Rs.</span>
                       <input
                         type="number"
+                        min={0}
+                        step="any"
                         name="basicSalary"
                         value={formData.basicSalary || ""}
                         onChange={handleBasicSalaryChange}

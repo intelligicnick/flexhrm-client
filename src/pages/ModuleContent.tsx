@@ -77,7 +77,8 @@ import {
   getEmployeeHeaderValue,
   normalizeSkillCategory,
   employeeMatchesSkillFilters,
-  prorateSalaryByAttendance,
+  computeProratedGrossAndBasic,
+  resolveFullMonthSalary,
   isEmployeeEsicCovered,
   calculatePfAmounts,
   calculateProfessionalTax,
@@ -103,12 +104,12 @@ import SchoolExpensesPanel from "../components/SchoolExpensesPanel";
 import FieldTeamPanel from "../components/FieldTeamPanel";
 import TendersPanel from "../components/TendersPanel";
 import ContractsPanel from "../components/ContractsPanel";
-import BgDdPanel from "../components/BgDdPanel";
 import RenewalsPanel from "../components/RenewalsPanel";
+import BgDdPanel from "../components/BgDdPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
-import { isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
+import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
 import { RENEWAL_TAB_TO_CATEGORY } from "../lib/renewals";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -120,7 +121,6 @@ import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedF
 import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
 import {
   countMonthAttendance,
-  getSalaryProrationDays,
   isWeeklyOffDay,
   getEffectiveAttendanceStatus,
   getBulkAttendanceDisabledDays,
@@ -207,8 +207,6 @@ export default function ModuleContent() {
     isFormOpen,
     currentEmployee,
     isLoading,
-    errorMessage,
-    successMessage,
     esicEligibilityLimit,
     basicSalaryPercentage,
     companyBranch,
@@ -494,17 +492,17 @@ export default function ModuleContent() {
     handleUpdateContract,
     handleDeleteContract,
     handleImportContracts,
-    rawBankInstruments,
-    fetchBankInstruments,
-    handleCreateBankInstrument,
-    handleUpdateBankInstrument,
-    handleDeleteBankInstrument,
     rawRenewals,
     fetchRenewals,
     handleCreateRenewal,
     handleUpdateRenewal,
     handleDeleteRenewal,
     handleImportRenewals,
+    rawBgDdRecords,
+    fetchBgDdRecords,
+    handleCreateBgDdRecord,
+    handleUpdateBgDdRecord,
+    handleDeleteBgDdRecord,
     pendingSupervisorRequestCount,
     fieldTeamView,
     setFieldTeamView,
@@ -792,26 +790,6 @@ export default function ModuleContent() {
 
   return (
                     <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin" id="viewport-scroll-shell">
-                      {errorMessage && (
-                        <div className="p-4 bg-rose-50 border-l-4 border-rose-500 rounded-r-lg text-rose-900 text-xs flex items-start gap-2.5 shadow-xs animate-fade-in" id="error-toast-banner">
-                          <div className="p-1 bg-rose-100 text-rose-800 rounded-full shrink-0">!</div>
-                          <div>
-                            <p className="font-bold text-rose-950">System Alert</p>
-                            <p className="mt-0.5">{errorMessage}</p>
-                          </div>
-                        </div>
-                      )}
-    
-                      {successMessage && (
-                        <div className="p-4 bg-emerald-50 border-l-4 border-emerald-500 rounded-r-lg text-emerald-900 text-xs flex items-start gap-2.5 shadow-xs animate-fade-in" id="success-toast-banner">
-                          <div className="p-1 bg-emerald-100 text-emerald-800 rounded-full shrink-0">✓</div>
-                          <div>
-                            <p className="font-bold text-emerald-950">Success Overview</p>
-                            <p className="mt-0.5">{successMessage}</p>
-                          </div>
-                        </div>
-                      )}
-    
                       <>
                         {/* VIEW: ACTIVE SIDEBAR MODULES MAPPING */}
                         {isModuleAccessDenied ? (
@@ -2033,6 +2011,7 @@ export default function ModuleContent() {
                                     <div className="grid grid-cols-2 gap-1 items-center">
                                       <input id="salary-min-salary-filter" name="salaryMinSalaryFilter"
                                         type="number"
+                                        min={0}
                                         placeholder="Min"
                                         value={salaryMinSalaryFilter}
                                         onChange={(e) => setSalaryMinSalaryFilter(e.target.value)}
@@ -2040,6 +2019,7 @@ export default function ModuleContent() {
                                       />
                                       <input id="salary-max-salary-filter" name="salaryMaxSalaryFilter"
                                         type="number"
+                                        min={0}
                                         placeholder="Max"
                                         value={salaryMaxSalaryFilter}
                                         onChange={(e) => setSalaryMaxSalaryFilter(e.target.value)}
@@ -2054,6 +2034,7 @@ export default function ModuleContent() {
                                     <div className="grid grid-cols-2 gap-1 items-center">
                                       <input id="salary-min-daily-wage-filter" name="salaryMinDailyWageFilter"
                                         type="number"
+                                        min={0}
                                         placeholder="Min"
                                         value={salaryMinDailyWageFilter}
                                         onChange={(e) => setSalaryMinDailyWageFilter(e.target.value)}
@@ -2061,6 +2042,7 @@ export default function ModuleContent() {
                                       />
                                       <input id="salary-max-daily-wage-filter" name="salaryMaxDailyWageFilter"
                                         type="number"
+                                        min={0}
                                         placeholder="Max"
                                         value={salaryMaxDailyWageFilter}
                                         onChange={(e) => setSalaryMaxDailyWageFilter(e.target.value)}
@@ -2405,12 +2387,14 @@ export default function ModuleContent() {
                                             (day) => isEmployeeExitedOnDayStatic(e, selectedMonth, day),
                                             { workingDaysType: e.workingDaysType, monthStr: selectedMonth },
                                           ).presents;
-                                          const workingDaysInCycle = getSalaryProrationDays(e.workingDaysType);
 
-                                          const rawGross = safeNumber(e.grossSalary);
-                                          const rawBasic = safeNumber(e.basicSalary);
-                                          const gross = prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empData);
-                                          const basic = prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empData);
+                                          const fullMonthSalary = resolveFullMonthSalary(e, selectedMonth);
+                                          const { gross, basic } = computeProratedGrossAndBasic(
+                                            e,
+                                            presents,
+                                            empData,
+                                            selectedMonth,
+                                          );
           
                                           const isCompliant = isPfEsicCompliant(e, locationCompliance);
                                           const isPtEnabled = isProfessionalTaxApplicable(e, locationPtEnabled);
@@ -2443,7 +2427,7 @@ export default function ModuleContent() {
                                           return [
                                             e.employeeCode,
                                             e.nameAsPerAadharColumn || e.nameAsPerAadhar,
-                                            rawGross,
+                                            fullMonthSalary,
                                             gross,
                                             isCompliant ? Math.round(erPf) : "",
                                             isCompliant ? Math.round(erEsic) : "",
@@ -3015,13 +2999,15 @@ export default function ModuleContent() {
                                             (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
                                             { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
                                           ).presents;
-                                          const workingDaysInCycle = getSalaryProrationDays(emp.workingDaysType);
 
-                                           const rawGross = safeNumber(emp.grossSalary);
-                                           const rawBasic = safeNumber(emp.basicSalary);
+                                           const fullMonthSalary = resolveFullMonthSalary(emp, selectedMonth);
 
-                                           const gross = prorateSalaryByAttendance(rawGross, workingDaysInCycle, presents, empData);
-                                           const basic = prorateSalaryByAttendance(rawBasic, workingDaysInCycle, presents, empData);
+                                           const { gross, basic } = computeProratedGrossAndBasic(
+                                             emp,
+                                             presents,
+                                             empData,
+                                             selectedMonth,
+                                           );
           
                                            const isCompliant = isPfEsicCompliant(emp, locationCompliance);
                                            const isPtEnabled = isProfessionalTaxApplicable(emp, locationPtEnabled);
@@ -3110,7 +3096,7 @@ export default function ModuleContent() {
                                               )}
                                           
                                               {selectedSalaryColumns.includes("Total Salary") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{rawGross.toLocaleString("en-IN")}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{fullMonthSalary.toLocaleString("en-IN")}</td>
                                               )}
                                               {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium">₹{gross.toLocaleString("en-IN")}</td>
@@ -3169,6 +3155,7 @@ export default function ModuleContent() {
                                                   <input id={`salary-food-${emp.id}`} name={`salaryFood_${emp.id}`}
                                                     key={`food-${emp.id}-${selectedMonth}-${food}`}
                                                     type="number"
+                                                    min={0}
                                                     defaultValue={food || ""}
                                                     onBlur={(e) => handleUpdatePerkValue(emp.id, "foodPerk", e.target.value)}
                                                     disabled={!userPermissions.salary?.edit}
@@ -3187,6 +3174,7 @@ export default function ModuleContent() {
                                                   <input id={`salary-accom-${emp.id}`} name={`salaryAccom_${emp.id}`}
                                                     key={`accom-${emp.id}-${selectedMonth}-${acc}`}
                                                     type="number"
+                                                    min={0}
                                                     defaultValue={acc || ""}
                                                     onBlur={(e) => handleUpdatePerkValue(emp.id, "accommodationPerk", e.target.value)}
                                                     disabled={!userPermissions.salary?.edit}
@@ -3205,6 +3193,7 @@ export default function ModuleContent() {
                                                   <input id={`salary-conv-${emp.id}`} name={`salaryConv_${emp.id}`}
                                                     key={`conv-${emp.id}-${selectedMonth}-${conv}`}
                                                     type="number"
+                                                    min={0}
                                                     defaultValue={conv || ""}
                                                     onBlur={(e) => handleUpdatePerkValue(emp.id, "conveyancePerk", e.target.value)}
                                                     disabled={!userPermissions.salary?.edit}
@@ -3854,6 +3843,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">💰 Advance</label>
                                                   <input id={`ledger-advance-${empId}`} name={`ledgerAdvance_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.advance}
                                                     onChange={(e) => updateField("advance", e.target.value)}
                                                     placeholder="0"
@@ -3864,6 +3854,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">👕 Uniform</label>
                                                   <input id={`ledger-uniform-${empId}`} name={`ledgerUniform_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.uniform}
                                                     onChange={(e) => updateField("uniform", e.target.value)}
                                                     placeholder="0"
@@ -3874,6 +3865,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">⚠️ Penalty</label>
                                                   <input id={`ledger-penalty-${empId}`} name={`ledgerPenalty_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.penalty}
                                                     onChange={(e) => updateField("penalty", e.target.value)}
                                                     placeholder="0"
@@ -3884,6 +3876,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🍔 Food</label>
                                                   <input id={`ledger-food-${empId}`} name={`ledgerFood_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.foodPerk}
                                                     onChange={(e) => updateField("foodPerk", e.target.value)}
                                                     placeholder="0"
@@ -3894,6 +3887,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🏠 Accom.</label>
                                                   <input id={`ledger-accom-${empId}`} name={`ledgerAccom_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.accommodationPerk}
                                                     onChange={(e) => updateField("accommodationPerk", e.target.value)}
                                                     placeholder="0"
@@ -3904,6 +3898,7 @@ export default function ModuleContent() {
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🚗 Conv.</label>
                                                   <input id={`ledger-conv-${empId}`} name={`ledgerConv_${empId}`}
                                                     type="number"
+                                                    min={0}
                                                     value={entry.conveyancePerk}
                                                     onChange={(e) => updateField("conveyancePerk", e.target.value)}
                                                     placeholder="0"
@@ -5763,18 +5758,6 @@ export default function ModuleContent() {
                                   onImport={handleImportContracts}
                                 />
                               )}
-
-                              {activeSidebarTab === "BG & DD" && (
-                                <BgDdPanel
-                                  instruments={rawBankInstruments}
-                                  contracts={rawContracts}
-                                  readOnly={!userPermissions.bids?.edit}
-                                  onRefresh={fetchBankInstruments}
-                                  onCreate={handleCreateBankInstrument}
-                                  onUpdate={handleUpdateBankInstrument}
-                                  onDelete={handleDeleteBankInstrument}
-                                />
-                              )}
                             </>
                           ) : isRenewalsTab(activeSidebarTab) ? (
                             <>
@@ -5796,6 +5779,16 @@ export default function ModuleContent() {
                                 );
                               })()}
                             </>
+                          ) : isBgDdTab(activeSidebarTab) ? (
+                            <BgDdPanel
+                              records={rawBgDdRecords}
+                              contracts={rawContracts}
+                              readOnly={!userPermissions.bids?.edit}
+                              onRefresh={fetchBgDdRecords}
+                              onCreate={handleCreateBgDdRecord}
+                              onUpdate={handleUpdateBgDdRecord}
+                              onDelete={handleDeleteBgDdRecord}
+                            />
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
                            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">

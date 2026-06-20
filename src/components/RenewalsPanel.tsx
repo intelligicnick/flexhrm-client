@@ -38,6 +38,7 @@ import {
   renewalPeriodLabel,
 } from "../lib/renewal-helpers";
 import { formatAppDate, matchesIsoDateRange, parseFlexibleDateMs } from "../lib/date-helpers";
+import { validateOptionalAmountString } from "../lib/number-validation";
 import { DateInput } from "./ui/DateInput";
 import RenewalDocumentsPanel, {
   type RenewalDocumentsPanelHandle,
@@ -411,6 +412,12 @@ export default function RenewalsPanel({
     }
     if (form.hasExpiry && !form.expiresOn.trim()) {
       setFormError("Expires on date is required when expiry is enabled.");
+      return;
+    }
+
+    const amountError = validateOptionalAmountString(form.amount, "Amount");
+    if (amountError) {
+      setFormError(amountError);
       return;
     }
 
@@ -1184,6 +1191,9 @@ export default function RenewalsPanel({
                         <label className="block text-[11px] font-bold text-slate-500 sm:col-span-2">
                           Amount (₹)
                           <input
+                            type="number"
+                            min={0}
+                            step="any"
                             value={form.amount}
                             onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
                             className={RENEWAL_FORM_FIELD}

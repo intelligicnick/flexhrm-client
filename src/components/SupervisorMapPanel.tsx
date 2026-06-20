@@ -4,13 +4,22 @@ import { MapPin, ChevronRight, Route, User } from "lucide-react";
 import type { SchoolSupervisor, SchoolVisit } from "../types";
 import {
   buildSupervisorPaths,
+  formatDistanceKm,
   type SupervisorPath,
+  type SupervisorPathPeriod,
   type SupervisorPathPoint,
 } from "../lib/supervisor-map-helpers";
 import { formatRelativeTimeAgo } from "../lib/date-helpers";
+import { getDateRangeForPeriod } from "../lib/supervisor-dates";
 
 const INDIA_CENTER: L.LatLngExpression = [20.5937, 78.9629];
 const DEFAULT_ZOOM = 5;
+
+const PERIOD_OPTIONS: { key: SupervisorPathPeriod; label: string }[] = [
+  { key: "day", label: "Today" },
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+];
 
 type SupervisorMapPanelProps = {
   supervisors: SchoolSupervisor[];
@@ -33,6 +42,7 @@ function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): 
   const location = point.locationLabel?.trim() || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
   const lastActive = path.lastActiveAt ? formatRelativeTimeAgo(path.lastActiveAt) : "—";
   const stepLabel = point.step === path.points.length ? "Current position" : `Stop ${point.step}`;
+  const distanceLabel = path.distanceKm > 0 ? formatDistanceKm(path.distanceKm) : "—";
 
   return `
     <div style="min-width:190px;font-family:Montserrat,system-ui,sans-serif;font-size:12px;line-height:1.45">
@@ -40,6 +50,7 @@ function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): 
       <div style="margin-top:6px;color:#475569">
         <div style="font-weight:700;color:#0f172a">${escapeHtml(stepLabel)}</div>
         <div><span style="color:${statusColor};font-weight:700">${statusLabel}</span> · last active ${escapeHtml(lastActive)}</div>
+        <div style="margin-top:4px"><strong>Est. distance:</strong> ~${escapeHtml(distanceLabel)}</div>
         <div style="margin-top:4px"><strong>Date:</strong> ${escapeHtml(point.visitDate)}</div>
         <div><strong>School:</strong> ${escapeHtml(point.schoolName || "—")}</div>
         <div style="margin-top:4px"><strong>Location:</strong> ${escapeHtml(location)}</div>
@@ -128,8 +139,17 @@ export default function SupervisorMapPanel({
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
   const [mapWheelActive, setMapWheelActive] = useState(false);
+  const [period, setPeriod] = useState<SupervisorPathPeriod>("week");
 
-  const paths = useMemo(() => buildSupervisorPaths(supervisors, visits), [supervisors, visits]);
+  const periodRange = useMemo(() => getDateRangeForPeriod(period), [period]);
+  const paths = useMemo(
+    () =>
+      buildSupervisorPaths(supervisors, visits, {
+        fromDate: periodRange.fromDate,
+        toDate: periodRange.toDate,
+      }),
+    [supervisors, visits, periodRange.fromDate, periodRange.toDate],
+  );
   const visiblePaths = useMemo(
     () =>
       selectedSupervisorId === "all"
@@ -150,6 +170,27 @@ export default function SupervisorMapPanel({
     () => visiblePaths.reduce((sum, path) => sum + path.points.length, 0),
     [visiblePaths],
   );
+  const totalDistanceKm = useMemo(
+    () => visiblePaths.reduce((sum, path) => sum + path.distanceKm, 0),
+    [visiblePaths],
+  );
+  const periodLabel = useMemo(() => {
+    if (period === "day") return periodRange.fromDate;
+    if (period === "month" && periodRange.monthKey) {
+      const [year, month] = periodRange.monthKey.split("-").map(Number);
+      return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(
+        new Date(year, month - 1, 1),
+      );
+    }
+    return `${periodRange.fromDate} – ${periodRange.toDate}`;
+  }, [period, periodRange]);
+
+  useEffect(() => {
+    if (selectedSupervisorId === "all") return;
+    if (!paths.some((path) => path.supervisorId === selectedSupervisorId)) {
+      setSelectedSupervisorId("all");
+    }
+  }, [paths, selectedSupervisorId]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -226,30 +267,32 @@ export default function SupervisorMapPanel({
     const bounds = L.latLngBounds([]);
 
     visiblePaths.forEach((path) => {
-      const latLngs = path.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
+      path.segments.forEach((segment) => {
+        const latLngs = segment.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
 
-      latLngs.forEach((latLng) => bounds.extend(latLng));
+        latLngs.forEach((latLng) => bounds.extend(latLng));
 
-      if (showPaths && latLngs.length > 1) {
-        L.polyline(latLngs, {
-          color: path.color,
-          weight: 4,
-          opacity: 0.82,
-          lineCap: "round",
-          lineJoin: "round",
-        }).addTo(pathsLayer);
-
-        for (let i = 0; i < latLngs.length - 1; i += 1) {
-          const from = latLngs[i];
-          const to = latLngs[i + 1];
-          const arrowPoint = midpoint(from, to);
-          const rotation = segmentBearing(from, to);
-          L.marker(arrowPoint, {
-            icon: createArrowIcon(path.color, rotation),
-            interactive: false,
+        if (showPaths && latLngs.length > 1) {
+          L.polyline(latLngs, {
+            color: path.color,
+            weight: 4,
+            opacity: 0.82,
+            lineCap: "round",
+            lineJoin: "round",
           }).addTo(pathsLayer);
+
+          for (let i = 0; i < latLngs.length - 1; i += 1) {
+            const from = latLngs[i];
+            const to = latLngs[i + 1];
+            const arrowPoint = midpoint(from, to);
+            const rotation = segmentBearing(from, to);
+            L.marker(arrowPoint, {
+              icon: createArrowIcon(path.color, rotation),
+              interactive: false,
+            }).addTo(pathsLayer);
+          }
         }
-      }
+      });
 
       path.points.forEach((point, index) => {
         const isLatest = index === path.points.length - 1;
@@ -296,10 +339,26 @@ export default function SupervisorMapPanel({
             Supervisor Map
           </h3>
           <p className="text-[11px] text-slate-500 mt-1">
-            Traversed visit paths with person markers at each supervisor&apos;s latest position
+            Traversed visit paths for {periodLabel} with estimated travel distance
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setPeriod(option.key)}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                  period === option.key
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-600">
             <Route size={12} />
             <select
@@ -347,6 +406,10 @@ export default function SupervisorMapPanel({
         </span>
         <span>{paths.length} supervisors with GPS trails</span>
         <span>{totalStops} mapped stops</span>
+        <span className="inline-flex items-center gap-1 text-slate-600">
+          <Route size={12} className="text-[#ff791a]" />
+          ~{formatDistanceKm(totalDistanceKm)} tentative
+        </span>
       </div>
 
       {paths.length > 0 && (
@@ -371,7 +434,9 @@ export default function SupervisorMapPanel({
                 style={{ backgroundColor: path.color }}
               />
               {path.name}
-              <span className="opacity-70">({path.points.length})</span>
+              <span className="opacity-70">
+                ({path.points.length} · ~{formatDistanceKm(path.distanceKm)})
+              </span>
             </button>
           ))}
         </div>
@@ -396,11 +461,13 @@ export default function SupervisorMapPanel({
 
       {paths.length === 0 ? (
         <p className="text-xs text-slate-400 mt-3">
-          No supervisor visit GPS data yet. Paths appear after supervisors submit geo-tagged field visits.
+          No supervisor visit GPS data for {periodLabel.toLowerCase()}. Paths appear after supervisors submit
+          geo-tagged field visits in this period.
         </p>
       ) : (
         <p className="text-[10px] text-slate-400 mt-3">
-          S = journey start · numbered stops = visit checkpoints · person icon = latest position · arrows show travel direction
+          S = journey start · numbered stops = visit checkpoints · person icon = latest position in period · arrows
+          show travel direction · distance is straight-line estimate between GPS points (actual road distance may differ)
         </p>
       )}
     </div>

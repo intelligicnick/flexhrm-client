@@ -55,7 +55,6 @@ import {
   CheckSquare,
   Square,
   Archive,
-  Download,
   Eye,
   School,
 } from "lucide-react";
@@ -99,7 +98,6 @@ import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedF
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { getModuleKey, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
-import { downloadEmployeeOnboardingTemplate } from "../lib/employee-onboarding-template";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
 import DirectoryContactCard from "../components/DirectoryContactCard";
@@ -780,49 +778,6 @@ export default function EmployeesPage() {
                                             ? "Edit any ECR field in the spreadsheet, then review old vs new values side-by-side and apply directly"
                                             : "Edit, delete, or bulk-export rows into statutory Indian onboarding templates"}
                                         </p>
-                                      </div>
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        {!isBulkEditMode && !!userPermissions.employees?.edit && (
-                                          <>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                void downloadEmployeeOnboardingTemplate({
-                                                  availableLocations: registryLocations,
-                                                  availableRoles: registeredJobRoles,
-                                                  isSample: false,
-                                                })
-                                              }
-                                              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 cursor-pointer"
-                                              title="Download blank ECR onboarding Excel template with dropdown validations"
-                                              id="btn-ecr-blank-template"
-                                            >
-                                              <Download size={13} className="text-slate-600" />
-                                              Blank Excel Template
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                void downloadEmployeeOnboardingTemplate({
-                                                  availableLocations: registryLocations,
-                                                  availableRoles: registeredJobRoles,
-                                                  isSample: true,
-                                                })
-                                              }
-                                              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-blue-800 shadow-xs transition hover:bg-blue-100/70 cursor-pointer"
-                                              title="Download sample-filled ECR onboarding Excel with reference data"
-                                              id="btn-ecr-sample-template"
-                                            >
-                                              <FileSpreadsheet size={13} />
-                                              Sample Filled Excel
-                                            </button>
-                                          </>
-                                        )}
-                                        {!isBulkEditMode && (
-                                          <span className="text-xs text-slate-400 bg-slate-50 inline-block px-2.5 py-1 rounded-full border border-slate-200/50">
-                                            Checked boxes unlock bulk actions below the table grid
-                                          </span>
-                                        )}
                                       </div>
                                     </div>
 

@@ -11,7 +11,7 @@ import {
   Notebook,
 } from "lucide-react";
 import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_CATEGORIES } from "../types";
-import { defaultRatesForCategory } from "../lib/school-work-helpers";
+import { defaultRatesForCategory, validateSchoolWork } from "../lib/school-work-helpers";
 
 interface SchoolWorkFormModalProps {
   school?: SchoolWork | null;
@@ -49,6 +49,7 @@ export default function SchoolWorkFormModal({
   const isEdit = !!school;
   const [activeTab, setActiveTab] = useState<FormTab>("school");
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<SchoolWork>>({
     udise: school?.udise || "",
     schoolName: school?.schoolName || "",
@@ -120,14 +121,23 @@ export default function SchoolWorkFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     const defaults = defaultRatesForCategory(formData.schoolCategory || "");
     const payload = {
       ...formData,
       govtUnitRate: Number(formData.govtUnitRate) || defaults.govtUnitRate,
       partnerMonthlyPay: Number(formData.partnerMonthlyPay) || defaults.partnerMonthlyPay,
       rates: Number(formData.partnerMonthlyPay) || Number(formData.rates) || defaults.partnerMonthlyPay,
+      materialCost: Number(formData.materialCost) || 0,
     };
+
+    const validationErrors = validateSchoolWork(payload);
+    if (Object.keys(validationErrors).length > 0) {
+      setFormError(Object.values(validationErrors)[0]);
+      return;
+    }
+
+    setSaving(true);
+    setFormError(null);
     const ok = await onSave(payload);
     setSaving(false);
     if (ok) onClose();
@@ -147,8 +157,14 @@ export default function SchoolWorkFormModal({
       <label className={LABEL_CLASS}>{label}</label>
       <input
         type={type}
+        min={type === "number" ? 0 : undefined}
         value={formData[key] ?? (type === "number" ? 0 : "")}
-        onChange={(e) => update(key, type === "number" ? Number(e.target.value) || 0 : e.target.value)}
+        onChange={(e) =>
+          update(
+            key,
+            type === "number" ? Math.max(0, Number(e.target.value) || 0) : e.target.value,
+          )
+        }
         placeholder={placeholder}
         className={INPUT_CLASS}
       />
@@ -332,6 +348,9 @@ export default function SchoolWorkFormModal({
             </div>
 
             <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 sm:px-5">
+              {formError && (
+                <p className="text-[11px] font-semibold text-red-600">{formError}</p>
+              )}
               <p className="text-[10px] text-slate-400 font-medium hidden sm:block">
                 Tab: {FORM_TABS.find((t) => t.id === activeTab)?.label}
               </p>

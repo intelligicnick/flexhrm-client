@@ -32,6 +32,7 @@ import {
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
 import { resolveGemContractNoLabel, resolveGemContractPdfUrl } from "../lib/gem-helpers";
+import { validateOptionalAmountString } from "../lib/number-validation";
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
@@ -596,6 +597,20 @@ export default function ContractsPanel({
       setToast("Contract number is required.");
       return;
     }
+
+    const contractValueError = validateOptionalAmountString(form.contractValue, "Contract value");
+    if (contractValueError) {
+      setToast(contractValueError);
+      return;
+    }
+    if (form.bgApplicable) {
+      const bgAmountError = validateOptionalAmountString(form.bgAmount, "BG amount");
+      if (bgAmountError) {
+        setToast(bgAmountError);
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       const payload = buildPayload();
@@ -1199,6 +1214,9 @@ export default function ContractsPanel({
                 <label className="block">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Contract Value</span>
                   <input
+                    type="number"
+                    min={0}
+                    step="any"
                     value={form.contractValue}
                     onChange={(e) => setForm({ ...form, contractValue: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
@@ -1253,6 +1271,9 @@ export default function ContractsPanel({
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase text-slate-400">BG Amount</span>
                       <input
+                        type="number"
+                        min={0}
+                        step="any"
                         value={form.bgAmount}
                         onChange={(e) => setForm({ ...form, bgAmount: e.target.value })}
                         className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"

@@ -11,6 +11,7 @@ export const REPORT_COLUMN_GROUPS = [
       "Skill Category",
       "Job Role",
       "Working Days Cycle",
+      "Salary Wage Mode",
       "Daily Wage",
     ],
   },
@@ -29,7 +30,23 @@ export const REPORT_COLUMN_GROUPS = [
   {
     name: "Payroll & Statutory",
     color: "bg-emerald-50 text-emerald-800 border-emerald-100",
-    headers: ["Gross Salary***", "Basic Salary***", "ESIC", "UAN", "PF JOINING DATE"],
+    headers: [
+      "Gross Salary***",
+      "Basic Salary***",
+      "ESIC",
+      "PF/ESIC Compliance **",
+      "Professional Tax (PT) **",
+      "PF Calculation Mode",
+      "UAN",
+      "PF JOINING DATE",
+      "EXIT/LEAVING DATE",
+      "REASON FOR EXIT",
+    ],
+  },
+  {
+    name: "Perks & Deductions",
+    color: "bg-orange-50 text-orange-800 border-orange-100",
+    headers: ["Advance", "Penalty", "Uniform", "Food Perk", "Accommodation Perk", "Conveyance Perk"],
   },
   {
     name: "Identity & Tax",

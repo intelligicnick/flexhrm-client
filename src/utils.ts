@@ -5,6 +5,13 @@
 
 import * as XLSX from "xlsx";
 import { Employee, EXCEL_ROW_HEADERS } from "./types";
+import { getDaysInMonthStatic } from "./lib/date-helpers";
+import {
+  getWorkingDaysCount,
+  inferSalaryWageMode,
+  type SalaryWageMode,
+} from "./lib/salary-calc";
+import { validateNonNegativeNumberField } from "./lib/number-validation";
 
 // State-machine CSV Line Parser supporting quotes, double-quotes escaping, and customized delimiters (comma, semicolon, tab)
 export function parseCSVLine(line: string, delimiter: string = ","): string[] {
@@ -230,87 +237,11 @@ export function parseCSV(text: string): Partial<Employee>[] {
       return "";
     };
 
-    const dailyWageVal = parseFloat(getVal("Daily Wage")) || 0;
-    const workingDaysCycle = getVal("Working Days Cycle") || "26 Days (Sun Off)";
-    
-    // Auto-calculate gross if not given and daily wage is provided
-    let grossVal = parseFloat(getVal("Gross Salary***")) || 0;
-    if (grossVal === 0 && dailyWageVal > 0) {
-      const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
-      const daysCount = daysMatch ? parseInt(daysMatch[1]) : 26;
-      grossVal = Math.round(dailyWageVal * daysCount);
-    }
-    
-    // Auto-calculate daily wage if gross is given and daily wage is not provided
-    let finalDailyWage = dailyWageVal;
-    if (finalDailyWage === 0 && grossVal > 0) {
-      const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
-      const daysCount = daysMatch ? parseInt(daysMatch[1]) : 26;
-      finalDailyWage = parseFloat((grossVal / daysCount).toFixed(2));
-    }
-
-    const basicVal = parseFloat(getVal("Basic Salary***")) || 0;
-
-    const rawCode = getVal("Employees Code **").trim();
-    const generatedCode = rawCode || `EMP-${100 + i}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const emp: Partial<Employee> = {
-      srNo: parseInt(getVal("SR NO")) || i - headerRowIndex,
-      employeeCode: generatedCode,
-      location: getVal("Location"),
-      nameAsPerAadhar: getVal("EMPLOYEE NAME AS PER AADHAR ***"),
-      grossSalary: grossVal,
-      basicSalary: basicVal || Math.round(grossVal * 0.5), // Fallback to 50% of gross
-      esic: getVal("ESIC") || (grossVal <= 21000 && grossVal > 0 ? "Yes" : "No"),
-      workingDaysType: workingDaysCycle,
-      uan: getVal("UAN"),
-      aadharNo: getVal("AADHAR NO **"),
-      nameAsPerAadharColumn: getVal("NAME AS PER AADHAR **"),
-      panNo: getVal("PAN NO"),
-      nameAsPerPan: getVal("NAME AS PER PAN"),
-      bankAccountNo: getVal("BANK ACCOUNT NO **"),
-      ifscCode: getVal("IFSC CODE **"),
-      nameAsPerBank: getVal("EMPLOYEE NAME AS PER BANK **"),
-      fatherName: getVal("FATHER **"),
-      husbandName: getVal("HUSBAND NAME **"),
-      pfJoiningDate: getVal("PF JOINING DATE"),
-      dateOfBirth: getVal("DATE OF BIRTH"),
-      gender: getVal("GENDER **"),
-      maritalStatus: getVal("MARITAL STATUS **"),
-      aadharLinkMobNo: getVal("AADHAR LINK MOB.NO. **"),
-      previousUanNo: getVal("PREVIOUS UAN NO"),
-      previousEsicNo: getVal("PREVIOUS ESIC NO***"),
-      presentAddress: getVal("Present Address**"),
-      permanentAddress: getVal("Permanent Address**"),
-      nomineeName: getVal("Nominee Name (ESIC)"),
-      nomineeDob: getVal("Nominee DOB"),
-      nomineeRelation: getVal("Nominee Relation"),
-      familyMember1Name: getVal("Family Member Name (1)"),
-      familyMember1Dob: getVal("Family Member DOB (1)"),
-      familyMember1Relation: getVal("Family Member Relation (1)"),
-      familyMember2Name: getVal("Family Member Name (2)"),
-      familyMember2Dob: getVal("Family Member DOB (2)"),
-      familyMember2Relation: getVal("Family Member Relation (2)"),
-      familyMember3Name: getVal("Family Member Name (3)"),
-      familyMember3Dob: getVal("Family Member DOB (3)"),
-      familyMember3Relation: getVal("Family Member Relation (3)"),
-      skillCategory: normalizeSkillCategory(getVal("Skill Category")) || undefined,
-      role: getVal("Job Role") || undefined,
-      dailyWage: finalDailyWage || undefined,
-      employeeMobile: getVal("Employee Mobile") || undefined,
-      nomineeMobile: getVal("Nominee Mobile") || undefined,
-      familyMember1Mobile: getVal("Family Member Mobile (1)") || undefined,
-      familyMember2Mobile: getVal("Family Member Mobile (2)") || undefined,
-      familyMember3Mobile: getVal("Family Member Mobile (3)") || undefined,
-    };
-
-    parsedEmployees.push(emp);
+    parsedEmployees.push(buildImportedEmployeeFromRow(getVal, i, headerRowIndex));
   }
 
   return parsedEmployees;
 }
-
-// Convert a field to a valid CSV cell value (quotes if commas or quotes exist)
 export function quoteCSVValue(val: string | number | undefined | null): string {
   if (val === undefined || val === null) return "";
   const s = String(val);
@@ -369,17 +300,166 @@ export const EMPLOYEE_HEADER_KEY_MAP: Record<string, keyof Employee> = {
   "Family Member Mobile (1)": "familyMember1Mobile",
   "Family Member Mobile (2)": "familyMember2Mobile",
   "Family Member Mobile (3)": "familyMember3Mobile",
+  "PF/ESIC Compliance **": "complianceEnabled",
+  "Professional Tax (PT) **": "ptEnabled",
+  "PF Calculation Mode": "pfCalculationMode",
+  "Salary Wage Mode": "salaryWageMode",
+  "EXIT/LEAVING DATE": "exitDate",
+  "REASON FOR EXIT": "exitReason",
+  "Advance": "advance",
+  "Penalty": "penalty",
+  "Uniform": "uniform",
+  "Food Perk": "foodPerk",
+  "Accommodation Perk": "accommodationPerk",
+  "Conveyance Perk": "conveyancePerk",
 };
+
+function parseImportYesNo(val: string): boolean | undefined {
+  const normalized = val.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "yes" || normalized === "true" || normalized === "1") return true;
+  if (normalized === "no" || normalized === "false" || normalized === "0") return false;
+  return undefined;
+}
+
+function parseImportPfCalculationMode(val: string): Employee["pfCalculationMode"] | undefined {
+  const normalized = val.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "gross" || normalized.includes("full")) return "gross";
+  if (normalized === "ceiling_15000" || normalized.includes("15000") || normalized.includes("ceiling")) {
+    return "ceiling_15000";
+  }
+  return undefined;
+}
+
+function parseImportSalaryWageMode(val: string): Employee["salaryWageMode"] | undefined {
+  const normalized = val.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "daily" || normalized.includes("daily")) return "daily";
+  if (normalized === "monthly" || normalized.includes("monthly")) return "monthly";
+  return undefined;
+}
+
+function buildImportedEmployeeFromRow(
+  getVal: (header: string) => string,
+  rowIndex: number,
+  headerRowIndex: number,
+): Partial<Employee> {
+  const dailyWageVal = parseFloat(getVal("Daily Wage")) || 0;
+  const workingDaysCycle = getVal("Working Days Cycle") || "26 Days (Sun Off)";
+
+  let grossVal = parseFloat(getVal("Gross Salary***")) || 0;
+  if (grossVal === 0 && dailyWageVal > 0) {
+    const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
+    const daysCount = daysMatch ? parseInt(daysMatch[1], 10) : 26;
+    grossVal = Math.round(dailyWageVal * daysCount);
+  }
+
+  let finalDailyWage = dailyWageVal;
+  if (finalDailyWage === 0 && grossVal > 0) {
+    const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
+    const daysCount = daysMatch ? parseInt(daysMatch[1], 10) : 26;
+    finalDailyWage = parseFloat((grossVal / daysCount).toFixed(2));
+  }
+
+  const basicVal = parseFloat(getVal("Basic Salary***")) || 0;
+  const rawCode = getVal("Employees Code **").trim();
+  const generatedCode = rawCode || `EMP-${100 + rowIndex}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const complianceEnabled = parseImportYesNo(getVal("PF/ESIC Compliance **"));
+  const ptEnabled = parseImportYesNo(getVal("Professional Tax (PT) **"));
+  const pfCalculationMode = parseImportPfCalculationMode(getVal("PF Calculation Mode"));
+  const salaryWageMode = parseImportSalaryWageMode(getVal("Salary Wage Mode"));
+  const exitDate = getVal("EXIT/LEAVING DATE");
+  const exitReason = getVal("REASON FOR EXIT");
+  const advance = parseFloat(getVal("Advance")) || 0;
+  const penalty = parseFloat(getVal("Penalty")) || 0;
+  const uniform = parseFloat(getVal("Uniform")) || 0;
+  const foodPerk = parseFloat(getVal("Food Perk")) || 0;
+  const accommodationPerk = parseFloat(getVal("Accommodation Perk")) || 0;
+  const conveyancePerk = parseFloat(getVal("Conveyance Perk")) || 0;
+
+  return {
+    srNo: parseInt(getVal("SR NO"), 10) || rowIndex - headerRowIndex,
+    employeeCode: generatedCode,
+    location: getVal("Location"),
+    nameAsPerAadhar: getVal("EMPLOYEE NAME AS PER AADHAR ***"),
+    grossSalary: grossVal,
+    basicSalary: basicVal || Math.round(grossVal * 0.5),
+    esic: getVal("ESIC") || (grossVal <= 21000 && grossVal > 0 ? "Yes" : "No"),
+    workingDaysType: workingDaysCycle,
+    uan: getVal("UAN"),
+    aadharNo: getVal("AADHAR NO **"),
+    nameAsPerAadharColumn: getVal("NAME AS PER AADHAR **"),
+    panNo: getVal("PAN NO"),
+    nameAsPerPan: getVal("NAME AS PER PAN"),
+    bankAccountNo: getVal("BANK ACCOUNT NO **"),
+    ifscCode: getVal("IFSC CODE **"),
+    nameAsPerBank: getVal("EMPLOYEE NAME AS PER BANK **"),
+    fatherName: getVal("FATHER **"),
+    husbandName: getVal("HUSBAND NAME **"),
+    pfJoiningDate: getVal("PF JOINING DATE"),
+    dateOfBirth: getVal("DATE OF BIRTH"),
+    gender: getVal("GENDER **"),
+    maritalStatus: getVal("MARITAL STATUS **"),
+    aadharLinkMobNo: getVal("AADHAR LINK MOB.NO. **"),
+    previousUanNo: getVal("PREVIOUS UAN NO"),
+    previousEsicNo: getVal("PREVIOUS ESIC NO***"),
+    presentAddress: getVal("Present Address**"),
+    permanentAddress: getVal("Permanent Address**"),
+    nomineeName: getVal("Nominee Name (ESIC)"),
+    nomineeDob: getVal("Nominee DOB"),
+    nomineeRelation: getVal("Nominee Relation"),
+    familyMember1Name: getVal("Family Member Name (1)"),
+    familyMember1Dob: getVal("Family Member DOB (1)"),
+    familyMember1Relation: getVal("Family Member Relation (1)"),
+    familyMember2Name: getVal("Family Member Name (2)"),
+    familyMember2Dob: getVal("Family Member DOB (2)"),
+    familyMember2Relation: getVal("Family Member Relation (2)"),
+    familyMember3Name: getVal("Family Member Name (3)"),
+    familyMember3Dob: getVal("Family Member DOB (3)"),
+    familyMember3Relation: getVal("Family Member Relation (3)"),
+    skillCategory: normalizeSkillCategory(getVal("Skill Category")) || undefined,
+    role: getVal("Job Role") || undefined,
+    dailyWage: finalDailyWage || undefined,
+    employeeMobile: getVal("Employee Mobile") || undefined,
+    nomineeMobile: getVal("Nominee Mobile") || undefined,
+    familyMember1Mobile: getVal("Family Member Mobile (1)") || undefined,
+    familyMember2Mobile: getVal("Family Member Mobile (2)") || undefined,
+    familyMember3Mobile: getVal("Family Member Mobile (3)") || undefined,
+    complianceEnabled,
+    ptEnabled,
+    pfCalculationMode,
+    salaryWageMode,
+    exitDate: exitDate || undefined,
+    exitReason: exitReason || undefined,
+    advance: advance || undefined,
+    penalty: penalty || undefined,
+    uniform: uniform || undefined,
+    foodPerk: foodPerk || undefined,
+    accommodationPerk: accommodationPerk || undefined,
+    conveyancePerk: conveyancePerk || undefined,
+  };
+}
 
 export function getEmployeeHeaderValue(emp: Employee, header: string, index: number): string | number {
   if (header === "SR NO") return index + 1;
   const key = EMPLOYEE_HEADER_KEY_MAP[header];
   if (!key) return "";
+  if (key === "complianceEnabled") {
+    return emp.complianceEnabled === false ? "No" : "Yes";
+  }
+  if (key === "ptEnabled") {
+    if (emp.ptEnabled !== undefined) return emp.ptEnabled === false ? "No" : "Yes";
+    return emp.complianceEnabled === false ? "No" : "Yes";
+  }
   const val = emp[key];
   if (val === undefined || val === null || val === "") {
     if (key === "workingDaysType") return "26 Days (Sun Off)";
+    if (key === "pfCalculationMode") return "ceiling_15000";
+    if (key === "salaryWageMode") return "monthly";
     return "";
   }
+  if (typeof val === "boolean") return val ? "Yes" : "No";
   return val as string | number;
 }
 
@@ -408,6 +488,85 @@ export function prorateSalaryByAttendance(
   );
   if (!hasRecordedAttendance) return rawAmount;
   return Math.round((rawAmount / workingDaysInCycle) * presents);
+}
+
+export function resolveEmployeeDailyWage(
+  emp: Pick<Employee, "dailyWage" | "grossSalary" | "workingDaysType">,
+): number {
+  const stored = Number(emp.dailyWage);
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  const gross = Number(emp.grossSalary);
+  if (!Number.isFinite(gross) || gross <= 0) return 0;
+  const days = getWorkingDaysCount(emp.workingDaysType);
+  return days > 0 ? parseFloat((gross / days).toFixed(2)) : 0;
+}
+
+export function resolveSalaryWageMode(
+  emp: Pick<Employee, "salaryWageMode" | "grossSalary" | "dailyWage" | "basicSalary" | "workingDaysType">,
+): SalaryWageMode {
+  return inferSalaryWageMode(emp);
+}
+
+function hasRecordedAttendance(empMonthAttendance: Record<string | number, string>): boolean {
+  return Object.values(empMonthAttendance).some(
+    (v) => v !== undefined && v !== null && String(v).trim() !== "",
+  );
+}
+
+/**
+ * Prorate gross and basic by attendance using the employee's wage mode.
+ * Monthly: (monthly amount / calendar days in month) * present days.
+ * Daily: present days * daily wage (basic keeps the gross/basic ratio).
+ */
+export function computeProratedGrossAndBasic(
+  emp: Pick<Employee, "grossSalary" | "basicSalary" | "dailyWage" | "workingDaysType" | "salaryWageMode">,
+  presents: number,
+  empMonthAttendance: Record<string | number, string>,
+  month: string,
+): { gross: number; basic: number } {
+  const rawGross = Number(emp.grossSalary) || 0;
+  const rawBasic = Number(emp.basicSalary) || 0;
+
+  if (presents <= 0) {
+    return hasRecordedAttendance(empMonthAttendance) ? { gross: 0, basic: 0 } : { gross: rawGross, basic: rawBasic };
+  }
+
+  if (!hasRecordedAttendance(empMonthAttendance)) {
+    return { gross: rawGross, basic: rawBasic };
+  }
+
+  const wageMode = resolveSalaryWageMode(emp);
+
+  if (wageMode === "daily") {
+    const dailyWage = resolveEmployeeDailyWage(emp);
+    const gross = Math.round(dailyWage * presents);
+    const basic =
+      rawGross > 0 ? Math.round(gross * (rawBasic / rawGross)) : Math.round(gross * 0.5);
+    return { gross, basic };
+  }
+
+  const calendarDays = getDaysInMonthStatic(month);
+  if (calendarDays <= 0) {
+    return { gross: rawGross, basic: rawBasic };
+  }
+
+  return {
+    gross: Math.round((rawGross / calendarDays) * presents),
+    basic: Math.round((rawBasic / calendarDays) * presents),
+  };
+}
+
+/** Full-month salary before attendance proration. Daily: daily wage × calendar days; monthly: stored gross. */
+export function resolveFullMonthSalary(
+  emp: Pick<Employee, "grossSalary" | "dailyWage" | "workingDaysType" | "salaryWageMode">,
+  month: string,
+): number {
+  if (resolveSalaryWageMode(emp) === "daily") {
+    const dailyWage = resolveEmployeeDailyWage(emp);
+    const calendarDays = getDaysInMonthStatic(month);
+    return Math.round(dailyWage * calendarDays);
+  }
+  return Number(emp.grossSalary) || 0;
 }
 
 /** ESIC applies only when compliant and the employee ESIC flag is explicitly Yes. */
@@ -671,7 +830,26 @@ export function calculateSalaryDetails(
 // Modifed to make all fields completely optional to support flexible CSV importing & manual onboarding
 export function validateEmployee(emp: Partial<Employee>): Record<string, string> {
   const errors: Record<string, string> = {};
-  // Under the user's instructions, no fields are strictly validated as mandatory here.
+
+  const salaryFields = [
+    { key: "grossSalary" as const, label: "Gross salary" },
+    { key: "basicSalary" as const, label: "Basic salary" },
+    { key: "dailyWage" as const, label: "Daily wage" },
+    { key: "advance" as const, label: "Advance" },
+    { key: "penalty" as const, label: "Penalty" },
+    { key: "uniform" as const, label: "Uniform" },
+    { key: "foodPerk" as const, label: "Food perk" },
+    { key: "accommodationPerk" as const, label: "Accommodation perk" },
+    { key: "conveyancePerk" as const, label: "Conveyance perk" },
+  ];
+
+  for (const { key, label } of salaryFields) {
+    if (emp[key] !== undefined && emp[key] !== null && emp[key] !== "") {
+      const err = validateNonNegativeNumberField(emp[key], label);
+      if (err) errors[key] = err;
+    }
+  }
+
   return errors;
 }
 
@@ -698,81 +876,7 @@ export function parseSheetRows(sheetRows: any[][]): Partial<Employee>[] {
       return "";
     };
 
-    const dailyWageVal = parseFloat(getVal("Daily Wage")) || 0;
-    const workingDaysCycle = getVal("Working Days Cycle") || "26 Days (Sun Off)";
-    
-    // Auto-calculate gross if not given and daily wage is provided
-    let grossVal = parseFloat(getVal("Gross Salary***")) || 0;
-    if (grossVal === 0 && dailyWageVal > 0) {
-      const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
-      const daysCount = daysMatch ? parseInt(daysMatch[1]) : 26;
-      grossVal = Math.round(dailyWageVal * daysCount);
-    }
-    
-    // Auto-calculate daily wage if gross is given and daily wage is not provided
-    let finalDailyWage = dailyWageVal;
-    if (finalDailyWage === 0 && grossVal > 0) {
-      const daysMatch = workingDaysCycle.match(/(\d+)\s*Days?/i);
-      const daysCount = daysMatch ? parseInt(daysMatch[1]) : 26;
-      finalDailyWage = parseFloat((grossVal / daysCount).toFixed(2));
-    }
-
-    const basicVal = parseFloat(getVal("Basic Salary***")) || 0;
-
-    const rawCode = getVal("Employees Code **").trim();
-    const generatedCode = rawCode || `EMP-${100 + i}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const emp: Partial<Employee> = {
-      srNo: parseInt(getVal("SR NO")) || i - headerRowIndex,
-      employeeCode: generatedCode,
-      location: getVal("Location"),
-      nameAsPerAadhar: getVal("EMPLOYEE NAME AS PER AADHAR ***"),
-      grossSalary: grossVal,
-      basicSalary: basicVal || Math.round(grossVal * 0.5), // Fallback to 50% of gross
-      esic: getVal("ESIC") || (grossVal <= 21000 && grossVal > 0 ? "Yes" : "No"),
-      workingDaysType: workingDaysCycle,
-      uan: getVal("UAN"),
-      aadharNo: getVal("AADHAR NO **"),
-      nameAsPerAadharColumn: getVal("NAME AS PER AADHAR **"),
-      panNo: getVal("PAN NO"),
-      nameAsPerPan: getVal("NAME AS PER PAN"),
-      bankAccountNo: getVal("BANK ACCOUNT NO **"),
-      ifscCode: getVal("IFSC CODE **"),
-      nameAsPerBank: getVal("EMPLOYEE NAME AS PER BANK **"),
-      fatherName: getVal("FATHER **"),
-      husbandName: getVal("HUSBAND NAME **"),
-      pfJoiningDate: getVal("PF JOINING DATE"),
-      dateOfBirth: getVal("DATE OF BIRTH"),
-      gender: getVal("GENDER **"),
-      maritalStatus: getVal("MARITAL STATUS **"),
-      aadharLinkMobNo: getVal("AADHAR LINK MOB.NO. **"),
-      previousUanNo: getVal("PREVIOUS UAN NO"),
-      previousEsicNo: getVal("PREVIOUS ESIC NO***"),
-      presentAddress: getVal("Present Address**"),
-      permanentAddress: getVal("Permanent Address**"),
-      nomineeName: getVal("Nominee Name (ESIC)"),
-      nomineeDob: getVal("Nominee DOB"),
-      nomineeRelation: getVal("Nominee Relation"),
-      familyMember1Name: getVal("Family Member Name (1)"),
-      familyMember1Dob: getVal("Family Member DOB (1)"),
-      familyMember1Relation: getVal("Family Member Relation (1)"),
-      familyMember2Name: getVal("Family Member Name (2)"),
-      familyMember2Dob: getVal("Family Member DOB (2)"),
-      familyMember2Relation: getVal("Family Member Relation (2)"),
-      familyMember3Name: getVal("Family Member Name (3)"),
-      familyMember3Dob: getVal("Family Member DOB (3)"),
-      familyMember3Relation: getVal("Family Member Relation (3)"),
-      skillCategory: normalizeSkillCategory(getVal("Skill Category")) || undefined,
-      role: getVal("Job Role") || undefined,
-      dailyWage: finalDailyWage || undefined,
-      employeeMobile: getVal("Employee Mobile") || undefined,
-      nomineeMobile: getVal("Nominee Mobile") || undefined,
-      familyMember1Mobile: getVal("Family Member Mobile (1)") || undefined,
-      familyMember2Mobile: getVal("Family Member Mobile (2)") || undefined,
-      familyMember3Mobile: getVal("Family Member Mobile (3)") || undefined,
-    };
-
-    parsedEmployees.push(emp);
+    parsedEmployees.push(buildImportedEmployeeFromRow(getVal, i, headerRowIndex));
   }
 
   return parsedEmployees;

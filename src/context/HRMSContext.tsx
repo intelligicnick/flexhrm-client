@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from "react";
 import { useHRMSApp } from "../hooks/useHRMSApp";
+import AppToast from "../components/ui/AppToast";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 
 export type HRMSContextValue = ReturnType<typeof useHRMSApp>;
@@ -11,6 +12,12 @@ export function HRMSProvider({ children }: { children: React.ReactNode }) {
   return (
     <HRMSContext.Provider value={value}>
       {children}
+      <AppToast
+        errorMessage={value.errorMessage}
+        successMessage={value.successMessage}
+        onDismissError={() => value.setErrorMessage(null)}
+        onDismissSuccess={() => value.setSuccessMessage(null)}
+      />
       <ConfirmDialog
         open={!!value.confirmDialog}
         title={value.confirmDialog?.title ?? ""}

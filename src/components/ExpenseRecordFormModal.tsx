@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, RotateCw, X } from "lucide-react";
 import { SchoolBlock, SchoolDistrict } from "../types";
 import { splitAmountEqually } from "../lib/school-work-helpers";
+import { validateNonNegativeNumberField } from "../lib/number-validation";
 
 export type ExpenseRecordType = "material" | "trek" | "miscellaneous";
 
@@ -69,6 +70,7 @@ export default function ExpenseRecordFormModal({
     initialValues?.date || new Date().toISOString().slice(0, 10),
   );
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const selectedDistrict = useMemo(
     () => districts.find((d) => d.id === districtId) || null,
@@ -105,9 +107,15 @@ export default function ExpenseRecordFormModal({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedDistrict || !blockName || !monthKey || !date) return;
-    const parsedAmount = Number(amount);
-    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) return;
 
+    const amountError = validateNonNegativeNumberField(amount, "Amount", { required: true });
+    if (amountError) {
+      setFormError(amountError);
+      return;
+    }
+
+    const parsedAmount = Number(amount);
+    setFormError(null);
     setSaving(true);
     const ok = await onSave({
       district: selectedDistrict.name,
@@ -266,6 +274,10 @@ export default function ExpenseRecordFormModal({
             <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800 font-semibold">
               No schools are registered under block &quot;{blockName}&quot;. Add schools first or check the block name.
             </div>
+          )}
+
+          {formError && (
+            <p className="text-[11px] font-semibold text-red-600">{formError}</p>
           )}
 
           <div className="flex justify-end gap-2 pt-2">

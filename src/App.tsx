@@ -20,6 +20,7 @@ import SupervisorHistoryPage from "./pages/supervisor/SupervisorHistoryPage";
 import SupervisorProfilePage from "./pages/supervisor/SupervisorProfilePage";
 import SupervisorRequestsPage from "./pages/supervisor/SupervisorRequestsPage";
 import { DEFAULT_PATH } from "./routes";
+import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isLoggedIn } = useHRMS();
@@ -73,6 +74,7 @@ function PortalRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
+      <GlobalHorizontalScroll />
       <Routes>
         <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />

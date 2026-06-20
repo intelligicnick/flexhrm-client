@@ -61,11 +61,12 @@ import {
   Eye,
   School,
   Gavel,
+  Landmark,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, BankInstrument, CreateBankInstrumentInput, Renewal, CreateRenewalInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, Renewal, CreateRenewalInput, BgDdRecord, CreateBgDdInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   BULK_EDIT_FIELDS,
   buildCustomFieldsAfterEdit,
@@ -124,6 +125,11 @@ import {
   getCurrentMonthName, getTodayBirthdayLabel, getOrdinalDay, parseDateOfBirth,
   formatEmployeeBirthDate,
 } from "../lib/date-helpers";
+import {
+  parseNonNegativeNumber,
+  validateLedgerEntries,
+  validateNonNegativeNumberField,
+} from "../lib/number-validation";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
 import {
@@ -137,7 +143,7 @@ import {
   type ExitEligibleEmployee,
 } from "../lib/exit-eligibility-helpers";
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
-import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab } from "../routes";
+import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
@@ -455,8 +461,8 @@ export function useHRMSApp() {
   const [rawCommitmentDiary, setRawCommitmentDiary] = useState<CommitmentDiary[]>([]);
   const [rawTenders, setRawTenders] = useState<Tender[]>([]);
   const [rawContracts, setRawContracts] = useState<Contract[]>([]);
-  const [rawBankInstruments, setRawBankInstruments] = useState<BankInstrument[]>([]);
   const [rawRenewals, setRawRenewals] = useState<Renewal[]>([]);
+  const [rawBgDdRecords, setRawBgDdRecords] = useState<BgDdRecord[]>([]);
   const [pendingSupervisorRequestCount, setPendingSupervisorRequestCount] = useState(0);
   const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
   const [adminNotificationUnreadCount, setAdminNotificationUnreadCount] = useState(0);
@@ -2632,17 +2638,23 @@ export function useHRMSApp() {
           penaltyReason: ""
         };
 
+        const ledgerError = validateLedgerEntries(entries);
+        if (ledgerError) {
+          setErrorMessage(`${emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode}: ${ledgerError}`);
+          return;
+        }
+
         const updatedEmp = {
           ...emp,
           monthlyLedger: {
             ...(emp.monthlyLedger || {}),
             [selectedMonth]: {
-              advance: parseFloat(entries.advance) || 0,
-              penalty: parseFloat(entries.penalty) || 0,
-              uniform: parseFloat(entries.uniform) || 0,
-              foodPerk: parseFloat(entries.foodPerk) || 0,
-              accommodationPerk: parseFloat(entries.accommodationPerk) || 0,
-              conveyancePerk: parseFloat(entries.conveyancePerk) || 0,
+              advance: parseNonNegativeNumber(entries.advance),
+              penalty: parseNonNegativeNumber(entries.penalty),
+              uniform: parseNonNegativeNumber(entries.uniform),
+              foodPerk: parseNonNegativeNumber(entries.foodPerk),
+              accommodationPerk: parseNonNegativeNumber(entries.accommodationPerk),
+              conveyancePerk: parseNonNegativeNumber(entries.conveyancePerk),
               penaltyReason: entries.penaltyReason || ""
             }
           }
@@ -2670,14 +2682,14 @@ export function useHRMSApp() {
   const handleSaveLedgerRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmpId = ledgerEmployeeId;
-    const amountNum = parseFloat(ledgerAmount);
+    const amountNum = parseNonNegativeNumber(ledgerAmount, NaN);
     
     if (!cleanEmpId) {
       setErrorMessage("Please select an employee to record transaction.");
       return;
     }
-    if (isNaN(amountNum) || amountNum < 0) {
-      setErrorMessage("Please enter a valid, positive amount.");
+    if (!Number.isFinite(amountNum)) {
+      setErrorMessage("Please enter a valid amount.");
       return;
     }
 
@@ -2821,9 +2833,21 @@ export function useHRMSApp() {
     const emp = employees.find(e => e.id === empId);
     if (!emp) return;
 
-    const numericVal = parseFloat(valueStr) || 0;
+    const numericVal = parseNonNegativeNumber(valueStr);
     const currentVal = emp.monthlyLedger?.[selectedMonth]?.[perkName] ?? emp[perkName] ?? 0;
     if (Number(currentVal) === numericVal) return; // No change
+
+    const perkLabel =
+      perkName === "foodPerk"
+        ? "Food perk"
+        : perkName === "accommodationPerk"
+          ? "Accommodation perk"
+          : "Conveyance perk";
+    const perkError = validateNonNegativeNumberField(valueStr, perkLabel);
+    if (perkError) {
+      alert(perkError);
+      return;
+    }
 
     const updatedEmp = {
       ...emp,
@@ -3726,16 +3750,6 @@ export function useHRMSApp() {
     }
   };
 
-  const fetchBankInstruments = async () => {
-    try {
-      const res = await fetch("/api/bank-instruments");
-      if (res.ok) setRawBankInstruments(await res.json());
-      else setRawBankInstruments([]);
-    } catch {
-      setRawBankInstruments([]);
-    }
-  };
-
   const fetchRenewals = async () => {
     try {
       const res = await fetch("/api/renewals");
@@ -3743,6 +3757,16 @@ export function useHRMSApp() {
       else setRawRenewals([]);
     } catch {
       setRawRenewals([]);
+    }
+  };
+
+  const fetchBgDdRecords = async () => {
+    try {
+      const res = await fetch("/api/bg-dd");
+      if (res.ok) setRawBgDdRecords(await res.json());
+      else setRawBgDdRecords([]);
+    } catch {
+      setRawBgDdRecords([]);
     }
   };
 
@@ -4262,6 +4286,7 @@ export function useHRMSApp() {
       fetchTenders();
       fetchContracts();
       fetchRenewals();
+      fetchBgDdRecords();
       fetchSchoolWorks();
       fetchPendingSupervisorRequestCount();
       fetchSchoolVisits();
@@ -4273,15 +4298,19 @@ export function useHRMSApp() {
     if (isLoggedIn && isBidsTab(activeSidebarTab)) {
       fetchTenders();
       fetchContracts();
-      if (activeSidebarTab === "BG & DD") {
-        fetchBankInstruments();
-      }
     }
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
     if (isLoggedIn && isRenewalsTab(activeSidebarTab)) {
       fetchRenewals();
+    }
+  }, [isLoggedIn, activeSidebarTab]);
+
+  useEffect(() => {
+    if (isLoggedIn && isBgDdTab(activeSidebarTab)) {
+      fetchBgDdRecords();
+      fetchContracts();
     }
   }, [isLoggedIn, activeSidebarTab]);
 
@@ -4459,12 +4488,8 @@ export function useHRMSApp() {
     isLedgerRoleDropdownOpen,
   ]);
 
-  // Show auto-expiring success indicator
   const triggerSuccess = (msg: string) => {
     setSuccessMessage(msg);
-    setTimeout(() => {
-      setSuccessMessage(null);
-    }, 4000);
   };
 
   // Login handler
@@ -5708,6 +5733,12 @@ export function useHRMSApp() {
     remark: string;
     date: string;
   }): Promise<boolean> => {
+    const amountError = validateNonNegativeNumberField(payload.amount, "Amount", { required: true });
+    if (amountError) {
+      setErrorMessage(amountError);
+      return false;
+    }
+
     try {
       setErrorMessage(null);
       const body: Record<string, unknown> = {
@@ -6056,42 +6087,6 @@ export function useHRMSApp() {
     };
   };
 
-  const handleCreateBankInstrument = async (
-    payload: CreateBankInstrumentInput,
-  ): Promise<BankInstrument> => {
-    const res = await fetch("/api/bank-instruments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw await parseApiError(res, "Failed to create BG/DD record.");
-    const created = await res.json();
-    await fetchBankInstruments();
-    triggerSuccess("BG/DD record added.");
-    return created;
-  };
-
-  const handleUpdateBankInstrument = async (
-    id: string,
-    payload: Partial<CreateBankInstrumentInput>,
-  ): Promise<void> => {
-    const res = await fetch(`/api/bank-instruments/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw await parseApiError(res, "Failed to update BG/DD record.");
-    await fetchBankInstruments();
-    triggerSuccess("BG/DD record updated.");
-  };
-
-  const handleDeleteBankInstrument = async (id: string): Promise<void> => {
-    const res = await fetch(`/api/bank-instruments/${id}`, { method: "DELETE" });
-    if (!res.ok) throw await parseApiError(res, "Failed to delete BG/DD record.");
-    await fetchBankInstruments();
-    triggerSuccess("BG/DD record deleted.");
-  };
-
   const handleCreateRenewal = async (payload: CreateRenewalInput): Promise<Renewal> => {
     const res = await fetch("/api/renewals", {
       method: "POST",
@@ -6145,6 +6140,40 @@ export function useHRMSApp() {
       updated: data.updated || 0,
       skipped: data.skipped || 0,
     };
+  };
+
+  const handleCreateBgDdRecord = async (payload: CreateBgDdInput): Promise<BgDdRecord> => {
+    const res = await fetch("/api/bg-dd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to create BG/DD record.");
+    const created = await res.json();
+    await fetchBgDdRecords();
+    triggerSuccess("BG/DD record added.");
+    return created;
+  };
+
+  const handleUpdateBgDdRecord = async (
+    id: string,
+    payload: Partial<CreateBgDdInput>,
+  ): Promise<void> => {
+    const res = await fetch(`/api/bg-dd/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to update BG/DD record.");
+    await fetchBgDdRecords();
+    triggerSuccess("BG/DD record updated.");
+  };
+
+  const handleDeleteBgDdRecord = async (id: string): Promise<void> => {
+    const res = await fetch(`/api/bg-dd/${id}`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to delete BG/DD record.");
+    await fetchBgDdRecords();
+    triggerSuccess("BG/DD record deleted.");
   };
 
   const handleSaveSchoolSupervisor = async (
@@ -6982,7 +7011,6 @@ export function useHRMSApp() {
       children: [
         { name: "Tenders", tab: "Tenders" },
         { name: "Contracts", tab: "Contracts" },
-        { name: "BG & DD", tab: "BG & DD" },
       ],
     },
     {
@@ -6995,6 +7023,7 @@ export function useHRMSApp() {
         { name: "Licenses", tab: "Licenses" },
       ],
     },
+    { name: "BG & DD", icon: Landmark, badge: "New" },
   ];
 
   // Filtered sidebar items
@@ -7488,17 +7517,17 @@ export function useHRMSApp() {
     handleUpdateContract,
     handleDeleteContract,
     handleImportContracts,
-    rawBankInstruments,
-    fetchBankInstruments,
-    handleCreateBankInstrument,
-    handleUpdateBankInstrument,
-    handleDeleteBankInstrument,
     rawRenewals,
     fetchRenewals,
     handleCreateRenewal,
     handleUpdateRenewal,
     handleDeleteRenewal,
     handleImportRenewals,
+    rawBgDdRecords,
+    fetchBgDdRecords,
+    handleCreateBgDdRecord,
+    handleUpdateBgDdRecord,
+    handleDeleteBgDdRecord,
     pendingSupervisorRequestCount,
     adminNotifications,
     adminNotificationUnreadCount,

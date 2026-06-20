@@ -1,5 +1,48 @@
 import { Employee } from "../types";
 import { MONTH_NAME_LIST } from "./date-helpers";
+import { inferSalaryWageMode } from "./salary-calc";
+
+export type EmployeeWageModeRowVariant = "daily" | "monthly";
+
+export function resolveEmployeeWageModeRowVariant(
+  emp: Pick<Employee, "salaryWageMode" | "grossSalary" | "dailyWage" | "basicSalary" | "workingDaysType">,
+): EmployeeWageModeRowVariant {
+  return inferSalaryWageMode(emp) === "daily" ? "daily" : "monthly";
+}
+
+export function getEmployeeWageModeRowClassName(
+  variant: EmployeeWageModeRowVariant,
+  options?: { selected?: boolean; hasDraftChanges?: boolean },
+): string {
+  if (options?.hasDraftChanges) {
+    return "bg-amber-50/60 hover:bg-amber-100/70";
+  }
+  if (variant === "daily") {
+    return options?.selected
+      ? "bg-sky-100/90 hover:bg-sky-100 ring-1 ring-inset ring-sky-200"
+      : "bg-sky-50/80 hover:bg-sky-100/90";
+  }
+  return options?.selected
+    ? "bg-emerald-100/80 hover:bg-emerald-100 ring-1 ring-inset ring-emerald-200"
+    : "bg-emerald-50/60 hover:bg-emerald-100/70";
+}
+
+export function getEmployeeWageModeStickyCellClassName(
+  variant: EmployeeWageModeRowVariant,
+  options?: { selected?: boolean; hasDraftChanges?: boolean },
+): string {
+  if (options?.hasDraftChanges) {
+    return "bg-amber-50 group-hover:bg-amber-100";
+  }
+  if (variant === "daily") {
+    return options?.selected
+      ? "bg-sky-100 group-hover:bg-sky-100"
+      : "bg-sky-50 group-hover:bg-sky-100";
+  }
+  return options?.selected
+    ? "bg-emerald-100 group-hover:bg-emerald-100"
+    : "bg-emerald-50 group-hover:bg-emerald-100";
+}
 
 export const isEmployeeExitedGeneral = (emp: Employee) => {
   if (emp.exitDate && emp.exitDate.trim() !== "") return true;

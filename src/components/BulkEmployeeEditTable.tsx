@@ -23,6 +23,11 @@ import {
   BulkEditReviewEntry,
 } from "../lib/employee-bulk-edit-fields";
 import { normalizeSkillCategory } from "../utils";
+import {
+  getEmployeeWageModeRowClassName,
+  getEmployeeWageModeStickyCellClassName,
+  resolveEmployeeWageModeRowVariant,
+} from "../lib/employee-helpers";
 
 interface BulkEmployeeEditTableProps {
   employees: Employee[];
@@ -840,10 +845,22 @@ export default function BulkEmployeeEditTable({
         </div>
       )}
 
-      <div className="px-4 py-1.5 border-b border-slate-100 bg-white text-[10px] text-slate-500">
-        Select rows: click a cell · <strong>Shift+click</strong> to extend · <strong>Shift+↑/↓</strong> with
-        keyboard · column header = select all · for dropdown columns, use <strong>Fill all selected</strong> or
-        change any selected cell’s dropdown · for text/number columns, type once in <strong>Fill all selected</strong> and press Apply
+      <div className="px-4 py-1.5 border-b border-slate-100 bg-white text-[10px] text-slate-500 flex flex-wrap items-center justify-between gap-2">
+        <span>
+          Select rows: click a cell · <strong>Shift+click</strong> to extend · <strong>Shift+↑/↓</strong> with
+          keyboard · column header = select all · for dropdown columns, use <strong>Fill all selected</strong> or
+          change any selected cell’s dropdown · for text/number columns, type once in <strong>Fill all selected</strong> and press Apply
+        </span>
+        <div className="flex flex-wrap items-center gap-3 font-medium shrink-0">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-200" aria-hidden />
+            Monthly wage
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-sky-100 border border-sky-200" aria-hidden />
+            Daily wage
+          </span>
+        </div>
       </div>
 
       <div className="overflow-auto max-h-[620px]">
@@ -913,13 +930,20 @@ export default function BulkEmployeeEditTable({
                 const recordId = resolveEmployeeRecordId(emp);
                 const draft = draftChanges[recordId];
                 const rowHasChanges = !!draft && Object.keys(draft).length > 0;
+                const wageModeVariant = resolveEmployeeWageModeRowVariant(emp);
+                const rowClassName = getEmployeeWageModeRowClassName(wageModeVariant, {
+                  hasDraftChanges: rowHasChanges,
+                });
+                const stickyCellClassName = getEmployeeWageModeStickyCellClassName(wageModeVariant, {
+                  hasDraftChanges: rowHasChanges,
+                });
 
                 return (
                   <tr
                     key={recordId}
-                    className={rowHasChanges ? "bg-amber-50/30" : "hover:bg-slate-50/50"}
+                    className={rowClassName}
                   >
-                    <td className="sticky left-0 z-10 bg-inherit p-2 text-center font-bold text-slate-500 border-r border-slate-200">
+                    <td className={`sticky left-0 z-[15] ${stickyCellClassName} p-2 text-center font-bold text-slate-500 border-r border-slate-200`}>
                       {emp.srNo}
                     </td>
                     {BULK_EDIT_FIELDS.map((field) => (

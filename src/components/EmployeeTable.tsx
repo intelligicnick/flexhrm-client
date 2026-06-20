@@ -9,6 +9,11 @@ import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
 import EmployeeViewModal from "./EmployeeViewModal";
 import { formatLastPresentDate } from "../lib/exit-eligibility-helpers";
+import {
+  getEmployeeWageModeRowClassName,
+  getEmployeeWageModeStickyCellClassName,
+  resolveEmployeeWageModeRowVariant,
+} from "../lib/employee-helpers";
 
 interface EmployeeTableProps {
   employees: Employee[];
@@ -380,8 +385,20 @@ export default function EmployeeTable({
             </button>
           </div>
 
-          <div className="text-xs text-slate-400 font-medium">
-            Showing <span className="font-bold text-slate-700">{filteredEmployees.length}</span> of <span className="font-bold text-slate-750">{employees.length}</span> Employees
+          <div className="flex flex-col sm:items-end gap-1.5">
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-500 font-medium">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-200" aria-hidden />
+                Monthly wage
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-sm bg-sky-100 border border-sky-200" aria-hidden />
+                Daily wage
+              </span>
+            </div>
+            <div className="text-xs text-slate-400 font-medium">
+              Showing <span className="font-bold text-slate-700">{filteredEmployees.length}</span> of <span className="font-bold text-slate-750">{employees.length}</span> Employees
+            </div>
           </div>
         </div>
       </div>
@@ -611,15 +628,16 @@ export default function EmployeeTable({
             ) : (
               filteredEmployees.map((emp) => {
                 const isSelected = selectedIds.includes(emp.id);
+                const wageModeVariant = resolveEmployeeWageModeRowVariant(emp);
+                const rowClassName = getEmployeeWageModeRowClassName(wageModeVariant, { selected: isSelected });
+                const stickyCellClassName = getEmployeeWageModeStickyCellClassName(wageModeVariant, { selected: isSelected });
                 return (
                   <tr
                     key={emp.id}
-                    className={`hover:bg-slate-50/80 transition group ${
-                      isSelected ? "bg-slate-50" : ""
-                    }`}
+                    className={`transition group ${rowClassName}`}
                   >
                     {/* Sticky column checkboxes with pixel-locked widths */}
-                    <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.03)]">
+                    <td className={`sticky left-0 z-[15] ${stickyCellClassName} p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.03)]`}>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -629,19 +647,19 @@ export default function EmployeeTable({
                       />
                     </td>
 
-                    <td className="sticky left-[48px] z-10 bg-white group-hover:bg-slate-50 p-3 w-[60px] min-w-[60px] max-w-[60px] text-center font-bold text-slate-450 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.03)]">
+                    <td className={`sticky left-[48px] z-[15] ${stickyCellClassName} p-3 w-[60px] min-w-[60px] max-w-[60px] text-center font-bold text-slate-450 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.03)]`}>
                       {emp.srNo}
                     </td>
 
                     <td 
                       onClick={() => setViewEmployee(emp)}
-                      className="sticky left-[108px] z-10 bg-white group-hover:bg-slate-50 p-3 w-[110px] min-w-[110px] max-w-[110px] font-semibold text-blue-600 border-r border-slate-250 shadow-[2px_0_4px_rgba(0,0,0,0.03)] cursor-pointer hover:underline hover:text-blue-800"
+                      className={`sticky left-[108px] z-[15] ${stickyCellClassName} p-3 w-[110px] min-w-[110px] max-w-[110px] font-semibold text-blue-600 border-r border-slate-250 shadow-[2px_0_4px_rgba(0,0,0,0.03)] cursor-pointer hover:underline hover:text-blue-800 overflow-hidden`}
                       title="Click to view full employee dossier"
                     >
                       {emp.employeeCode}
                     </td>
 
-                    <td className="sticky left-[218px] z-10 bg-white group-hover:bg-slate-50 p-3 w-[220px] min-w-[220px] max-w-[220px] font-bold text-slate-900 truncate border-r border-slate-300 shadow-[2px_0_4px_rgba(0,0,0,0.03)]" title={emp.nameAsPerAadhar}>
+                    <td className={`sticky left-[218px] z-[15] ${stickyCellClassName} p-3 w-[220px] min-w-[220px] max-w-[220px] font-bold text-slate-900 truncate overflow-hidden border-r border-slate-300 shadow-[2px_0_4px_rgba(0,0,0,0.03)]`} title={emp.nameAsPerAadhar}>
                       {emp.nameAsPerAadhar}
                     </td>
 

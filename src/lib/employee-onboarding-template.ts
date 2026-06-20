@@ -5,12 +5,71 @@ export interface EmployeeOnboardingTemplateOptions {
   availableLocations?: string[];
   availableRoles?: string[];
   isSample?: boolean;
+  basicSalaryPercent?: number;
+}
+
+function excelColumnLetter(col: number): string {
+  let n = col;
+  let letter = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letter;
+}
+
+function workingDaysExcelExpr(cellRef: string): string {
+  return `IF(ISNUMBER(SEARCH("30",${cellRef})),30,IF(ISNUMBER(SEARCH("22",${cellRef})),22,26))`;
+}
+
+function applySalaryFormulas(
+  ws: ExcelJS.Worksheet,
+  row: number,
+  headers: readonly string[],
+  basicSalaryPercent: number,
+): void {
+  const workingDaysCol = headers.indexOf("Working Days Cycle") + 1;
+  const wageModeCol = headers.indexOf("Salary Wage Mode") + 1;
+  const dailyCol = headers.indexOf("Daily Wage") + 1;
+  const grossCol = headers.indexOf("Gross Salary***") + 1;
+  const basicCol = headers.indexOf("Basic Salary***") + 1;
+
+  if ([workingDaysCol, wageModeCol, dailyCol, grossCol, basicCol].some((col) => col <= 0)) {
+    return;
+  }
+
+  const workingDaysRef = `${excelColumnLetter(workingDaysCol)}${row}`;
+  const wageModeRef = `${excelColumnLetter(wageModeCol)}${row}`;
+  const dailyRef = `${excelColumnLetter(dailyCol)}${row}`;
+  const grossRef = `${excelColumnLetter(grossCol)}${row}`;
+  const daysExpr = workingDaysExcelExpr(workingDaysRef);
+  const basicRatio = basicSalaryPercent / 100;
+
+  ws.getCell(row, wageModeCol).value = "monthly";
+
+  ws.getCell(row, dailyCol).value = {
+    formula: `IF(OR(LOWER(${wageModeRef})="monthly",${wageModeRef}=""),IF(${grossRef}>0,ROUND(${grossRef}/(${daysExpr}),2),""),"")`,
+  };
+
+  ws.getCell(row, grossCol).value = {
+    formula: `IF(LOWER(${wageModeRef})="daily",IF(${dailyRef}>0,ROUND(${dailyRef}*(${daysExpr}),0),""),"")`,
+  };
+
+  ws.getCell(row, basicCol).value = {
+    formula: `IF(${grossRef}>0,ROUND(${grossRef}*${basicRatio},0),IF(${dailyRef}>0,ROUND(${dailyRef}*(${daysExpr})*${basicRatio},0),""))`,
+  };
 }
 
 export async function buildEmployeeOnboardingWorkbook(
   options: EmployeeOnboardingTemplateOptions = {},
 ): Promise<ExcelJS.Workbook> {
-  const { availableLocations = [], availableRoles = [], isSample = false } = options;
+  const {
+    availableLocations = [],
+    availableRoles = [],
+    isSample = false,
+    basicSalaryPercent = 50,
+  } = options;
   const headers = EXCEL_ROW_HEADERS;
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet("Onboarding Template");
@@ -39,6 +98,8 @@ export async function buildEmployeeOnboardingWorkbook(
       "Skilled",
       registryRoles[0] || "",
       "26 Days (Sun Off)",
+      "monthly",
+      1076.92,
       28000,
       14000,
       "No",
@@ -73,12 +134,22 @@ export async function buildEmployeeOnboardingWorkbook(
       "",
       "",
       "",
-      1076.92,
       "9876543211",
       "9876543212",
       "9876543213",
       "9876543214",
       "9876543215",
+      "Yes",
+      "No",
+      "ceiling_15000",
+      "",
+      "",
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
     ]);
   }
 
@@ -88,10 +159,29 @@ export async function buildEmployeeOnboardingWorkbook(
   const maritalFormula = '"Single,Married,Divorced,Widowed"';
   const esicFormula = '"Yes,No"';
   const skillFormula = '"Highly Skilled,Skilled,Semi Skilled,Unskilled"';
+  const yesNoFormula = '"Yes,No"';
+  const pfModeFormula = '"gross,ceiling_15000"';
+  const wageModeFormula = '"monthly,daily"';
+
+  const locationCol = headers.indexOf("Location") + 1;
+  const skillCol = headers.indexOf("Skill Category") + 1;
+  const roleCol = headers.indexOf("Job Role") + 1;
+  const workingDaysCol = headers.indexOf("Working Days Cycle") + 1;
+  const esicCol = headers.indexOf("ESIC") + 1;
+  const genderCol = headers.indexOf("GENDER **") + 1;
+  const maritalCol = headers.indexOf("MARITAL STATUS **") + 1;
+  const complianceCol = headers.indexOf("PF/ESIC Compliance **") + 1;
+  const ptCol = headers.indexOf("Professional Tax (PT) **") + 1;
+  const pfModeCol = headers.indexOf("PF Calculation Mode") + 1;
+  const wageModeCol = headers.indexOf("Salary Wage Mode") + 1;
 
   for (let i = 2; i <= 200; i++) {
-    if (locFormula) {
-      ws.getCell(i, 4).dataValidation = {
+    if (!isSample) {
+      applySalaryFormulas(ws, i, headers, basicSalaryPercent);
+    }
+
+    if (locFormula && locationCol > 0) {
+      ws.getCell(i, locationCol).dataValidation = {
         type: "list",
         allowBlank: true,
         formulae: [locFormula],
@@ -102,17 +192,19 @@ export async function buildEmployeeOnboardingWorkbook(
       };
     }
 
-    ws.getCell(i, 5).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [skillFormula],
-      showErrorMessage: true,
-      errorTitle: "Invalid Skill Category",
-      error: "Please select either Highly Skilled, Skilled, Semi Skilled, or Unskilled.",
-    };
+    if (skillCol > 0) {
+      ws.getCell(i, skillCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [skillFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid Skill Category",
+        error: "Please select either Highly Skilled, Skilled, Semi Skilled, or Unskilled.",
+      };
+    }
 
-    if (roleFormula) {
-      ws.getCell(i, 6).dataValidation = {
+    if (roleFormula && roleCol > 0) {
+      ws.getCell(i, roleCol).dataValidation = {
         type: "list",
         allowBlank: true,
         formulae: [roleFormula],
@@ -123,47 +215,110 @@ export async function buildEmployeeOnboardingWorkbook(
       };
     }
 
-    ws.getCell(i, 7).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: ['"22 Days (Sat/Sun Off),26 Days (Sun Off),30/31 Days (No Off)"'],
-      showErrorMessage: true,
-      errorTitle: "Invalid Working Days Cycle",
-      error: "Allowed values: 22 Days (Sat/Sun Off), 26 Days (Sun Off), or 30/31 Days (No Off).",
-    };
+    if (workingDaysCol > 0) {
+      ws.getCell(i, workingDaysCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: ['"22 Days (Sat/Sun Off),26 Days (Sun Off),30/31 Days (No Off)"'],
+        showErrorMessage: true,
+        errorTitle: "Invalid Working Days Cycle",
+        error: "Allowed values: 22 Days (Sat/Sun Off), 26 Days (Sun Off), or 30/31 Days (No Off).",
+      };
+    }
 
-    ws.getCell(i, 23).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [genderFormula],
-      showErrorMessage: true,
-      errorTitle: "Invalid Gender Input",
-      error: "Please select either Male, Female or Other as per documentation.",
-    };
+    if (genderCol > 0) {
+      ws.getCell(i, genderCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [genderFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid Gender Input",
+        error: "Please select either Male, Female or Other as per documentation.",
+      };
+    }
 
-    ws.getCell(i, 24).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [maritalFormula],
-      showErrorMessage: true,
-      errorTitle: "Invalid Marital Option",
-      error: "Allowed values: Single, Married, Divorced, or Widowed.",
-    };
+    if (maritalCol > 0) {
+      ws.getCell(i, maritalCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [maritalFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid Marital Option",
+        error: "Allowed values: Single, Married, Divorced, or Widowed.",
+      };
+    }
 
-    ws.getCell(i, 10).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [esicFormula],
-      showErrorMessage: true,
-      errorTitle: "Invalid ESIC Answer",
-      error: "Allowed answers: Yes or No.",
-    };
+    if (esicCol > 0) {
+      ws.getCell(i, esicCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [esicFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid ESIC Answer",
+        error: "Allowed answers: Yes or No.",
+      };
+    }
+
+    if (complianceCol > 0) {
+      ws.getCell(i, complianceCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [yesNoFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid PF/ESIC Compliance",
+        error: "Allowed answers: Yes or No.",
+      };
+    }
+
+    if (ptCol > 0) {
+      ws.getCell(i, ptCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [yesNoFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid Professional Tax Setting",
+        error: "Allowed answers: Yes or No.",
+      };
+    }
+
+    if (pfModeCol > 0) {
+      ws.getCell(i, pfModeCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [pfModeFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid PF Calculation Mode",
+        error: "Allowed values: gross or ceiling_15000.",
+      };
+    }
+
+    if (wageModeCol > 0) {
+      ws.getCell(i, wageModeCol).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [wageModeFormula],
+        showErrorMessage: true,
+        errorTitle: "Invalid Salary Wage Mode",
+        error: "Allowed values: monthly or daily. Monthly: enter Gross Salary. Daily: enter Daily Wage.",
+      };
+    }
   }
 
+  const wideColumnHeaders = new Set([
+    "EMPLOYEE NAME AS PER AADHAR ***",
+    "Location",
+    "Gross Salary***",
+    "UAN",
+    "NAME AS PER AADHAR **",
+    "Present Address**",
+    "Permanent Address**",
+  ]);
+
   ws.columns.forEach((col, idx) => {
-    if (idx === 2) {
+    const header = headers[idx];
+    if (header === "Employees Code **") {
       col.width = 24;
-    } else if (idx === 3 || idx === 9 || idx === 11 || idx === 14 || idx === 24 || idx === 25) {
+    } else if (header && wideColumnHeaders.has(header)) {
       col.width = 26;
     } else {
       col.width = 16;

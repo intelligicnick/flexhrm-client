@@ -4,6 +4,8 @@ import {
   deriveSalaryFromAnchor,
   getWorkingDaysCount,
   toSalaryFieldValues,
+  applyWageModeSwitch,
+  inferSalaryWageMode,
 } from "./salary-calc";
 
 const base = () =>
@@ -40,116 +42,130 @@ describe("deriveSalaryFromAnchor", () => {
   });
 });
 
+describe("inferSalaryWageMode", () => {
+  it("uses stored wage mode when present", () => {
+    expect(inferSalaryWageMode({ salaryWageMode: "daily" })).toBe("daily");
+    expect(inferSalaryWageMode({ salaryWageMode: "monthly" })).toBe("monthly");
+  });
+});
+
 describe("applySalaryFieldChange", () => {
-  it("sets gross as anchor on first gross entry and derives daily/basic", () => {
-    const { values, anchor } = applySalaryFieldChange(
+  it("derives daily and basic when monthly gross is entered", () => {
+    const { values, wageMode } = applySalaryFieldChange(
       base(),
-      null,
+      "monthly",
       "grossSalary",
       "26000",
       50,
       21000,
     );
-    expect(anchor).toBe("gross");
+    expect(wageMode).toBe("monthly");
     expect(values.grossSalary).toBe(26000);
     expect(values.dailyWage).toBe(1000);
     expect(values.basicSalary).toBe(13000);
   });
 
-  it("keeps gross anchor when working days change", () => {
-    let anchor: "gross" | "daily" | "basic" | null = null;
+  it("derives gross and basic when daily wage is entered in daily mode", () => {
+    const { values, wageMode } = applySalaryFieldChange(
+      base(),
+      "daily",
+      "dailyWage",
+      "1000",
+      50,
+      21000,
+    );
+    expect(wageMode).toBe("daily");
+    expect(values.dailyWage).toBe(1000);
+    expect(values.grossSalary).toBe(26000);
+    expect(values.basicSalary).toBe(13000);
+  });
+
+  it("keeps monthly anchor when working days change", () => {
     let values = base();
 
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "monthly",
       "grossSalary",
       "26000",
       50,
       21000,
     ));
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "monthly",
       "workingDaysType",
       "22 Days (Sat/Sun Off)",
       50,
       21000,
     ));
 
-    expect(anchor).toBe("gross");
     expect(values.grossSalary).toBe(26000);
     expect(values.dailyWage).toBeCloseTo(1181.82, 2);
     expect(values.basicSalary).toBe(13000);
   });
 
   it("keeps daily anchor when working days change", () => {
-    let anchor: "gross" | "daily" | "basic" | null = null;
     let values = base();
 
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "daily",
       "dailyWage",
       "1000",
       50,
       21000,
     ));
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "daily",
       "workingDaysType",
       "22 Days (Sat/Sun Off)",
       50,
       21000,
     ));
 
-    expect(anchor).toBe("daily");
     expect(values.dailyWage).toBe(1000);
     expect(values.grossSalary).toBe(22000);
     expect(values.basicSalary).toBe(11000);
   });
 
-  it("does not overwrite anchor when a non-anchor field is edited", () => {
-    let anchor: "gross" | "daily" | "basic" | null = null;
+  it("does not overwrite monthly gross when basic is edited", () => {
     let values = base();
 
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "monthly",
       "grossSalary",
       "26000",
       50,
       21000,
     ));
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "monthly",
       "basicSalary",
       "12000",
       50,
       21000,
     ));
 
-    expect(anchor).toBe("gross");
     expect(values.grossSalary).toBe(26000);
     expect(values.dailyWage).toBe(1000);
     expect(values.basicSalary).toBe(12000);
   });
 
   it("preserves manual ESIC selection when salary fields are recalculated", () => {
-    let anchor: "gross" | "daily" | "basic" | null = null;
     let values = toSalaryFieldValues({
       ...base(),
       grossSalary: 15000,
       basicSalary: 7500,
       esic: "No",
     });
-    anchor = "gross";
 
-    ({ values, anchor } = applySalaryFieldChange(
+    ({ values } = applySalaryFieldChange(
       values,
-      anchor,
+      "monthly",
       "workingDaysType",
       "22 Days (Sat/Sun Off)",
       50,
@@ -157,5 +173,21 @@ describe("applySalaryFieldChange", () => {
     ));
 
     expect(values.esic).toBe("No");
+  });
+});
+
+describe("applyWageModeSwitch", () => {
+  it("recalculates from daily wage when switching to daily mode", () => {
+    const current = toSalaryFieldValues({
+      grossSalary: 26000,
+      dailyWage: 1000,
+      basicSalary: 13000,
+      workingDaysType: "26 Days (Sun Off)",
+      esic: "No",
+    });
+    const values = applyWageModeSwitch(current, "daily", 50, 21000);
+    expect(values.dailyWage).toBe(1000);
+    expect(values.grossSalary).toBe(26000);
+    expect(values.basicSalary).toBe(13000);
   });
 });

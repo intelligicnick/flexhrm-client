@@ -26,6 +26,7 @@ import {
   BookOpen,
   LogOut,
   UserMinus,
+  Landmark,
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import type { FieldTeamView } from "../lib/notification-navigation";
@@ -204,6 +205,7 @@ export default function AdminDashboardPage() {
     birthdayTodayList,
     rawTenders,
     rawRenewals,
+    rawBgDdRecords,
     rawContracts,
     filteredSalaryEmployees,
     esicEligibilityLimit,
@@ -365,6 +367,21 @@ export default function AdminDashboardPage() {
     return { total: rawRenewals.length, expired, soon };
   }, [rawRenewals]);
 
+  const bgDdStats = useMemo(() => {
+    let bgCount = 0;
+    let ddCount = 0;
+    let expired = 0;
+    let soon = 0;
+    rawBgDdRecords.forEach((item) => {
+      if (item.instrumentType === "bg") bgCount += 1;
+      else ddCount += 1;
+      const band = expiryBand({ hasExpiry: true, expiresOn: item.expiryDate, expiryDate: item.expiryDate });
+      if (band === "passed") expired += 1;
+      else if (band === "soon") soon += 1;
+    });
+    return { total: rawBgDdRecords.length, bgCount, ddCount, expired, soon };
+  }, [rawBgDdRecords]);
+
   const pendingActions = useMemo(() => {
     const items: {
       label: string;
@@ -472,6 +489,7 @@ export default function AdminDashboardPage() {
       "kpi-schools": canView("Schools"),
       "kpi-active-tenders": canView("Tenders"),
       "kpi-renewals-alert": canView("Car Papers"),
+      "kpi-bg-dd": canView("BG & DD"),
       "kpi-eligible-exit": canView("Employees"),
       "kpi-exited-employees": canView("Employees"),
       charts: canView("Attendance") || canView("Employees"),
@@ -588,6 +606,20 @@ export default function AdminDashboardPage() {
             onClick={() => navigateToTab("Car Papers")}
             cta="Review renewals"
             highlight={renewalStats.expired > 0}
+          />
+        );
+
+      case "kpi-bg-dd":
+        return (
+          <KpiCard
+            label="BG & DD"
+            value={String(bgDdStats.total)}
+            sub={`${bgDdStats.bgCount} BG · ${bgDdStats.ddCount} DD · ${bgDdStats.expired} expired · ${bgDdStats.soon} due soon`}
+            icon={<Landmark size={20} className="text-orange-700" />}
+            iconBg="bg-orange-50"
+            onClick={() => navigateToTab("BG & DD")}
+            cta="Open BG & DD"
+            highlight={bgDdStats.expired > 0}
           />
         );
 
@@ -1038,6 +1070,11 @@ export default function AdminDashboardPage() {
         {canView("Car Papers") && (
           <button type="button" onClick={() => navigateToTab("Car Papers")} className="hover:text-[#ff791a] cursor-pointer font-semibold">
             {renewalStats.total} renewal records →
+          </button>
+        )}
+        {canView("BG & DD") && (
+          <button type="button" onClick={() => navigateToTab("BG & DD")} className="hover:text-[#ff791a] cursor-pointer font-semibold">
+            {bgDdStats.total} BG/DD records →
           </button>
         )}
       </div>

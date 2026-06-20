@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   prorateSalaryByAttendance,
+  computeProratedGrossAndBasic,
+  resolveFullMonthSalary,
   calculatePfAmounts,
   isEmployeeEsicCovered,
   calculateProfessionalTax,
@@ -42,6 +44,69 @@ describe("prorateSalaryByAttendance", () => {
 
   it("returns raw amount when workingDaysInCycle is zero", () => {
     expect(prorateSalaryByAttendance(15000, 0, 10, { 1: "P" })).toBe(15000);
+  });
+});
+
+describe("computeProratedGrossAndBasic", () => {
+  const attendance25: Record<number, string> = {};
+  for (let d = 1; d <= 31; d++) {
+    attendance25[d] = d <= 25 ? "P" : "A";
+  }
+
+  it("prorates monthly wage by calendar days in the month", () => {
+    const emp = {
+      grossSalary: 15000,
+      basicSalary: 7500,
+      dailyWage: 0,
+      workingDaysType: "26 Days (Sun Off)",
+      salaryWageMode: "monthly" as const,
+    };
+    expect(
+      computeProratedGrossAndBasic(emp, 25, attendance25, "January 2026").gross,
+    ).toBe(Math.round((15000 / 31) * 25));
+    expect(
+      computeProratedGrossAndBasic(emp, 25, attendance25, "April 2026").gross,
+    ).toBe(Math.round((15000 / 30) * 25));
+    expect(
+      computeProratedGrossAndBasic(emp, 25, attendance25, "February 2026").gross,
+    ).toBe(Math.round((15000 / 28) * 25));
+  });
+
+  it("computes daily wage payroll as present days times daily wage", () => {
+    const emp = {
+      grossSalary: 26000,
+      basicSalary: 13000,
+      dailyWage: 1000,
+      workingDaysType: "26 Days (Sun Off)",
+      salaryWageMode: "daily" as const,
+    };
+    const result = computeProratedGrossAndBasic(emp, 25, attendance25, "January 2026");
+    expect(result.gross).toBe(25000);
+    expect(result.basic).toBe(12500);
+  });
+});
+
+describe("resolveFullMonthSalary", () => {
+  it("uses calendar days times daily wage for daily wage employees", () => {
+    const emp = {
+      grossSalary: 15000,
+      dailyWage: 500,
+      workingDaysType: "30/31 Days (No Off)",
+      salaryWageMode: "daily" as const,
+    };
+    expect(resolveFullMonthSalary(emp, "January 2026")).toBe(15500);
+    expect(resolveFullMonthSalary(emp, "April 2026")).toBe(15000);
+    expect(resolveFullMonthSalary(emp, "February 2026")).toBe(14000);
+  });
+
+  it("uses stored gross for monthly wage employees", () => {
+    const emp = {
+      grossSalary: 15000,
+      dailyWage: 500,
+      workingDaysType: "30/31 Days (No Off)",
+      salaryWageMode: "monthly" as const,
+    };
+    expect(resolveFullMonthSalary(emp, "January 2026")).toBe(15000);
   });
 });
 

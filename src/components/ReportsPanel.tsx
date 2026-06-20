@@ -467,6 +467,7 @@ export default function ReportsPanel() {
                         id="report-min-salary-filter"
                         name="reportMinSalaryFilter"
                         type="number"
+                        min={0}
                         placeholder="Min"
                         value={reportMinSalaryFilter}
                         onChange={(e) => setReportMinSalaryFilter(e.target.value)}

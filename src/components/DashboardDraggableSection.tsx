@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { GripVertical } from "lucide-react";
 import type { DashboardWidgetId } from "../lib/dashboard-section-order";
 import {
   DASHBOARD_WIDGET_LABELS,
   FULL_WIDTH_DASHBOARD_WIDGETS,
 } from "../lib/dashboard-section-order";
+import { startDragAutoScroll, stopDragAutoScroll } from "../lib/drag-auto-scroll";
 
 type DashboardDraggableSectionProps = {
   widgetId: DashboardWidgetId;
@@ -20,6 +21,8 @@ export default function DashboardDraggableSection({
   const [dragOver, setDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fullWidth = FULL_WIDTH_DASHBOARD_WIDGETS.has(widgetId);
+
+  useEffect(() => () => stopDragAutoScroll(), []);
 
   return (
     <div
@@ -37,6 +40,7 @@ export default function DashboardDraggableSection({
       onDrop={(event) => {
         event.preventDefault();
         setDragOver(false);
+        stopDragAutoScroll();
         const draggedId = event.dataTransfer.getData("text/plain") as DashboardWidgetId;
         if (draggedId && draggedId !== widgetId) {
           onReorder(draggedId, widgetId);
@@ -49,8 +53,12 @@ export default function DashboardDraggableSection({
           event.dataTransfer.setData("text/plain", widgetId);
           event.dataTransfer.effectAllowed = "move";
           setIsDragging(true);
+          startDragAutoScroll();
         }}
-        onDragEnd={() => setIsDragging(false)}
+        onDragEnd={() => {
+          setIsDragging(false);
+          stopDragAutoScroll();
+        }}
         className="flex items-center gap-1 px-2 py-1 mb-1 rounded-lg border border-dashed border-slate-200 bg-slate-50/90 text-[9px] font-bold text-slate-500 cursor-grab active:cursor-grabbing hover:border-[#ff791a]/40 hover:text-[#ff791a] transition"
         title={`Drag ${DASHBOARD_WIDGET_LABELS[widgetId]} to reorder`}
       >

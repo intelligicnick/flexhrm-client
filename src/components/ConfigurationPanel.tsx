@@ -24,12 +24,15 @@ import {
   Users,
   X,
   Archive,
+  HardDriveDownload,
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import PercentIcon from "./ui/PercentIcon";
 import TypeToConfirmDialog from "./ui/TypeToConfirmDialog";
 import SchoolConfigurationPanel from "./SchoolConfigurationPanel";
 import DataArchivePanel from "./DataArchivePanel";
+import BackupAndRestorePanel from "./BackupAndRestorePanel";
+import DeleteAllDataPanel from "./DeleteAllDataPanel";
 import { BASIC_SALARY_OPTIONS } from "../lib/hrms-config";
 import {
   addBulkPayBankAccount,
@@ -44,7 +47,15 @@ import {
   PROFESSIONAL_TAX_SLAB_SUMMARY,
 } from "../utils";
 
-type ConfigSection = "payroll" | "bankAccounts" | "locations" | "roles" | "schoolGeography" | "dataArchive";
+type ConfigSection =
+  | "payroll"
+  | "bankAccounts"
+  | "locations"
+  | "roles"
+  | "schoolGeography"
+  | "dataArchive"
+  | "backupRestore"
+  | "deleteAllData";
 
 const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: "payroll", label: "Payroll Rules", icon: IndianRupee },
@@ -53,6 +64,8 @@ const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adm
   { id: "roles", label: "Job Roles", icon: Briefcase },
   { id: "schoolGeography", label: "District & Blocks", icon: School },
   { id: "dataArchive", label: "Data Archive", icon: Archive, adminOnly: true },
+  { id: "backupRestore", label: "Backup & Restore", icon: HardDriveDownload, adminOnly: true },
+  { id: "deleteAllData", label: "Delete All Data", icon: Trash2, adminOnly: true },
 ];
 
 function StatCard({
@@ -1188,6 +1201,20 @@ export default function ConfigurationPanel() {
           )}
           {activeSection === "dataArchive" && userPermissions.admin?.view && (
             <DataArchivePanel
+              readOnly={!userPermissions.admin?.edit}
+              onSuccess={triggerSuccess}
+              onError={setErrorMessage}
+            />
+          )}
+          {activeSection === "backupRestore" && userPermissions.admin?.view && (
+            <BackupAndRestorePanel
+              readOnly={!userPermissions.admin?.edit}
+              onSuccess={triggerSuccess}
+              onError={setErrorMessage}
+            />
+          )}
+          {activeSection === "deleteAllData" && userPermissions.admin?.view && (
+            <DeleteAllDataPanel
               readOnly={!userPermissions.admin?.edit}
               onSuccess={triggerSuccess}
               onError={setErrorMessage}

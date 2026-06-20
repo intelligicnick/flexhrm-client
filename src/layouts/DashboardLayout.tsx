@@ -92,7 +92,7 @@ import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { parseApiError } from "../api";
 import {
-  getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
+  getCurrentFY, getFinancialYears, MONTH_NAME_LIST, FISCAL_MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
   getCurrentMonthName, getTodayBirthdayLabel, getOrdinalDay, parseDateOfBirth,
   formatEmployeeBirthDate,
@@ -972,10 +972,7 @@ export default function DashboardLayout() {
                               className="min-w-0 flex-1 bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer border-0"
                               title="Select Active Month"
                             >
-                              {[
-                                "January", "February", "March", "April", "May", "June",
-                                "July", "August", "September", "October", "November", "December"
-                              ].map(m => (
+                              {FISCAL_MONTH_NAME_LIST.map(m => (
                                 <option key={m} value={m} className="text-slate-800 font-bold">{m}</option>
                               ))}
                             </select>

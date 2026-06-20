@@ -3,6 +3,12 @@ export const MONTH_NAME_LIST = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+/** Fiscal year order: April through March. */
+export const FISCAL_MONTH_NAME_LIST = [
+  ...MONTH_NAME_LIST.slice(3),
+  ...MONTH_NAME_LIST.slice(0, 3),
+];
+
 export const getCurrentFY = (date: Date = new Date()) => {
   const year = date.getFullYear();
   const month = date.getMonth();

@@ -5,10 +5,11 @@
 
 import React, { useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Upload, Download, AlertTriangle, CheckCircle, FileSpreadsheet, X } from "lucide-react";
+import { Upload, Download, AlertTriangle, CheckCircle, FileSpreadsheet, X, ChevronDown, ChevronUp } from "lucide-react";
 import { parseCSV, parseSheetRows, validateEmployee, analyzeHeaders } from "../utils";
 import * as XLSX from "xlsx";
 import { downloadEmployeeOnboardingTemplate } from "../lib/employee-onboarding-template";
+import { EXCEL_ROW_HEADERS } from "../types";
 
 interface CsvImporterProps {
   onImportSuccess: (employees: any[]) => void;
@@ -19,6 +20,7 @@ interface CsvImporterProps {
 
 export default function CsvImporter({ onImportSuccess, existingCodes, availableLocations = [], availableRoles = [] }: CsvImporterProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [uploadExpanded, setUploadExpanded] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [parsedRows, setParsedRows] = useState<any[]>([]);
   const [headerAnalysis, setHeaderAnalysis] = useState<{
@@ -115,6 +117,7 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
 
       setParsedRows(rows);
       setValidationResults({ valid, invalid });
+      setUploadExpanded(true);
     };
 
     if (isExcel) {
@@ -207,11 +210,28 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden" id="csv-importer-container">
       <div className="p-5 border-b border-slate-100 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="font-semibold text-slate-800 text-base" id="importer-title">Bulk Employee Import</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Upload an Excel (.xlsx, .xls) or CSV file containing all onboarding details</p>
+        <div className="flex items-start gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={() => setUploadExpanded((prev) => !prev)}
+            className="mt-0.5 p-1 rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition shrink-0 cursor-pointer"
+            title={uploadExpanded ? "Hide upload area" : "Show upload area"}
+            aria-expanded={uploadExpanded}
+            id="btn-toggle-upload-area"
+          >
+            {uploadExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-slate-800 text-base" id="importer-title">Bulk Employee Import</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Upload an Excel (.xlsx, .xls) or CSV file containing all onboarding details
+              {!uploadExpanded && (
+                <span className="text-slate-400"> · {EXCEL_ROW_HEADERS.length} columns</span>
+              )}
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2 text-xs">
+        <div className="flex gap-2 text-xs shrink-0">
           <button
             onClick={() => handleDownloadTemplate(false)}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 rounded text-slate-700 font-bold transition cursor-pointer shadow-xs"
@@ -233,6 +253,7 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
         </div>
       </div>
 
+      {uploadExpanded && (
       <div className="p-6">
         {/* Upload Drop Zone */}
         <div
@@ -241,7 +262,7 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
           onDragLeave={handleDrag}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl py-8 px-4 flex flex-col items-center justify-center cursor-pointer transition ${
+          className={`border-2 border-dashed rounded-xl py-6 px-4 flex flex-col items-center justify-center cursor-pointer transition ${
             dragActive
               ? "border-blue-500 bg-blue-50/50"
               : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/30"
@@ -256,14 +277,14 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
             className="hidden"
             id="csv-file-input"
           />
-          <div className="bg-blue-50 p-3 rounded-full text-blue-600 mb-3" id="icon-upload-badge">
-            <Upload size={24} />
+          <div className="bg-blue-50 p-2.5 rounded-full text-blue-600 mb-2.5" id="icon-upload-badge">
+            <Upload size={22} />
           </div>
           <span className="font-medium text-slate-700 text-sm">
             Drag and drop your CSV or Excel file here, or <span className="text-blue-600 hover:underline">browse files</span>
           </span>
           <span className="text-xs text-slate-400 mt-1.5">
-            Strict layout (38 Columns including Address & Nominee) matches ESIC / EPF onboarding specs
+            Strict layout ({EXCEL_ROW_HEADERS.length} columns including compliance, perks, address &amp; nominee) matches ESIC / EPF onboarding specs
           </span>
         </div>
 
@@ -276,9 +297,11 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
             </div>
           </div>
         )}
+      </div>
+      )}
 
-        {/* Modal-like Dry Run Validation Preview */}
-        {validationResults && createPortal(
+      {/* Modal-like Dry Run Validation Preview */}
+      {validationResults && createPortal(
           <div 
             onClick={(e) => {
               if (e.target === e.currentTarget) {
@@ -463,7 +486,6 @@ export default function CsvImporter({ onImportSuccess, existingCodes, availableL
           </div>,
           document.body
         )}
-      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ export type DashboardWidgetId =
   | "kpi-schools"
   | "kpi-active-tenders"
   | "kpi-renewals-alert"
+  | "kpi-bg-dd"
   | "kpi-eligible-exit"
   | "kpi-exited-employees"
   | "charts"
@@ -28,6 +29,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
   "kpi-schools": "Schools",
   "kpi-active-tenders": "Active Tenders",
   "kpi-renewals-alert": "Renewals Alert",
+  "kpi-bg-dd": "BG & DD",
   "kpi-eligible-exit": "Eligible for Exit",
   "kpi-exited-employees": "Exited Employees",
   charts: "Charts",
@@ -58,6 +60,7 @@ export const DEFAULT_DASHBOARD_WIDGET_ORDER: DashboardWidgetId[] = [
   "kpi-schools",
   "kpi-active-tenders",
   "kpi-renewals-alert",
+  "kpi-bg-dd",
   "kpi-eligible-exit",
   "kpi-exited-employees",
   "charts",

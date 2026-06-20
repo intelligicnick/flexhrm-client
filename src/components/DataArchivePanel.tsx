@@ -125,15 +125,12 @@ export default function DataArchivePanel({
     return Object.values(summary.hotEligibleCounts).reduce((sum, count) => sum + count, 0);
   }, [summary]);
 
-  const noDataMessage = useMemo(() => {
-    const months = summary?.retentionMonths ?? 6;
-    return `No data to archive older than ${months} months.`;
-  }, [summary?.retentionMonths]);
+  const noDataMessage = "No data for archive run.";
 
   const handleRunArchive = async () => {
     if (readOnly) return;
     if (totalEligibleToArchive === 0) {
-      onSuccess?.(noDataMessage);
+      onError?.(noDataMessage);
       return;
     }
     setRunningArchive(true);
@@ -146,11 +143,7 @@ export default function DataArchivePanel({
       if (!res.ok) throw await parseApiError(res, "Archive job failed.");
       const run = await res.json();
       const archived = run.totalArchived ?? 0;
-      onSuccess?.(
-        archived === 0
-          ? noDataMessage
-          : `Archive completed — ${archived} record(s) moved to cold storage.`,
-      );
+      onSuccess?.(`Archive completed — ${archived} record(s) moved to cold storage.`);
       await loadSummary();
       await loadRecords();
     } catch (err) {
@@ -233,7 +226,13 @@ export default function DataArchivePanel({
           <button
             type="button"
             onClick={() => void handleRunArchive()}
-            disabled={runningArchive || summary?.archiveInProgress}
+            disabled={
+              runningArchive ||
+              summary?.archiveInProgress ||
+              loadingSummary ||
+              totalEligibleToArchive === 0
+            }
+            title={totalEligibleToArchive === 0 ? noDataMessage : undefined}
             className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-60 cursor-pointer"
           >
             {runningArchive ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
@@ -256,6 +255,10 @@ export default function DataArchivePanel({
           </button>
         )}
       </div>
+
+      {!loadingSummary && totalEligibleToArchive === 0 && (
+        <p className="text-xs font-semibold text-amber-700">{noDataMessage}</p>
+      )}
 
       {loadingSummary && !summary ? (
         <div className="flex items-center gap-2 text-xs text-slate-500 py-8 justify-center">
