@@ -261,30 +261,33 @@ export function parseFlexibleDateMs(value: string): number | null {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
 
+  // DD-MM-YYYY (GeM / tender dates) before Date.parse — JS treats 01-07-2026 as Jan 7 (MM-DD).
+  const dmyMatch = raw.match(
+    /(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]) - 1;
+    const year = Number(dmyMatch[3]);
+    const hasTime = Boolean(dmyMatch[4]);
+    const hour = dmyMatch[4] ? Number(dmyMatch[4]) : 12;
+    const minute = dmyMatch[5] ? Number(dmyMatch[5]) : 0;
+    const second = dmyMatch[6] ? Number(dmyMatch[6]) : 0;
+    const ts = new Date(
+      year,
+      month,
+      day,
+      hasTime ? hour : 0,
+      hasTime ? minute : 0,
+      hasTime ? second : 0,
+    ).getTime();
+    if (!Number.isNaN(ts)) return ts;
+  }
+
   const iso = Date.parse(raw);
   if (!Number.isNaN(iso)) return iso;
 
-  const match = raw.match(
-    /(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
-  );
-  if (!match) return null;
-
-  const day = Number(match[1]);
-  const month = Number(match[2]) - 1;
-  const year = Number(match[3]);
-  const hasTime = Boolean(match[4]);
-  const hour = match[4] ? Number(match[4]) : 12;
-  const minute = match[5] ? Number(match[5]) : 0;
-  const second = match[6] ? Number(match[6]) : 0;
-  const ts = new Date(
-    year,
-    month,
-    day,
-    hasTime ? hour : 0,
-    hasTime ? minute : 0,
-    hasTime ? second : 0,
-  ).getTime();
-  return Number.isNaN(ts) ? null : ts;
+  return null;
 }
 
 export function isoDateStartMs(isoDate: string): number {

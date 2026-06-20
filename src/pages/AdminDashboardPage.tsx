@@ -33,7 +33,7 @@ import type { FieldTeamView } from "../lib/notification-navigation";
 import { getModuleKey } from "../lib/permissions";
 import { countMonthAttendance, type AttendanceRecordFilter } from "../lib/attendance-helpers";
 import { isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
-import { getDaysInMonthStatic } from "../lib/date-helpers";
+import { getDaysInMonthStatic, parseFlexibleDateMs } from "../lib/date-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { expiryBand } from "../lib/renewal-helpers";
 import { Tender } from "../types";
@@ -350,8 +350,8 @@ export default function AdminDashboardPage() {
     const now = Date.now();
     let upcoming = 0;
     active.forEach((t) => {
-      const ts = Date.parse(t.endDate || "");
-      if (!Number.isNaN(ts) && ts >= now) upcoming += 1;
+      const ts = parseFlexibleDateMs(t.endDate || "");
+      if (ts !== null && ts >= now) upcoming += 1;
     });
     return { total: active.length, upcoming };
   }, [rawTenders]);
