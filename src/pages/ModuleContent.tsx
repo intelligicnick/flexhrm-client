@@ -5380,6 +5380,8 @@ export default function ModuleContent() {
                                           setIsSchoolImporterOpen(false);
                                         }}
                                         existingUdiseCodes={existingSchoolUdiseCodes}
+                                        districts={schoolDistricts}
+                                        blocks={schoolBlocks}
                                       />
                                     </div>
                                   )}
@@ -5699,6 +5701,7 @@ export default function ModuleContent() {
                                 <ContractsPanel
                                   contracts={rawContracts}
                                   tenders={rawTenders}
+                                  availableLocations={registryLocations}
                                   readOnly={!userPermissions.bids?.edit}
                                   onRefresh={fetchContracts}
                                   onCreate={handleCreateContract}

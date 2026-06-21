@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.5
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, Check, Calculator, UserCheck, CreditCard, Users, Link, MapPin, Plus, Camera, Trash2, Edit3, UserPlus, FolderOpen } from "lucide-react";
 import { Employee } from "../types";
+import type { Contract } from "../types";
 import {
   calculateSalaryDetails,
   validateEmployee,
@@ -29,6 +30,10 @@ import {
 import { CARD_PHOTO, prepareCardPhoto } from "./id-card";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 import EmployeeDocumentsPanel from "./EmployeeDocumentsPanel";
+import {
+  findContractsForLocation,
+  formatContractLabel,
+} from "../lib/contract-locations";
 
 interface EmployeeFormModalProps {
   employee?: Employee | null; // null if adding
@@ -36,6 +41,7 @@ interface EmployeeFormModalProps {
   onSave: (empData: Partial<Employee>) => Promise<Employee | null>;
   availableLocations?: string[];
   availableRoles?: string[];
+  contracts?: Contract[];
   basicSalaryPercent?: number;
   esicEligibilityLimit?: number;
   onLocationRegistryUpdate?: () => void;
@@ -76,6 +82,7 @@ export default function EmployeeFormModal({
   onSave,
   availableLocations,
   availableRoles,
+  contracts = [],
   basicSalaryPercent = 50,
   esicEligibilityLimit = 21000,
   onLocationRegistryUpdate,
@@ -290,6 +297,11 @@ export default function EmployeeFormModal({
       setPhotoRemoveConfirm(false);
     }
   }, [employee]);
+
+  const locationContracts = useMemo(
+    () => findContractsForLocation(formData.location || "", contracts),
+    [formData.location, contracts],
+  );
 
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
@@ -516,7 +528,8 @@ export default function EmployeeFormModal({
     }
 
     setIsSubmitting(true);
-    const saved = await onSave(formData);
+    const { contractId: _contractId, ...employeePayload } = formData;
+    const saved = await onSave(employeePayload);
     setIsSubmitting(false);
     if (!saved) return;
     if (!isEdit) {
@@ -825,6 +838,33 @@ export default function EmployeeFormModal({
                         </div>
                       </div>
                     </>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center gap-1">
+                    <Link size={12} className="text-[#ff791a]" />
+                    Assigned Contract
+                  </label>
+                  <div className="w-full px-3 py-1.5 border border-slate-200 rounded bg-slate-50 text-xs text-slate-700">
+                    {locationContracts.length === 1
+                      ? formatContractLabel(locationContracts[0])
+                      : "— Not linked to a contract —"}
+                  </div>
+                  {formData.location?.trim() && locationContracts.length === 0 && contracts.length > 0 && (
+                    <p className="text-[10px] text-amber-700 mt-1">
+                      No contract is linked to this office location yet. Link it from the Contracts page.
+                    </p>
+                  )}
+                  {locationContracts.length > 1 && (
+                    <p className="text-[10px] text-amber-700 mt-1">
+                      Multiple contracts use this location — assign the correct one on the Contracts page.
+                    </p>
+                  )}
+                  {locationContracts.length === 1 && (
+                    <p className="text-[10px] text-emerald-700 mt-1">
+                      Resolved from office location mapping.
+                    </p>
                   )}
                 </div>
 

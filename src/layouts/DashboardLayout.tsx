@@ -415,6 +415,7 @@ export default function DashboardLayout() {
     handleDownloadSchoolBulkPayArchive,
     registryLocations,
     registeredJobRoles,
+    rawContracts,
     reportLocationExportLabel,
     setNewPassword,
     openFlushAuditModal,
@@ -1166,6 +1167,7 @@ export default function DashboardLayout() {
                       employee={currentEmployee}
                       availableLocations={registryLocations}
                       availableRoles={registeredJobRoles}
+                      contracts={rawContracts}
                       basicSalaryPercent={basicSalaryPercentage}
                       esicEligibilityLimit={esicEligibilityLimit}
                       onLocationRegistryUpdate={fetchLocations}

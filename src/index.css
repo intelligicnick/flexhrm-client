@@ -23,6 +23,25 @@
   75% { transform: translateX(4px); }
 }
 
+@keyframes tourClickTap {
+  0%, 100% { transform: scale(1) translateY(0); }
+  35% { transform: scale(0.88) translateY(1px); }
+  55% { transform: scale(1.05) translateY(-1px); }
+}
+
+@keyframes tourClickRing {
+  0% { transform: scale(0.65); opacity: 0.75; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.tour-click-hotspot-tap {
+  animation: tourClickTap 1.4s ease-in-out infinite;
+}
+
+.tour-click-hotspot-ring {
+  animation: tourClickRing 1.4s ease-out infinite;
+}
+
 @utility animate-fade-in {
   animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

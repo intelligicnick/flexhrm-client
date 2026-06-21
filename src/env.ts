@@ -62,6 +62,20 @@ export function getApiBase(): string {
   return (__FLEXHRM_API_BASE__ || "").replace(/\/$/, "");
 }
 
+/** NestJS origin for the Chrome extension (direct API host, not the UI dev server). */
+export function getExtensionApiBase(): string {
+  const apiBase = getApiBase();
+  if (apiBase) return apiBase;
+
+  if (typeof window !== "undefined" && (import.meta.env.DEV || isLocalUiHost())) {
+    const { protocol, hostname } = window.location;
+    const backendPort = String(import.meta.env.VITE_BACKEND_PORT || "3001").trim();
+    return `${protocol}//${hostname}:${backendPort}`;
+  }
+
+  return (DEFAULT_PRODUCTION_API_BASE || __FLEXHRM_API_BASE__ || "").replace(/\/$/, "");
+}
+
 /** Public verification URL scanned from the ID card QR code (no trailing slash). */
 export function getIdCardVerifyBase(): string {
   if (typeof window !== "undefined" && (import.meta.env.DEV || isLocalUiHost())) {

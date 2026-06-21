@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-const TOAST_DURATION_MS = 3500;
+export const TOAST_DURATION_MS = 3500;
 
 interface AppToastProps {
   errorMessage: string | null;

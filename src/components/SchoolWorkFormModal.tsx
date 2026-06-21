@@ -6,12 +6,10 @@ import {
   School,
   MapPin,
   Users,
-  IndianRupee,
-  CreditCard,
   Notebook,
 } from "lucide-react";
 import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_CATEGORIES } from "../types";
-import { defaultRatesForCategory, validateSchoolWork } from "../lib/school-work-helpers";
+import { defaultRatesForCategory, getBlocksForDistrictName, validateSchoolWork } from "../lib/school-work-helpers";
 
 interface SchoolWorkFormModalProps {
   school?: SchoolWork | null;
@@ -21,7 +19,7 @@ interface SchoolWorkFormModalProps {
   onSave: (data: Partial<SchoolWork>) => Promise<boolean>;
 }
 
-type FormTab = "school" | "contacts" | "pay" | "banking" | "notes";
+type FormTab = "school" | "contacts" | "notes";
 
 type SchoolWorkScalarKey = {
   [K in keyof SchoolWork]: SchoolWork[K] extends string | number ? K : never;
@@ -29,9 +27,7 @@ type SchoolWorkScalarKey = {
 
 const FORM_TABS: { id: FormTab; label: string; icon: React.ReactNode }[] = [
   { id: "school", label: "School & Location", icon: <School size={14} /> },
-  { id: "contacts", label: "Contacts", icon: <Users size={14} /> },
-  { id: "pay", label: "Rates & Pay", icon: <IndianRupee size={14} /> },
-  { id: "banking", label: "Banking", icon: <CreditCard size={14} /> },
+  { id: "contacts", label: "Contacts & Banking", icon: <Users size={14} /> },
   { id: "notes", label: "Notes", icon: <Notebook size={14} /> },
 ];
 
@@ -79,14 +75,13 @@ export default function SchoolWorkFormModal({
   );
 
   const blockOptions = useMemo(() => {
-    if (selectedDistrict) {
-      return blocks
-        .filter((b) => b.districtId === selectedDistrict.id)
-        .map((b) => b.name)
-        .sort();
+    if (!selectedDistrict) return [];
+    const configured = getBlocksForDistrictName(blocks, districts, selectedDistrict.name);
+    if (formData.block && !configured.includes(formData.block)) {
+      configured.push(formData.block);
     }
-    return Array.from(new Set(blocks.map((b) => b.name))).sort();
-  }, [blocks, selectedDistrict]);
+    return configured.sort((a, b) => a.localeCompare(b));
+  }, [blocks, districts, selectedDistrict, formData.block]);
 
   const districtOptions = useMemo(() => {
     const configured = districts.map((d) => d.name);
@@ -130,7 +125,7 @@ export default function SchoolWorkFormModal({
       materialCost: Number(formData.materialCost) || 0,
     };
 
-    const validationErrors = validateSchoolWork(payload);
+    const validationErrors = validateSchoolWork(payload, { districts, blocks });
     if (Object.keys(validationErrors).length > 0) {
       setFormError(Object.values(validationErrors)[0]);
       return;
@@ -285,7 +280,9 @@ export default function SchoolWorkFormModal({
                       disabled={!formData.district}
                       className={`${INPUT_CLASS} cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
-                      <option value="">Select block</option>
+                      <option value="">
+                        {formData.district ? "Select block" : "Select district first"}
+                      </option>
                       {blockOptions.map((b) => (
                         <option key={b} value={b}>
                           {b}
@@ -293,6 +290,8 @@ export default function SchoolWorkFormModal({
                       ))}
                     </select>
                   </div>
+                  {renderTextInput("noOfToilets", "No of Toilets", "number")}
+                  {renderTextInput("govtUnitRate", "Govt Unit Rate (₹/toilet/day)", "number")}
                 </div>
               )}
 
@@ -301,32 +300,6 @@ export default function SchoolWorkFormModal({
                   {renderTextInput("headmasterName", "Headmaster Name")}
                   {renderTextInput("headmasterNumber", "Headmaster Number")}
                   {renderTextInput("sweeperName", "Cleaning Partner")}
-                </div>
-              )}
-
-              {activeTab === "pay" && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {renderTextInput("noOfToilets", "No of Toilets", "number")}
-                    {renderTextInput("paymentMethod", "Payment Method")}
-                    {renderTextInput("govtUnitRate", "Govt Unit Rate (₹/toilet/day)", "number")}
-                    {renderTextInput("partnerMonthlyPay", "Partner Monthly Pay (₹)", "number")}
-                    {renderTextInput("materialCost", "Material Cost (₹)", "number")}
-                  </div>
-                  <div>
-                    <label className={LABEL_CLASS}>Explanation for Rate</label>
-                    <textarea
-                      value={formData.rateExplanation || ""}
-                      onChange={(e) => update("rateExplanation", e.target.value)}
-                      rows={3}
-                      className={`${INPUT_CLASS} resize-none`}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {activeTab === "banking" && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {renderTextInput("accountHolderName", "Account Holder Name")}
                   {renderTextInput("accountNumber", "Account Number")}
                   {renderTextInput("ifscCode", "IFSC Code")}

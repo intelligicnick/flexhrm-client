@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Save, Search, ShieldAlert, MousePointerClick } from "lucide-react";
 import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_CATEGORIES } from "../types";
+import { getBlocksForDistrictName } from "../lib/school-work-helpers";
 
 type SchoolBulkEditFieldDef = {
   key: keyof SchoolWork;
@@ -16,8 +17,8 @@ const EDITABLE_FIELDS: SchoolBulkEditFieldDef[] = [
   { key: "headmasterName", label: "Headmaster", type: "text" },
   { key: "headmasterNumber", label: "HM Phone", type: "text" },
   { key: "sweeperName", label: "Partner", type: "text" },
-  { key: "block", label: "Block", type: "select" },
   { key: "district", label: "District", type: "select" },
+  { key: "block", label: "Block", type: "select" },
   { key: "noOfToilets", label: "Toilets", type: "number" },
   { key: "govtUnitRate", label: "Govt Rate", type: "number" },
   { key: "remarks", label: "Remarks", type: "text" },
@@ -108,13 +109,8 @@ export default function BulkSchoolEditTable({
   );
 
   const blockNames = useMemo(() => {
-    if (districtFilter) {
-      const district = districts.find((d) => d.name === districtFilter);
-      if (district) {
-        return blocks.filter((b) => b.districtId === district.id).map((b) => b.name).sort();
-      }
-    }
-    return Array.from(new Set(blocks.map((b) => b.name))).sort();
+    if (!districtFilter) return [];
+    return getBlocksForDistrictName(blocks, districts, districtFilter);
   }, [blocks, districts, districtFilter]);
 
   const filteredSchools = useMemo(() => {
@@ -158,10 +154,8 @@ export default function BulkSchoolEditTable({
       }
       if (field === "block") {
         const districtName = getDraftValue(school, "district", draftChanges) || school.district;
-        const district = districts.find((d) => d.name === districtName);
-        const configured = district
-          ? blocks.filter((b) => b.districtId === district.id).map((b) => b.name)
-          : blocks.map((b) => b.name);
+        if (!districtName) return school.block ? [school.block] : [];
+        const configured = getBlocksForDistrictName(blocks, districts, districtName);
         const set = new Set([...configured, school.block].filter(Boolean));
         return Array.from(set).sort();
       }
@@ -359,6 +353,22 @@ export default function BulkSchoolEditTable({
     (schoolIds: string[], columnId: ColumnId, value: string) => {
       if (schoolIds.length === 0) return;
 
+      if (columnId === "district") {
+        const updates: Array<{ schoolId: string; field: keyof SchoolWork; value: string }> = [];
+        for (const schoolId of schoolIds) {
+          updates.push({ schoolId, field: "district", value });
+          updates.push({ schoolId, field: "block", value: "" });
+        }
+        if (onDraftChangeMany) {
+          onDraftChangeMany(updates);
+          return;
+        }
+        for (const update of updates) {
+          onDraftChange(update.schoolId, update.field, update.value);
+        }
+        return;
+      }
+
       if (onDraftChangeMany && schoolIds.length > 1) {
         onDraftChangeMany(
           schoolIds.map((schoolId) => ({ schoolId, field: columnId, value })),
@@ -416,15 +426,20 @@ export default function BulkSchoolEditTable({
 
     if (field.type === "select") {
       const options = resolveSelectOptions(field.key, school);
+      const districtName = getDraftValue(school, "district", draftChanges) || school.district;
+      const blockDisabled = field.key === "block" && !districtName;
       return (
         <select
           value={value}
           {...cellDataAttrs}
+          disabled={blockDisabled}
           onKeyDown={(e) => handleCellKeyDown(e, school.id, field.key)}
           onChange={(e) => handleFieldChange(school.id, field.key, e.target.value)}
-          className={`w-full px-2 py-1.5 border rounded text-xs cursor-pointer bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${dirtyClass} ${selectedClass}`}
+          className={`w-full px-2 py-1.5 border rounded text-xs cursor-pointer bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:cursor-not-allowed ${dirtyClass} ${selectedClass}`}
         >
-          <option value="">—</option>
+          <option value="">
+            {field.key === "block" && !districtName ? "Select district first" : "—"}
+          </option>
           {options.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
@@ -518,9 +533,10 @@ export default function BulkSchoolEditTable({
           <select
             value={blockFilter}
             onChange={(e) => setBlockFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold cursor-pointer"
+            disabled={!districtFilter}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <option value="">All Blocks</option>
+            <option value="">{districtFilter ? "All Blocks" : "Select district first"}</option>
             {blockNames.map((b) => (
               <option key={b} value={b}>{b}</option>
             ))}

@@ -1,4 +1,4 @@
-import { SchoolSupervisor, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS, SchoolPartner } from "../types";
+import { SchoolSupervisor, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS, SchoolPartner, SchoolDistrict, SchoolBlock } from "../types";
 
 export function normalizeBlockName(block: string): string {
   return block.trim().toLowerCase();
@@ -145,15 +145,12 @@ export const SCHOOL_HEADER_ALIASES: Record<string, string[]> = {
   accountholdername: ["accountholdername", "accountholder", "bankaccountholder", "nameremarks"],
   accountnumber: ["accountnumber", "accountno", "bankaccountno", "bankaccount"],
   ifsccode: ["ifsccode", "ifsc"],
-  paymentmethod: ["paymentmethod", "paymethod", "paymentmode"],
   nooftoilets: ["nooftoilets", "noof toiletes", "noof toilletes", "toilets", "toiletes"],
   govtunitrate: ["govtunitrate", "unitrate", "perunitcost", "govtrate"],
   partnermonthlypay: ["partnermonthlypay", "partnerpay", "payby", "monthlypay"],
   rates: ["rates", "rate"],
-  explanationforrate: ["explanationforrate", "explainationforrate", "rateexplanation", "explaination for rate"],
   block: ["block", "blockname"],
   district: ["district"],
-  materialcost: ["materialcost", "material"],
   remarks: ["remarks", "remark", "notes"],
 };
 
@@ -314,15 +311,15 @@ export function parseSchoolSheetRows(sheetRows: unknown[][]): Partial<SchoolWork
       accountHolderName: getVal("Account Holder Name"),
       accountNumber: getVal("Account Number"),
       ifscCode: getVal("IFSC Code"),
-      paymentMethod: getVal("Payment Method"),
+      paymentMethod: "",
       noOfToilets: Number(getVal("No of Toilets")) || 0,
       govtUnitRate,
       partnerMonthlyPay,
       rates: Number(getVal("Rates")) || partnerMonthlyPay,
-      rateExplanation: getVal("Explanation for Rate"),
+      rateExplanation: "",
       block: getVal("Block"),
       district: getVal("District"),
-      materialCost: Number(getVal("Material Cost")) || 0,
+      materialCost: 0,
       remarks: getVal("Remarks"),
       srNo: Number(getVal("SR NO")) || 0,
     });
@@ -331,7 +328,23 @@ export function parseSchoolSheetRows(sheetRows: unknown[][]): Partial<SchoolWork
   return parsed;
 }
 
-export function validateSchoolWork(row: Partial<SchoolWork>): Record<string, string> {
+export function getBlocksForDistrictName(
+  blocks: SchoolBlock[],
+  districts: SchoolDistrict[],
+  districtName: string,
+): string[] {
+  const district = districts.find((d) => d.name === districtName);
+  if (!district) return [];
+  return blocks
+    .filter((b) => !b.deleted && b.districtId === district.id && b.name.trim())
+    .map((b) => b.name.trim())
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export function validateSchoolWork(
+  row: Partial<SchoolWork>,
+  options?: { districts?: SchoolDistrict[]; blocks?: SchoolBlock[] },
+): Record<string, string> {
   const errors: Record<string, string> = {};
 
   if (!row.schoolName?.trim()) {
@@ -345,6 +358,24 @@ export function validateSchoolWork(row: Partial<SchoolWork>): Record<string, str
 
   if (!row.block?.trim()) {
     errors.block = "Block is required.";
+  }
+
+  const districtName = row.district?.trim() || "";
+  if (options?.districts?.length && districtName) {
+    const districtExists = options.districts.some(
+      (d) => !d.deleted && d.name.trim() === districtName,
+    );
+    if (!districtExists) {
+      errors.district = `District "${districtName}" is not configured.`;
+    }
+  }
+
+  const blockName = row.block?.trim() || "";
+  if (options?.blocks?.length && options?.districts?.length && districtName && blockName) {
+    const allowedBlocks = getBlocksForDistrictName(options.blocks, options.districts, districtName);
+    if (allowedBlocks.length > 0 && !allowedBlocks.includes(blockName)) {
+      errors.block = `Block "${blockName}" does not belong to district "${districtName}".`;
+    }
   }
 
   const toilets = Number(row.noOfToilets);
@@ -408,8 +439,6 @@ export function getSchoolHeaderValue(
       return school.accountNumber || "";
     case "IFSC Code":
       return school.ifscCode || "";
-    case "Payment Method":
-      return school.paymentMethod || "";
     case "No of Toilets":
       return school.noOfToilets ?? 0;
     case "Govt Unit Rate":
@@ -418,14 +447,10 @@ export function getSchoolHeaderValue(
       return school.partnerMonthlyPay ?? 0;
     case "Rates":
       return school.rates ?? 0;
-    case "Explanation for Rate":
-      return school.rateExplanation || "";
     case "Block":
       return school.block || "";
     case "District":
       return school.district || "";
-    case "Material Cost":
-      return school.materialCost ?? 0;
     case "Remarks":
       return school.remarks || "";
     default:

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   CheckCircle,
   XCircle,
@@ -12,8 +12,13 @@ import {
   ChevronUp,
   User,
   Calendar,
+  X,
+  Eye,
+  Loader2,
+  FileText,
 } from "lucide-react";
-import { EmployeeChangeRequest } from "../types";
+import { EmployeeChangeRequest, PendingEmployeeDocument } from "../types";
+import { compressionPercent, formatFileSize } from "../lib/image-compress";
 
 interface EmployeeChangeRequestsPanelProps {
   requests: EmployeeChangeRequest[];
@@ -22,6 +27,7 @@ interface EmployeeChangeRequestsPanelProps {
   onApprove: (requestId: string, reviewNotes: string) => Promise<void>;
   onReject: (requestId: string, reviewNotes: string) => Promise<void>;
   onRefresh: () => void;
+  onClose?: () => void;
 }
 
 function formatDate(iso?: string): string {
@@ -58,6 +64,198 @@ function StatusBadge({ status }: { status: string }) {
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
       <XCircle size={10} /> Rejected
     </span>
+  );
+}
+
+function base64ToBlobUrl(fileBase64: string, mimeType: string): string {
+  const trimmed = fileBase64.trim();
+  const normalized = trimmed.includes(",") ? trimmed.split(",").pop()!.trim() : trimmed;
+  const binary = atob(normalized.replace(/\s/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+}
+
+async function fetchPendingDocumentPreview(
+  requestId: string,
+  index: number,
+): Promise<PendingEmployeeDocument> {
+  const res = await fetch(
+    `/api/employees/change-requests/${encodeURIComponent(requestId)}/pending-documents/${index}`,
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const message =
+      typeof err?.message === "string"
+        ? err.message
+        : Array.isArray(err?.message)
+          ? err.message.join(", ")
+          : "Failed to load document preview.";
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+function PendingDocumentPreviewModal({
+  document,
+  onClose,
+}: {
+  document: PendingEmployeeDocument;
+  onClose: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const isPdf = document.mimeType === "application/pdf";
+
+  useEffect(() => {
+    if (!document.fileBase64?.trim()) {
+      setLoadError("Document file data is unavailable.");
+      return;
+    }
+
+    let objectUrl: string | null = null;
+    try {
+      objectUrl = base64ToBlobUrl(document.fileBase64, document.mimeType);
+      setPreviewUrl(objectUrl);
+      setLoadError(null);
+    } catch {
+      setLoadError("Unable to render this document preview.");
+    }
+
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [document.fileBase64, document.mimeType]);
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden
+      />
+      <div
+        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">{document.label}</h3>
+            <p className="text-[11px] text-slate-500">
+              {formatFileSize(document.storedSizeBytes || document.originalSizeBytes)}
+              {document.quality != null && ` · ${compressionPercent(document.quality)}% quality`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto bg-slate-50 p-4">
+          {loadError ? (
+            <div className="flex h-64 items-center justify-center text-sm text-rose-600">
+              {loadError}
+            </div>
+          ) : !previewUrl ? (
+            <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+              <Loader2 size={20} className="mr-2 animate-spin" />
+              Loading preview...
+            </div>
+          ) : isPdf ? (
+            <iframe
+              src={previewUrl}
+              title={document.label}
+              className="h-[70vh] w-full rounded-lg border border-slate-200 bg-white"
+            />
+          ) : (
+            <img
+              src={previewUrl}
+              alt={document.label}
+              className="mx-auto max-h-[70vh] max-w-full rounded-lg border border-slate-200 object-contain shadow-sm"
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PendingDocumentsList({
+  requestId,
+  documents,
+}: {
+  requestId: string;
+  documents: PendingEmployeeDocument[];
+}) {
+  const [previewDoc, setPreviewDoc] = useState<PendingEmployeeDocument | null>(null);
+  const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const handleView = async (index: number) => {
+    setLoadingIndex(index);
+    setPreviewError(null);
+    try {
+      const doc = await fetchPendingDocumentPreview(requestId, index);
+      setPreviewDoc(doc);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : "Failed to load document.");
+    } finally {
+      setLoadingIndex(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2 text-[11px] text-blue-900">
+        <p className="font-semibold">
+          {documents.length} document(s) awaiting upload on approval
+        </p>
+        <div className="mt-2 space-y-1.5">
+          {documents.map((doc, index) => (
+            <div
+              key={`${doc.label}-${index}`}
+              className="flex items-center justify-between gap-2 rounded-md border border-blue-100 bg-white px-2.5 py-2"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <FileText size={14} className="shrink-0 text-blue-600" />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-800">{doc.label}</p>
+                  <p className="text-[10px] text-slate-500">
+                    {formatFileSize(doc.storedSizeBytes || doc.originalSizeBytes)}
+                    {doc.mimeType === "application/pdf" ? " · PDF" : " · Image"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleView(index)}
+                disabled={loadingIndex === index}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-60"
+              >
+                {loadingIndex === index ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Eye size={12} />
+                )}
+                View
+              </button>
+            </div>
+          ))}
+        </div>
+        {previewError && (
+          <p className="mt-2 text-[10px] font-medium text-rose-600">{previewError}</p>
+        )}
+      </div>
+
+      {previewDoc && (
+        <PendingDocumentPreviewModal document={previewDoc} onClose={() => setPreviewDoc(null)} />
+      )}
+    </>
   );
 }
 
@@ -118,6 +316,7 @@ export default function EmployeeChangeRequestsPanel({
   onApprove,
   onReject,
   onRefresh,
+  onClose,
 }: EmployeeChangeRequestsPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
@@ -159,15 +358,27 @@ export default function EmployeeChangeRequestsPanel({
         <div>
           <h3 className="font-bold text-slate-900 text-sm">Pending Approvals</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Review bulk employee edits before they are published to the live registry
+            Review bulk employee edits and employee self-service submissions before they are published
           </p>
         </div>
-        <button
-          onClick={onRefresh}
-          className="text-xs font-semibold text-blue-600 hover:text-blue-800 cursor-pointer"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRefresh}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-800 cursor-pointer"
+          >
+            Refresh
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       {pending.length === 0 ? (
@@ -191,8 +402,15 @@ export default function EmployeeChangeRequestsPanel({
               >
                 <div className="flex items-center gap-3 flex-wrap">
                   <StatusBadge status={req.status} />
+                  {req.source === "employee_self_service" && (
+                    <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700">
+                      Employee self-service
+                    </span>
+                  )}
                   <span className="font-bold text-slate-900 text-sm">
                     {req.employeeCount} employee(s) · {req.fieldChangeCount} changes
+                    {(req.pendingDocuments?.length ?? 0) > 0 &&
+                      ` · ${req.pendingDocuments!.length} document(s)`}
                   </span>
                   <span className="flex items-center gap-1 text-xs text-slate-500">
                     <User size={12} /> {req.submittedBy}
@@ -215,6 +433,12 @@ export default function EmployeeChangeRequestsPanel({
                     {(req.updates || []).map((entry) => (
                       <ChangeDetailRow key={entry.employeeId} entry={entry} />
                     ))}
+                    {(req.pendingDocuments?.length ?? 0) > 0 && (
+                      <PendingDocumentsList
+                        requestId={req.id}
+                        documents={req.pendingDocuments!}
+                      />
+                    )}
                   </div>
                   {canReview && (
                     <div className="border-t border-slate-100 pt-3">

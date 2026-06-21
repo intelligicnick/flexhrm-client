@@ -14,8 +14,10 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Shield,
   ExternalLink,
+  MapPin,
 } from "lucide-react";
 import {
   Contract,
@@ -23,6 +25,7 @@ import {
   ContractStatus,
   CreateContractInput,
   Tender,
+  BgDdRecord,
 } from "../types";
 import {
   parseFlexibleDateMs,
@@ -33,6 +36,11 @@ import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
 import { resolveGemContractNoLabel, resolveGemContractPdfUrl } from "../lib/gem-helpers";
 import { validateOptionalAmountString } from "../lib/number-validation";
+import {
+  formatContractLabel,
+  otherContractsUsingLocation,
+} from "../lib/contract-locations";
+import { fetchBgDdRecords } from "../lib/bg-dd";
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
@@ -75,7 +83,73 @@ const EMPTY_FORM: CreateContractInput = {
   status: "active",
   notes: "",
   entryDate: "",
+  linkedLocations: [],
 };
+
+function contractToFormInput(contract: Contract): CreateContractInput {
+  return {
+    contractNo: contract.contractNo,
+    officerName: contract.officerName,
+    officeName: contract.officeName,
+    correspondingOffice: contract.correspondingOffice,
+    fromDate: contract.fromDate,
+    toDate: contract.toDate,
+    companyName: contract.companyName,
+    category: contract.category,
+    contractType: contract.contractType,
+    hasExtension: contract.hasExtension,
+    extensionEndDate: contract.extensionEndDate,
+    bgApplicable: contract.bgApplicable,
+    bgNumber: contract.bgNumber,
+    bgAmount: contract.bgAmount,
+    bgIssuingBank: contract.bgIssuingBank,
+    bgExpiryDate: contract.bgExpiryDate,
+    bgDetails: contract.bgDetails,
+    ddoName: contract.ddoName,
+    ddoIssuingDetails: contract.ddoIssuingDetails,
+    tenderBidNo: contract.tenderBidNo,
+    contractValue: contract.contractValue,
+    status: contract.status,
+    notes: contract.notes,
+    entryDate: contract.entryDate,
+    linkedLocations: contract.linkedLocations || [],
+  };
+}
+
+function mergeLinkedBgRecord(
+  form: CreateContractInput,
+  bgRecords: BgDdRecord[],
+): CreateContractInput {
+  if (bgRecords.length === 0) return form;
+
+  const bgRecord = [...bgRecords].sort((a, b) => {
+    const aTs = Date.parse(a.updatedAt || a.createdAt || "") || 0;
+    const bTs = Date.parse(b.updatedAt || b.createdAt || "") || 0;
+    return bTs - aTs;
+  })[0];
+
+  if (bgRecord.instrumentType !== "bg") return form;
+
+  const hasBgData = [
+    bgRecord.number,
+    bgRecord.amount,
+    bgRecord.issuingBank,
+    bgRecord.expiryDate,
+    bgRecord.notes,
+  ].some((value) => String(value || "").trim().length > 0);
+
+  if (!hasBgData && !form.bgApplicable) return form;
+
+  return {
+    ...form,
+    bgApplicable: true,
+    bgNumber: bgRecord.number || form.bgNumber,
+    bgAmount: bgRecord.amount || form.bgAmount,
+    bgIssuingBank: bgRecord.issuingBank || form.bgIssuingBank,
+    bgExpiryDate: bgRecord.expiryDate || form.bgExpiryDate,
+    bgDetails: bgRecord.notes || form.bgDetails,
+  };
+}
 
 function effectiveEndDate(contract: Contract): string {
   if (contract.hasExtension && contract.extensionEndDate.trim()) {
@@ -360,6 +434,14 @@ function ContractExpandedDetails({
       ),
     },
     { key: "detail", label: "Notes", value: displayValue(contract.notes) },
+    {
+      key: "detail",
+      label: "Linked Office Locations",
+      value:
+        contract.linkedLocations && contract.linkedLocations.length > 0
+          ? contract.linkedLocations.join(" → ")
+          : "—",
+    },
   ];
 
   return (
@@ -389,6 +471,7 @@ function ContractExpandedDetails({
 interface ContractsPanelProps {
   contracts: Contract[];
   tenders?: Tender[];
+  availableLocations?: string[];
   readOnly?: boolean;
   onRefresh: () => Promise<void>;
   onCreate: (payload: CreateContractInput) => Promise<void>;
@@ -400,6 +483,7 @@ interface ContractsPanelProps {
 export default function ContractsPanel({
   contracts,
   tenders = [],
+  availableLocations = [],
   readOnly = false,
   onRefresh,
   onCreate,
@@ -423,10 +507,22 @@ export default function ContractsPanel({
   const [extensionEndIso, setExtensionEndIso] = useState("");
   const [bgExpiryIso, setBgExpiryIso] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedColumnKey, setExpandedColumnKey] = useState<ContractColumnKey | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [locationToAdd, setLocationToAdd] = useState("");
+
+  const sortedLocations = useMemo(
+    () => [...availableLocations].filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [availableLocations],
+  );
+
+  const addableLocations = useMemo(() => {
+    const linked = new Set((form.linkedLocations || []).map((loc) => loc.toLowerCase()));
+    return sortedLocations.filter((loc) => !linked.has(loc.toLowerCase()));
+  }, [sortedLocations, form.linkedLocations]);
 
   const visibleColumns = useMemo(
     () => TABLE_COLUMNS.filter((column) => readOnly ? column.key !== "actions" : true),
@@ -545,42 +641,77 @@ export default function ContractsPanel({
     setToDateIso("");
     setExtensionEndIso("");
     setBgExpiryIso("");
+    setLocationToAdd("");
     setModalOpen(true);
   };
 
-  const openEdit = (contract: Contract) => {
+  const openEdit = async (contract: Contract) => {
     setEditingId(contract.id);
-    setForm({
-      contractNo: contract.contractNo,
-      officerName: contract.officerName,
-      officeName: contract.officeName,
-      correspondingOffice: contract.correspondingOffice,
-      fromDate: contract.fromDate,
-      toDate: contract.toDate,
-      companyName: contract.companyName,
-      category: contract.category,
-      contractType: contract.contractType,
-      hasExtension: contract.hasExtension,
-      extensionEndDate: contract.extensionEndDate,
-      bgApplicable: contract.bgApplicable,
-      bgNumber: contract.bgNumber,
-      bgAmount: contract.bgAmount,
-      bgIssuingBank: contract.bgIssuingBank,
-      bgExpiryDate: contract.bgExpiryDate,
-      bgDetails: contract.bgDetails,
-      ddoName: contract.ddoName,
-      ddoIssuingDetails: contract.ddoIssuingDetails,
-      tenderBidNo: contract.tenderBidNo,
-      contractValue: contract.contractValue,
-      status: contract.status,
-      notes: contract.notes,
-      entryDate: contract.entryDate,
+    setEditLoading(true);
+    try {
+      let freshContract: Contract = contract;
+      try {
+        const res = await fetch(`/api/contracts/${encodeURIComponent(contract.id)}`);
+        if (res.ok) {
+          freshContract = await res.json();
+        }
+      } catch {
+        // Fall back to the in-memory contract row.
+      }
+
+      let bgRecords: BgDdRecord[] = [];
+      try {
+        bgRecords = await fetchBgDdRecords({
+          contractId: contract.id,
+          instrumentType: "bg",
+        });
+      } catch {
+        // BG details are optional; still open the edit form.
+      }
+
+      const formData = mergeLinkedBgRecord(contractToFormInput(freshContract), bgRecords);
+      setForm(formData);
+      setFromDateIso(freshContract.fromDate || "");
+      setToDateIso(freshContract.toDate || "");
+      setExtensionEndIso(freshContract.extensionEndDate || "");
+      setBgExpiryIso(formData.bgExpiryDate || "");
+      setLocationToAdd("");
+      setModalOpen(true);
+    } catch {
+      setToast("Failed to load contract details.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const moveLinkedLocation = (index: number, direction: -1 | 1) => {
+    setForm((prev) => {
+      const next = [...(prev.linkedLocations || [])];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...prev, linkedLocations: next };
     });
-    setFromDateIso("");
-    setToDateIso("");
-    setExtensionEndIso("");
-    setBgExpiryIso("");
-    setModalOpen(true);
+  };
+
+  const removeLinkedLocation = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      linkedLocations: (prev.linkedLocations || []).filter((_, idx) => idx !== index),
+    }));
+  };
+
+  const addLinkedLocation = () => {
+    const value = locationToAdd.trim();
+    if (!value) return;
+    setForm((prev) => {
+      const existing = prev.linkedLocations || [];
+      if (existing.some((loc) => loc.toLowerCase() === value.toLowerCase())) {
+        return prev;
+      }
+      return { ...prev, linkedLocations: [...existing, value] };
+    });
+    setLocationToAdd("");
   };
 
   const buildPayload = (): CreateContractInput => ({
@@ -590,6 +721,7 @@ export default function ContractsPanel({
     extensionEndDate: form.hasExtension ? extensionEndIso || form.extensionEndDate : "",
     bgExpiryDate: form.bgApplicable ? bgExpiryIso || form.bgExpiryDate : "",
     entryDate: form.entryDate || new Date().toISOString().slice(0, 10),
+    linkedLocations: form.linkedLocations || [],
   });
 
   const handleSubmit = async () => {
@@ -1073,10 +1205,11 @@ export default function ContractsPanel({
                           <ContractTableCell align="right" className="whitespace-nowrap">
                             <button
                               type="button"
-                              onClick={() => openEdit(contract)}
-                              className="text-sky-600 hover:text-sky-800 font-bold mr-2"
+                              onClick={() => void openEdit(contract)}
+                              disabled={editLoading && editingId === contract.id}
+                              className="text-sky-600 hover:text-sky-800 font-bold mr-2 disabled:opacity-50"
                             >
-                              Edit
+                              {editLoading && editingId === contract.id ? "Loading…" : "Edit"}
                             </button>
                             <button
                               type="button"
@@ -1230,6 +1363,96 @@ export default function ContractsPanel({
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
+              </div>
+
+              <div className="border border-orange-100 rounded-xl p-3 space-y-3 bg-orange-50/30">
+                <div>
+                  <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <MapPin size={14} className="text-[#ff791a]" />
+                    Link Office Locations
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Assign worksite locations to this contract in priority order. Employees at a linked location can be mapped directly to this contract.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select
+                    value={locationToAdd}
+                    onChange={(e) => setLocationToAdd(e.target.value)}
+                    className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
+                  >
+                    <option value="">
+                      {addableLocations.length > 0 ? "Select office location…" : "No more locations available"}
+                    </option>
+                    {addableLocations.map((loc) => (
+                      <option key={loc} value={loc}>{loc}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addLinkedLocation}
+                    disabled={!locationToAdd.trim()}
+                    className="px-3 py-2 text-xs font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded-lg disabled:opacity-50"
+                  >
+                    Add Location
+                  </button>
+                </div>
+
+                {(form.linkedLocations || []).length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">No office locations linked yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(form.linkedLocations || []).map((loc, index) => {
+                      const conflicts = otherContractsUsingLocation(loc, contracts, editingId || undefined);
+                      return (
+                        <div
+                          key={`${loc}-${index}`}
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+                        >
+                          <span className="text-[10px] font-bold text-slate-400 w-5 shrink-0">{index + 1}.</span>
+                          <span className="flex-1 text-xs font-semibold text-slate-800 truncate">{loc}</span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveLinkedLocation(index, -1)}
+                              disabled={index === 0}
+                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                              title="Move up"
+                            >
+                              <ChevronUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveLinkedLocation(index, 1)}
+                              disabled={index === (form.linkedLocations || []).length - 1}
+                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                              title="Move down"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeLinkedLocation(index)}
+                              className="p-1 text-red-400 hover:text-red-600"
+                              title="Remove"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                          {conflicts.length > 0 && (
+                            <span
+                              className="hidden lg:inline text-[10px] text-amber-700 font-semibold max-w-[220px] truncate"
+                              title={`Also linked on: ${conflicts.map((c) => c.contractNo).join(", ")}`}
+                            >
+                              Also on {conflicts.map((c) => c.contractNo).join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="border border-slate-100 rounded-xl p-3 space-y-3">

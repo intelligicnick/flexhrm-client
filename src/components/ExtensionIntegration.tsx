@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2, Puzzle, RefreshCw, X } from "lucide-react";
 import { parseApiError } from "../api";
-import { getApiBase } from "../env";
+import { getExtensionApiBase } from "../env";
 
 const GEM_SELLER_BIDS_URL = "https://bidplus.gem.gov.in/seller-bids";
 
@@ -25,10 +25,6 @@ function formatCountdown(expiresAt: string): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-function extensionApiUrl(): string {
-  return getApiBase() || window.location.origin;
-}
-
 export function ExtensionIntegrationModal({ open, onClose, onCopied }: ExtensionIntegrationModalProps) {
   const [code, setCode] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
@@ -36,7 +32,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState("");
   const [copiedField, setCopiedField] = useState<"apiUrl" | "code" | null>(null);
-  const apiUrl = extensionApiUrl();
+  const apiUrl = getExtensionApiBase();
   const onCopiedRef = useRef(onCopied);
   onCopiedRef.current = onCopied;
 
@@ -50,7 +46,7 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ flexhrmUrl: extensionApiUrl() }),
+        body: JSON.stringify({ flexhrmUrl: getExtensionApiBase() }),
       });
       if (!response.ok) {
         throw await parseApiError(response, "Could not generate connection code.");
@@ -171,8 +167,8 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Extension API URL
             </p>
-            <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 rounded-lg bg-white border border-slate-200 px-3 py-2 font-mono text-[11px] text-slate-800 break-all">
+            <div className="mt-2 flex items-start gap-2 min-w-0">
+              <div className="flex-1 min-w-0 rounded-lg bg-white border border-slate-200 px-3 py-2 font-mono text-[11px] text-slate-800 break-all">
                 {apiUrl}
               </div>
               <button
@@ -198,49 +194,52 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
               Connection Code
             </p>
-            <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 rounded-lg bg-white border border-slate-200 px-3 py-2.5 font-mono text-lg font-bold tracking-widest text-slate-900 text-center">
-                {loading ? (
-                  <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-500">
-                    <Loader2 size={16} className="animate-spin" />
-                    Generating…
-                  </span>
-                ) : (
-                  code || "—"
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => void copyCode()}
-                disabled={!code || loading}
-                className={`shrink-0 p-2.5 rounded-lg border disabled:opacity-50 transition ${
-                  copiedField === "code"
-                    ? "border-emerald-300 bg-emerald-50"
-                    : "border-slate-200 bg-white hover:bg-slate-50"
-                }`}
-                title={copiedField === "code" ? "Copied!" : "Copy code"}
-              >
-                {copiedField === "code" ? (
-                  <Check size={16} className="text-emerald-600" />
-                ) : (
-                  <Copy size={16} className="text-slate-600" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => void generateCode(true)}
-                disabled={loading}
-                className="shrink-0 p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 transition"
-                title="Generate new code"
-              >
-                <RefreshCw size={16} className={`text-slate-600 ${loading ? "animate-spin" : ""}`} />
-              </button>
+            <div className="mt-2 rounded-lg bg-white border border-slate-200 px-3 py-2.5 min-h-[2.75rem] flex items-center">
+              {loading ? (
+                <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-500">
+                  <Loader2 size={16} className="animate-spin" />
+                  Generating…
+                </span>
+              ) : (
+                <code className="block w-full min-w-0 font-mono text-xs sm:text-sm font-semibold text-slate-900 break-all leading-relaxed">
+                  {code || "—"}
+                </code>
+              )}
             </div>
-            {expiresAt && !loading && (
-              <p className="mt-2 text-[11px] text-slate-500">
-                Expires in <span className="font-semibold text-slate-700">{countdown}</span> — one-time use
-              </p>
-            )}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              {expiresAt && !loading ? (
+                <p className="text-[11px] text-slate-500">
+                  Expires in <span className="font-semibold text-slate-700">{countdown}</span> — one-time use
+                </p>
+              ) : (
+                <span />
+              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => void copyCode()}
+                  disabled={!code || loading}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold disabled:opacity-50 transition ${
+                    copiedField === "code"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {copiedField === "code" ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedField === "code" ? "Copied" : "Copy"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void generateCode(true)}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition"
+                  title="Generate new code"
+                >
+                  <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                  New code
+                </button>
+              </div>
+            </div>
             {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
           </div>
 

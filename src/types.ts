@@ -8,6 +8,8 @@ export interface Employee {
   srNo: number;
   employeeCode: string; // Employees Code **
   location: string;
+  /** Contract resolved from office location (not set directly on employee) */
+  contractId?: string;
   nameAsPerAadhar: string; // EMPLOYEE NAME AS PER AADHAR ***
   grossSalary: number; // Gross Salary***
   basicSalary: number; // Basic Salary***
@@ -112,6 +114,16 @@ export interface EmployeeChangeEntry {
   previousSnapshot: Record<string, unknown>;
 }
 
+export interface PendingEmployeeDocument {
+  employeeId: string;
+  label: string;
+  mimeType: string;
+  originalSizeBytes: number;
+  storedSizeBytes: number;
+  quality?: number;
+  fileBase64?: string;
+}
+
 export interface EmployeeChangeRequest {
   id: string;
   submittedBy: string;
@@ -123,6 +135,8 @@ export interface EmployeeChangeRequest {
   updates: EmployeeChangeEntry[];
   employeeCount: number;
   fieldChangeCount: number;
+  source?: "admin_bulk" | "employee_self_service";
+  pendingDocuments?: PendingEmployeeDocument[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -438,6 +452,8 @@ export interface Contract {
   entryDate: string;
   gemContractPdfUrl?: string;
   gemContractId?: string;
+  /** Office locations assigned to this contract, in priority order */
+  linkedLocations?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -698,15 +714,12 @@ export const SCHOOL_EXCEL_ROW_HEADERS = [
   "Account Holder Name",
   "Account Number",
   "IFSC Code",
-  "Payment Method",
   "No of Toilets",
   "Govt Unit Rate",
   "Partner Monthly Pay",
   "Rates",
-  "Explanation for Rate",
-  "Block",
   "District",
-  "Material Cost",
+  "Block",
   "Remarks",
 ];
 

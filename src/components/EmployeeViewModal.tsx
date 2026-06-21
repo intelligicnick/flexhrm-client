@@ -24,6 +24,7 @@ import {
   LogOut,
   Calendar,
   FolderOpen,
+  Link2,
 } from "lucide-react";
 import { Employee } from "../types";
 import { normalizeSkillCategory, calculatePfAmounts, isEmployeePtEnabled, isPfEsicCompliant, isProfessionalTaxApplicable, resolveLocationCompliance, resolveLocationPtEnabled } from "../utils";
@@ -31,6 +32,7 @@ import EmployeePhoto from "./EmployeePhoto";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 import IdCardPanel from "./id-card/IdCardPanel";
 import EmployeeDocumentsPanel from "./EmployeeDocumentsPanel";
+import EmployeeDataGatherPanel from "./EmployeeDataGatherPanel";
 import { fetchEmployeeDocuments } from "../lib/employee-documents";
 
 interface EmployeeViewModalProps {
@@ -41,7 +43,7 @@ interface EmployeeViewModalProps {
   readOnly?: boolean;
 }
 
-type ViewTab = "overview" | "personal" | "payroll" | "statutory" | "family" | "idcard" | "documents";
+type ViewTab = "overview" | "personal" | "payroll" | "statutory" | "family" | "idcard" | "documents" | "collect";
 
 const TABS: { id: ViewTab; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <LayoutGrid size={14} /> },
@@ -50,6 +52,7 @@ const TABS: { id: ViewTab; label: string; icon: React.ReactNode }[] = [
   { id: "statutory", label: "IDs & Bank", icon: <Key size={14} /> },
   { id: "family", label: "Family", icon: <Users size={14} /> },
   { id: "documents", label: "Documents", icon: <FolderOpen size={14} /> },
+  { id: "collect", label: "Collect Data", icon: <Link2 size={14} /> },
   { id: "idcard", label: "ID Card", icon: <IdCard size={14} /> },
 ];
 
@@ -636,6 +639,12 @@ export default function EmployeeViewModal({
           {activeTab === "documents" && (
             <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">
               <EmployeeDocumentsPanel employeeId={employee.id} readOnly />
+            </div>
+          )}
+
+          {activeTab === "collect" && (
+            <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-xs">
+              <EmployeeDataGatherPanel employeeId={employee.id} readOnly={readOnly} />
             </div>
           )}
         </div>

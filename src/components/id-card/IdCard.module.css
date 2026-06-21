@@ -1,6 +1,6 @@
 .card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 14px;
   background-color: #fff;
   background-repeat: no-repeat;
@@ -28,8 +28,6 @@
   max-width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  object-fit: cover;
-  object-position: center top;
 }
 
 .photoPlaceholder {
@@ -42,22 +40,24 @@
 .idNumberStrip {
   position: absolute;
   box-sizing: border-box;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
-  padding: 0 2px 0 0;
+  gap: 4px;
+  padding: 2px 6px;
   text-align: right;
-  overflow: visible;
-  z-index: 2;
+  white-space: nowrap;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 4px;
 }
 
 .idNumberLabel,
 .idNumberText {
   color: #0b1b3d;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.25;
   letter-spacing: 0.01em;
 }
 
@@ -66,22 +66,14 @@
 }
 
 .idNumberText {
-  min-width: 0;
-  overflow-x: hidden;
-  overflow-y: visible;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .fieldsBlock {
   position: absolute;
   box-sizing: border-box;
   padding: 4px 6px 2px;
-  background: linear-gradient(
-    180deg,
-    rgba(224, 242, 252, 0.98) 0%,
-    rgba(215, 238, 252, 0.98) 100%
-  );
+  background: #e0f2fc;
   display: flex;
   flex-direction: column;
   justify-content: space-between;

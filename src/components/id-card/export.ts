@@ -26,6 +26,15 @@ async function waitForImages(element: HTMLElement): Promise<void> {
   );
 }
 
+function normalizeExportClone(element: HTMLElement): void {
+  let node: HTMLElement | null = element;
+  while (node) {
+    node.style.opacity = "1";
+    node.style.visibility = "visible";
+    node = node.parentElement;
+  }
+}
+
 async function toCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
   await waitForImages(element);
   return html2canvas(element, {
@@ -34,6 +43,9 @@ async function toCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
     allowTaint: true,
     backgroundColor: "#ffffff",
     logging: false,
+    onclone: (_doc, clonedElement) => {
+      normalizeExportClone(clonedElement);
+    },
   });
 }
 

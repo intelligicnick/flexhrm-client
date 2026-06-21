@@ -53,8 +53,8 @@ const COLUMNS: { key: keyof SchoolWork; label: string }[] = [
   { key: "headmasterNumber", label: "Headmaster Number" },
   { key: "sweeperName", label: "Cleaning Partner" },
   { key: "noOfToilets", label: "No of Toilets" },
-  { key: "block", label: "Block" },
   { key: "district", label: "District" },
+  { key: "block", label: "Block" },
   { key: "remarks", label: "Remarks" },
 ];
 
@@ -112,14 +112,12 @@ export default function SchoolWorkTable({
   }, [districts, schools]);
 
   const blockOptions = useMemo(() => {
-    let source = blocks;
-    if (districtFilter) {
-      const district = districts.find((d) => d.name === districtFilter);
-      if (district) source = blocks.filter((b) => b.districtId === district.id);
-    }
-    const configured = source.map((b) => b.name);
+    if (!districtFilter) return [];
+    const district = districts.find((d) => d.name === districtFilter);
+    if (!district) return [];
+    const configured = blocks.filter((b) => b.districtId === district.id).map((b) => b.name);
     const fromSchools = schools
-      .filter((s) => !districtFilter || s.district === districtFilter)
+      .filter((s) => s.district === districtFilter)
       .map((s) => s.block)
       .filter(Boolean);
     return Array.from(new Set([...configured, ...fromSchools])).sort();
@@ -283,9 +281,10 @@ export default function SchoolWorkTable({
               <select
                 value={blockFilter}
                 onChange={(e) => setBlockFilter(e.target.value)}
-                className={FILTER_SELECT_CLASS}
+                disabled={!districtFilter}
+                className={`${FILTER_SELECT_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                <option value="">All Blocks</option>
+                <option value="">{districtFilter ? "All Blocks" : "Select district first"}</option>
                 {blockOptions.map((b) => (
                   <option key={b} value={b}>
                     {b}

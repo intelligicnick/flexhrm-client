@@ -30,9 +30,8 @@ const IdCardFront = forwardRef<HTMLDivElement, IdCardFrontProps>(
         <div
           className={styles.idNumberStrip}
           style={{
-            left: `calc(${pct(idNumberBox.left)} + ${idNumberBox.leftOffsetPx}px)`,
-            top: `calc(${pct(idNumberBox.top)} + ${idNumberBox.topOffsetPx}px)`,
-            width: pct(idNumberBox.width),
+            right: idNumberBox.rightPx,
+            top: idNumberBox.topPx,
           }}
         >
           <span className={styles.idNumberLabel}>ID No :</span>

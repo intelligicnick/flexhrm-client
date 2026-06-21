@@ -1,3 +1,21 @@
+import type { TourFormField } from "./tour-thumbnail-forms";
+export type { TourFormField } from "./tour-thumbnail-forms";
+
+import {
+  ADMIN_INVITE_FORM,
+  ATTENDANCE_CELL_FORM,
+  ATTENDANCE_GRID,
+  BG_DD_FORM,
+  EMPLOYEE_ADD_FORM,
+  EMPLOYEE_LIST_TABLE,
+  LEDGER_ENTRY_FORM,
+  MOBILE_LOGIN_FORM,
+  PAYROLL_CONFIG_FORM,
+  SALARY_ROW_SAMPLE,
+  SCHOOL_ADD_FORM,
+  SUPERVISOR_ADD_FORM,
+} from "./tour-thumbnail-forms";
+
 export interface TourThumbnailMock {
   windowTitle: string;
   activeSidebar: string;
@@ -5,22 +23,33 @@ export interface TourThumbnailMock {
   showMonthBar?: boolean;
   month?: string;
   year?: string;
-  subTabs?: Array<{ label: string; active?: boolean }>;
+  subTabs?: Array<{ label: string; active?: boolean; clickTarget?: boolean }>;
   heading?: string;
   subheading?: string;
   toolbar?: Array<{ kind: "search" | "filter" | "button"; label: string; highlight?: boolean }>;
-  table?: { headers: string[]; rows: string[][] };
-  cards?: Array<{ label: string; value: string }>;
+  table?: {
+    headers: string[];
+    rows: string[][];
+    highlightCells?: Array<{ row: number; col: number }>;
+  };
+  cards?: Array<{ label: string; value: string; highlight?: boolean }>;
   panelLines?: string[];
+  formFields?: TourFormField[];
+  /** Highlight sidebar item index for click animation */
+  highlightSidebarIndex?: number;
 }
 
-const DEFAULT_SIDEBAR = [
+const FULL_SIDEBAR = [
   "Dashboard",
+  "Role & Access",
   "Employees",
-  "Attendance",
   "Salary",
-  "Advance & Penalty",
-  "Leave",
+  "Saved Bulk Pay",
+  "Attendance",
+  "School Work ▾",
+  "Bids ▾",
+  "Renewals ▾",
+  "BG & DD",
 ];
 
 function mock(
@@ -36,7 +65,7 @@ function mock(
   return {
     windowTitle: data.windowTitle ?? section?.windowTitle ?? "FlexHRM",
     activeSidebar: data.activeSidebar ?? section?.activeSidebar ?? "Dashboard",
-    sidebarItems: data.sidebarItems ?? section?.sidebarItems ?? DEFAULT_SIDEBAR,
+    sidebarItems: data.sidebarItems ?? section?.sidebarItems ?? FULL_SIDEBAR,
     showMonthBar: data.showMonthBar ?? section?.showMonthBar ?? true,
     month: data.month ?? "June",
     year: data.year ?? "2025-2026",
@@ -48,189 +77,221 @@ const SYSTEM_MOCK_DEFAULTS: Record<
   string,
   Pick<TourThumbnailMock, "windowTitle" | "activeSidebar" | "sidebarItems" | "showMonthBar">
 > = {
-  employees: {
-    windowTitle: "FlexHRM · Employees",
-    activeSidebar: "Employees",
-    sidebarItems: DEFAULT_SIDEBAR,
-    showMonthBar: true,
-  },
-  attendance: {
-    windowTitle: "FlexHRM · Attendance",
-    activeSidebar: "Attendance",
-    sidebarItems: DEFAULT_SIDEBAR,
-    showMonthBar: true,
-  },
-  salary: {
-    windowTitle: "FlexHRM · Salary",
-    activeSidebar: "Salary",
-    sidebarItems: ["Dashboard", "Employees", "Attendance", "Salary", "Saved Bulk Pay"],
-    showMonthBar: true,
-  },
-  ledger: {
-    windowTitle: "FlexHRM · Advance & Penalty",
-    activeSidebar: "Advance & Penalty",
-    sidebarItems: ["Dashboard", "Salary", "Advance & Penalty", "Leave", "Attendance"],
-    showMonthBar: true,
-  },
-  leave: {
-    windowTitle: "FlexHRM · Leave",
-    activeSidebar: "Leave",
-    sidebarItems: DEFAULT_SIDEBAR,
-    showMonthBar: true,
-  },
-  directory: {
-    windowTitle: "FlexHRM · Directory",
-    activeSidebar: "Directory",
-    sidebarItems: ["Dashboard", "Employees", "Directory", "Birthdays"],
-    showMonthBar: false,
-  },
-  schoolWork: {
-    windowTitle: "FlexHRM · Schools",
-    activeSidebar: "School Work",
-    sidebarItems: ["Dashboard", "Employees", "School Work", "Schools", "Field Team"],
-    showMonthBar: true,
-  },
-  bids: {
-    windowTitle: "FlexHRM · Tenders",
-    activeSidebar: "Bids",
-    sidebarItems: ["Dashboard", "Bids", "Tenders", "Contracts", "Renewals"],
-    showMonthBar: false,
-  },
-  roleAccess: {
-    windowTitle: "FlexHRM · Role & Access",
-    activeSidebar: "Role & Access",
-    sidebarItems: ["Dashboard", "Role & Access", "Employees", "Attendance"],
-    showMonthBar: false,
-  },
-  supervisorApp: {
-    windowTitle: "FlexHRM Field Team",
-    activeSidebar: "",
-    sidebarItems: [],
-    showMonthBar: false,
-  },
-  portalTips: {
-    windowTitle: "FlexHRM · Dashboard",
-    activeSidebar: "Dashboard",
-    sidebarItems: DEFAULT_SIDEBAR,
-    showMonthBar: true,
-  },
+  gettingStarted: { windowTitle: "FlexHRM · Portal", activeSidebar: "Dashboard", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  dashboard: { windowTitle: "FlexHRM · Dashboard", activeSidebar: "Dashboard", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  employees: { windowTitle: "FlexHRM · Employees", activeSidebar: "Employees", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  attendance: { windowTitle: "FlexHRM · Attendance", activeSidebar: "Attendance", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  salary: { windowTitle: "FlexHRM · Salary", activeSidebar: "Salary", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  savedBulkPay: { windowTitle: "FlexHRM · Saved Bulk Pay", activeSidebar: "Saved Bulk Pay", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  ledger: { windowTitle: "FlexHRM · Advance & Penalty", activeSidebar: "Advance & Penalty", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  leave: { windowTitle: "FlexHRM · Leave", activeSidebar: "Leave", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  directory: { windowTitle: "FlexHRM · Directory", activeSidebar: "Directory", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  schoolWork: { windowTitle: "FlexHRM · Schools", activeSidebar: "Schools", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  fieldTeam: { windowTitle: "FlexHRM · Field Team", activeSidebar: "Field Team", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  bids: { windowTitle: "FlexHRM · Tenders", activeSidebar: "Tenders", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  renewals: { windowTitle: "FlexHRM · Car Papers", activeSidebar: "Car Papers", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  bgDd: { windowTitle: "FlexHRM · BG & DD", activeSidebar: "BG & DD", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  roleAccess: { windowTitle: "FlexHRM · Role & Access", activeSidebar: "Role & Access", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
+  supervisorApp: { windowTitle: "FlexHRM Field Team", activeSidebar: "", sidebarItems: [], showMonthBar: false },
+  monthlyPayroll: { windowTitle: "FlexHRM · Payroll Flow", activeSidebar: "Attendance", sidebarItems: FULL_SIDEBAR, showMonthBar: true },
+  birthdays: { windowTitle: "FlexHRM · Birthdays", activeSidebar: "Birthdays", sidebarItems: FULL_SIDEBAR, showMonthBar: false },
 };
 
 const STEP_MOCKS: Record<string, TourThumbnailMock[]> = {
+  gettingStarted: [
+    mock("gettingStarted", 0, {
+      heading: "Orange Month & Year Bar",
+      subheading: "Top header — same controls as live portal",
+      toolbar: [
+        { kind: "filter", label: "Month: June ▾", highlight: true },
+        { kind: "filter", label: "Year: 2025-2026 ▾", highlight: true },
+      ],
+      formFields: [
+        { label: "Month", value: "June", type: "select", highlight: true },
+        { label: "Financial Year", value: "2025-2026", type: "select", highlight: true },
+      ],
+    }),
+    mock("gettingStarted", 1, {
+      heading: "Left Sidebar Navigation",
+      subheading: "Click module name · Expand grouped menus",
+      highlightSidebarIndex: 5,
+      panelLines: ["School Work ▾ · Bids ▾ · Renewals ▾ expand on click"],
+    }),
+    mock("gettingStarted", 2, {
+      heading: "Sidebar Search",
+      toolbar: [{ kind: "search", label: "Search sidebar modules...", highlight: true }],
+      panelLines: ["Type \"Salary\" → click filtered result", "Type \"Field\" → Field Team appears"],
+    }),
+    mock("gettingStarted", 3, {
+      heading: "Profile Menu (Top Right)",
+      toolbar: [
+        { kind: "button", label: "Username ▾", highlight: true },
+      ],
+      panelLines: [
+        "My Account Profile · System Tour",
+        "Portal Settings · Sign Out",
+      ],
+    }),
+    mock("gettingStarted", 4, {
+      heading: "Notification Bell",
+      toolbar: [{ kind: "button", label: "🔔 Bell · 3 unread", highlight: true }],
+      panelLines: [
+        "Click bell → read alerts",
+        "Click row → Field Team (Visits/Requests)",
+        "Mark all read when done",
+      ],
+    }),
+  ],
+  dashboard: [
+    mock("dashboard", 0, {
+      heading: "Executive Dashboard",
+      cards: [
+        { label: "Active Employees", value: "142" },
+        { label: "Net Payroll", value: "₹4.8L" },
+        { label: "Attendance Rate", value: "94%" },
+        { label: "Renewals Alert", value: "3 due" },
+      ],
+      toolbar: [
+        { kind: "button", label: "Visits", highlight: true },
+        { kind: "button", label: "Requests (2)" },
+        { kind: "button", label: "Commitment Diary" },
+      ],
+    }),
+    mock("dashboard", 1, {
+      heading: "Action Required",
+      panelLines: [
+        "⚠ 3 supervisor requests pending → click Open",
+        "⚠ 2 renewals expiring soon → click Open",
+        "⚠ 1 bulk edit awaiting approval → click Open",
+      ],
+      toolbar: [{ kind: "button", label: "Open", highlight: true }],
+    }),
+    mock("dashboard", 2, {
+      heading: "KPI Cards & Quick Links",
+      cards: [
+        { label: "Total Employees", value: "142 →" },
+        { label: "Schools", value: "48 →" },
+      ],
+      panelLines: ["Click any KPI card → jump to module", "Quick Links grid → 12 module tiles"],
+    }),
+    mock("dashboard", 3, {
+      heading: "Field Team Shortcuts",
+      toolbar: [
+        { kind: "button", label: "Visits", highlight: true },
+        { kind: "button", label: "Requests (2)", highlight: true },
+        { kind: "button", label: "Commitment Diary" },
+      ],
+      panelLines: ["Supervisor map → click pin → Supervisors view"],
+    }),
+  ],
   employees: [
     mock("employees", 0, {
-      subTabs: [
-        { label: "Configuration" },
-        { label: "Employee List", active: true },
-        { label: "Add Employee" },
-        { label: "Reports" },
-      ],
-      heading: "ECR-Structured Employee Master Registry",
-      toolbar: [
-        { kind: "search", label: "Search by Employee Code, Name, Aadhar No..." },
-        { kind: "filter", label: "Active Staff (Current)" },
-        { kind: "filter", label: "All Locations" },
-        { kind: "filter", label: "All Roles" },
-      ],
-      table: {
-        headers: ["Code", "Name", "Location", "Job Role", "Gross Salary"],
-        rows: [
-          ["EMP-001", "Priya Sharma", "Mumbai HO", "Accountant", "₹28,000"],
-          ["EMP-002", "Rahul Verma", "Pune Branch", "Supervisor", "₹22,500"],
-        ],
-      },
+      subTabs: [{ label: "Configuration", active: true }, { label: "Employee List" }, { label: "Add Employee" }, { label: "Reports" }],
+      heading: "Employees → Configuration",
+      formFields: PAYROLL_CONFIG_FORM,
+      toolbar: [{ kind: "button", label: "Save Payroll Rules", highlight: true }],
     }),
     mock("employees", 1, {
-      subTabs: [
-        { label: "Configuration" },
-        { label: "Employee List" },
-        { label: "Add Employee", active: true },
-        { label: "Reports" },
-      ],
-      heading: "Add New Employee",
-      panelLines: [
-        "Employee Code · Full Name · Location · Job Role",
-        "Gross Salary · Basic Salary · Bank Account · IFSC",
-        "UAN · Aadhar No · PAN · Date of Birth",
-      ],
+      subTabs: [{ label: "Configuration" }, { label: "Employee List", active: true }, { label: "Reports" }],
+      heading: "ECR-Structured Employee Master Registry",
       toolbar: [
-        { kind: "button", label: "Save Employee", highlight: true },
-        { kind: "button", label: "Cancel" },
+        { kind: "search", label: "Search by Employee Code, Name, Aadhar No, UAN, PAN..." },
+        { kind: "filter", label: "Active Staff (Current) ▾", highlight: true },
+        { kind: "filter", label: "All Locations ▾" },
+        { kind: "filter", label: "All Roles ▾" },
       ],
+      table: EMPLOYEE_LIST_TABLE,
     }),
     mock("employees", 2, {
-      subTabs: [
-        { label: "Configuration" },
-        { label: "Employee List", active: true },
-        { label: "Add Employee" },
-        { label: "Reports" },
-      ],
-      heading: "Bulk Registry Operations",
-      subheading: "Import new employees from CSV or edit multiple ECR fields",
-      toolbar: [
-        { kind: "button", label: "Download CSV Template", highlight: true },
-        { kind: "button", label: "Upload CSV File" },
-        { kind: "button", label: "ECR Bulk Edit" },
-      ],
-      panelLines: ["Preview grid · Validate rows · Confirm import"],
+      subTabs: [{ label: "Employee List" }, { label: "Add Employee", active: true, clickTarget: true }],
+      heading: "Employee Onboarding — Basic Tab",
+      formFields: EMPLOYEE_ADD_FORM,
+      toolbar: [{ kind: "button", label: "Save Employee", highlight: true }],
     }),
     mock("employees", 3, {
-      subTabs: [{ label: "Configuration", active: true }, { label: "Employee List" }, { label: "Reports" }],
-      heading: "Employees Configuration",
-      cards: [
-        { label: "Payroll Rules", value: "PF · ESIC · PT" },
-        { label: "Bank Accounts", value: "2 accounts" },
-        { label: "Office Locations", value: "4 sites" },
-        { label: "Job Roles", value: "12 roles" },
+      subTabs: [{ label: "Employee List", active: true }],
+      heading: "CSV Import — Bulk Onboard",
+      toolbar: [
+        { kind: "button", label: "Download CSV Template", highlight: true },
+        { kind: "button", label: "Upload CSV File", highlight: true },
       ],
-      toolbar: [{ kind: "button", label: "Save Payroll Rules", highlight: true }],
+      panelLines: ["Preview grid → fix red rows → Confirm Import"],
+    }),
+    mock("employees", 4, {
+      subTabs: [{ label: "Employee List", active: true }],
+      heading: "Mark Employee Exit",
+      toolbar: [
+        { kind: "filter", label: "Exited Staff ▾", highlight: true },
+        { kind: "button", label: "Mark Exit", highlight: true },
+      ],
+      panelLines: ["Edit row → Exit Date · Reason → Save", "Or select rows → Mark Exit (bulk)"],
+    }),
+    mock("employees", 5, {
+      subTabs: [{ label: "Employee List", active: true }],
+      heading: "ECR Bulk Edit",
+      toolbar: [
+        { kind: "button", label: "ECR Bulk Edit", highlight: true },
+        { kind: "button", label: "Apply Changes" },
+      ],
+      panelLines: ["Edit spreadsheet cells → Apply", "Pending → Employee Change Requests → Approve"],
+    }),
+    mock("employees", 6, {
+      subTabs: [{ label: "Reports", active: true }],
+      heading: "Custom Employee Reports",
+      toolbar: [
+        { kind: "filter", label: "Location · Role · Skill filters" },
+        { kind: "button", label: "Export CSV", highlight: true },
+        { kind: "button", label: "Export Excel" },
+        { kind: "button", label: "Export PDF" },
+      ],
+      panelLines: ["Toggle columns · Save template · Export filtered set"],
     }),
   ],
   attendance: [
     mock("attendance", 0, {
       heading: "Monthly Attendance Register",
       toolbar: [
-        { kind: "filter", label: "Month: June", highlight: true },
-        { kind: "filter", label: "Year: 2025-2026", highlight: true },
-        { kind: "filter", label: "All Locations" },
+        { kind: "filter", label: "Month: June ▾", highlight: true },
+        { kind: "filter", label: "Year: 2025-2026 ▾", highlight: true },
       ],
-      table: {
-        headers: ["Code", "Name", "01", "02", "03", "P", "A"],
-        rows: [
-          ["EMP-001", "Priya Sharma", "P", "P", "A", "18", "2"],
-          ["EMP-002", "Rahul Verma", "P", "—", "P", "20", "0"],
-        ],
-      },
+      formFields: [
+        { label: "Month", value: "June", type: "select", highlight: true },
+        { label: "Financial Year", value: "2025-2026", type: "select", highlight: true },
+      ],
     }),
     mock("attendance", 1, {
-      heading: "Monthly Attendance Register",
-      subheading: "Click a cell → P (Present) · A (Absent) · — (blank)",
-      table: {
-        headers: ["Code", "Name", "15 Jun", "16 Jun", "17 Jun"],
-        rows: [
-          ["EMP-001", "Priya Sharma", "P", "A", "P"],
-          ["EMP-002", "Rahul Verma", "—", "P", "P"],
-        ],
-      },
+      heading: "Daily Attendance Grid",
+      subheading: "Click cell → P · A · H · — (blank)",
+      table: ATTENDANCE_GRID,
+      formFields: ATTENDANCE_CELL_FORM,
     }),
     mock("attendance", 2, {
       heading: "Bulk Mark Attendance Wizard",
-      panelLines: [
-        "Date range · Present or Absent",
-        "Filter by Location · Filter by Role",
-        "⚡ Confirm & Mark Bulk Present",
-      ],
       toolbar: [{ kind: "button", label: "Bulk Mark Attendance", highlight: true }],
+      panelLines: [
+        "Step 1: Select Staff (location · role · employees)",
+        "Step 2: Select Dates (calendar clicks)",
+        "Step 3: Confirm & Mark Bulk Present",
+      ],
     }),
     mock("attendance", 3, {
-      heading: "Monthly Attendance Register",
+      heading: "Filter Register",
       toolbar: [
-        { kind: "button", label: "Export CSV", highlight: true },
-        { kind: "button", label: "Export PDF" },
+        { kind: "search", label: "Search employee..." },
+        { kind: "filter", label: "Location ▾", highlight: true },
+        { kind: "filter", label: "Role ▾" },
+        { kind: "filter", label: "Skill ▾" },
+      ],
+    }),
+    mock("attendance", 4, {
+      heading: "Export Attendance",
+      toolbar: [
+        { kind: "button", label: "Export Excel (Landscape)", highlight: true },
+        { kind: "button", label: "Export PDF (Landscape)" },
       ],
       table: {
-        headers: ["SR NO", "Employee Code", "Employee Name", "Presents", "Absents"],
-        rows: [["1", "EMP-001", "Priya Sharma", "18", "2"]],
+        headers: ["Code", "Name", "Presents", "Absents"],
+        rows: [["EMP-001", "Priya Sharma", "18", "2"]],
       },
     }),
   ],
@@ -240,277 +301,460 @@ const STEP_MOCKS: Record<string, TourThumbnailMock[]> = {
       cards: [
         { label: "Total Gross Payroll", value: "₹4,82,000" },
         { label: "Total Net Payable", value: "₹4,15,200" },
+        { label: "Total Deductions", value: "₹66,800" },
+        { label: "Employer Liability", value: "₹48,200" },
       ],
-      table: {
-        headers: ["Code", "Name", "Present Days", "Gross Pay", "Net Payable"],
-        rows: [
-          ["EMP-001", "Priya Sharma", "18", "₹28,000", "₹24,100"],
-          ["EMP-002", "Rahul Verma", "20", "₹22,500", "₹19,800"],
-        ],
-      },
+      table: SALARY_ROW_SAMPLE,
     }),
     mock("salary", 1, {
-      heading: "Salary Sheet — June 2025",
+      heading: "Filter Payroll",
       toolbar: [
-        { kind: "filter", label: "Location: Pune Branch", highlight: true },
-        { kind: "filter", label: "Role: Supervisor" },
-        { kind: "filter", label: "Payment Status: All" },
+        { kind: "filter", label: "Location: Pune ▾", highlight: true },
+        { kind: "filter", label: "Role ▾" },
+        { kind: "filter", label: "Payment Status ▾" },
+        { kind: "filter", label: "Balance Type ▾" },
       ],
-      table: {
-        headers: ["Code", "Name", "Location", "Role", "Net Payable"],
-        rows: [["EMP-002", "Rahul Verma", "Pune Branch", "Supervisor", "₹19,800"]],
-      },
     }),
     mock("salary", 2, {
-      heading: "Salary Sheet — June 2025",
+      heading: "Export Payroll",
       toolbar: [
         { kind: "button", label: "Export CSV", highlight: true },
+        { kind: "button", label: "Export Excel" },
         { kind: "button", label: "Export PDF" },
       ],
-      table: {
-        headers: ["Employee Code", "Employee Name", "Net Payable", "Payment Status"],
-        rows: [["EMP-001", "Priya Sharma", "₹24,100", "Pending"]],
-      },
+      panelLines: ["Select rows → export selected only"],
     }),
     mock("salary", 3, {
-      windowTitle: "FlexHRM · Saved Bulk Pay",
-      activeSidebar: "Saved Bulk Pay",
-      heading: "Axis Bulk Pay Files",
-      toolbar: [{ kind: "button", label: "Generate Axis Bulk Pay XLS", highlight: true }],
-      panelLines: ["Default debit account · Axis format · Archive saved files"],
+      heading: "Payment Status Column",
+      table: SALARY_ROW_SAMPLE,
+      toolbar: [{ kind: "button", label: "Mark selected Paid", highlight: true }],
+    }),
+    mock("salary", 4, {
+      heading: "Axis Bulk Pay — Salary",
+      toolbar: [{ kind: "button", label: "Bulk Pay", highlight: true }],
+      formFields: [
+        { label: "Default Debit Account", value: "FlexHRM Payroll A/c — UTIB0000123", span: 2 },
+        { label: "Format", value: "Axis Bank .xls", type: "select" },
+        { label: "Records", value: "142 employees" },
+      ],
+    }),
+  ],
+  savedBulkPay: [
+    mock("savedBulkPay", 0, {
+      heading: "Saved Bulk Pay Archive",
+      toolbar: [
+        { kind: "filter", label: "Year: 2025-2026 ▾", highlight: true },
+        { kind: "button", label: "Refresh" },
+      ],
+      table: {
+        headers: ["Saved On", "Month", "Records", "Total", "By"],
+        rows: [["12 Jun", "June 2025", "142", "₹4.15L", "hr.admin"]],
+      },
+    }),
+    mock("savedBulkPay", 1, {
+      heading: "View · Re-download · Delete",
+      table: {
+        headers: ["Filename", "Actions"],
+        rows: [["axis_bulk_june_2025.xls", "View · Re-download · Delete"]],
+      },
+      toolbar: [{ kind: "button", label: "Re-download", highlight: true }],
     }),
   ],
   ledger: [
     mock("ledger", 0, {
-      heading: "Advance & Penalty Ledger",
-      panelLines: ["☑ Select employees · Filter by location / role"],
+      heading: "Select Employees (Left Panel)",
+      panelLines: ["☑ checklist · Search · Location ▾ · Role ▾", "Select All · Clear"],
       table: {
-        headers: ["☑", "Code", "Name", "Location", "Role"],
+        headers: ["☑", "Code", "Name", "Location"],
         rows: [
-          ["☑", "EMP-001", "Priya Sharma", "Mumbai HO", "Accountant"],
-          ["☐", "EMP-002", "Rahul Verma", "Pune Branch", "Supervisor"],
+          ["☑", "EMP-001", "Priya", "Mumbai"],
+          ["☐", "EMP-002", "Rahul", "Pune"],
         ],
       },
     }),
     mock("ledger", 1, {
-      heading: "Record Advance or Penalty",
-      toolbar: [
-        { kind: "filter", label: "Type: Advance", highlight: true },
-        { kind: "filter", label: "Type: Penalty" },
-        { kind: "button", label: "Save Entry", highlight: true },
-      ],
-      panelLines: ["Amount · Month: June 2025 · Notes"],
+      heading: "Record Advance / Penalty / Perk",
+      formFields: LEDGER_ENTRY_FORM,
+      toolbar: [{ kind: "button", label: "Save Entry", highlight: true }],
     }),
     mock("ledger", 2, {
+      heading: "Month Summary Totals",
+      cards: [
+        { label: "Advances", value: "₹12,000" },
+        { label: "Penalties", value: "₹3,500" },
+        { label: "Perks", value: "₹8,200" },
+      ],
+    }),
+    mock("ledger", 3, {
       heading: "Batch Settlement",
       toolbar: [{ kind: "button", label: "Settle Selected for June", highlight: true }],
-      panelLines: ["Apply pending advances & penalties to salary sheet"],
-    }),
-  ],
-  leave: [
-    mock("leave", 0, {
-      heading: "Leave Register — June 2025",
-      table: {
-        headers: ["Code", "Name", "Leave Type", "From", "To", "Days"],
-        rows: [["EMP-001", "Priya Sharma", "Casual", "10 Jun", "11 Jun", "2"]],
-      },
-    }),
-    mock("leave", 1, {
-      heading: "Add Leave Record",
-      panelLines: ["Employee · Leave type · Date range · Reason"],
-      toolbar: [{ kind: "button", label: "Save Leave", highlight: true }],
+      panelLines: ["→ then Salary → verify Net Payable updated"],
     }),
   ],
   directory: [
     mock("directory", 0, {
-      windowTitle: "FlexHRM · Directory",
-      heading: "Directory Contacts",
-      cards: [
-        { label: "HR Helpline", value: "+91 98765 43210" },
-        { label: "IT Support", value: "it@company.com" },
+      subTabs: [{ label: "Employee Profiles", active: true }, { label: "Important Helplines" }],
+      heading: "Directory — Employee Profiles",
+      toolbar: [
+        { kind: "search", label: "Search contacts..." },
+        { kind: "filter", label: "Location ▾" },
       ],
-      panelLines: ["Name · Phone · Role · Location"],
+      cards: [
+        { label: "Priya Sharma", value: "+91 98765 43210" },
+        { label: "Rahul Verma", value: "+91 91234 56789" },
+      ],
     }),
     mock("directory", 1, {
-      windowTitle: "FlexHRM · Birthdays",
-      activeSidebar: "Birthdays",
+      subTabs: [{ label: "Employee Profiles" }, { label: "Important Helplines", active: true }],
+      heading: "Add Helpline",
+      panelLines: ["Name · Phone · Role · Category · Location", "→ Click Save / Add Helpline"],
+      toolbar: [{ kind: "button", label: "Add Helpline", highlight: true }],
+    }),
+  ],
+  birthdays: [
+    mock("birthdays", 0, {
       heading: "Birthdays — June 2025",
+      toolbar: [{ kind: "filter", label: "Month: June ▾", highlight: true }],
       table: {
-        headers: ["Name", "Date of Birth", "Location", "Role"],
-        rows: [["Priya Sharma", "15 Jun", "Mumbai HO", "Accountant"]],
+        headers: ["Name", "Date of Birth", "Location", "Today?"],
+        rows: [
+          ["Priya Sharma", "15 Jun", "Mumbai HO", "🎂 Today"],
+          ["Rahul Verma", "22 Jun", "Pune Branch", ""],
+        ],
       },
+      panelLines: ["Click Celebrate → confetti for today's birthdays"],
     }),
   ],
   schoolWork: [
     mock("schoolWork", 0, {
       activeSidebar: "Schools",
       heading: "School Registry",
+      formFields: SCHOOL_ADD_FORM,
       toolbar: [
         { kind: "search", label: "Search schools..." },
         { kind: "button", label: "Add School", highlight: true },
+        { kind: "button", label: "Import Excel" },
       ],
-      table: {
-        headers: ["School Name", "District", "Block", "Partner"],
-        rows: [["Govt. Primary School", "Pune", "Haveli", "ABC Foundation"]],
-      },
     }),
     mock("schoolWork", 1, {
       activeSidebar: "Monthly Billing",
-      sidebarItems: ["Dashboard", "School Work", "Schools", "Monthly Billing", "Field Team"],
       windowTitle: "FlexHRM · Monthly Billing",
-      heading: "Monthly Billing — June 2025",
+      subTabs: [{ label: "Create Invoice", active: true }, { label: "View Saved" }, { label: "Partner Pay" }],
+      heading: "Create Invoice — June 2025",
       toolbar: [{ kind: "button", label: "Generate Invoice", highlight: true }],
-      table: {
-        headers: ["School", "Students", "Amount", "Status"],
-        rows: [["Govt. Primary School", "120", "₹48,000", "Draft"]],
-      },
+      panelLines: ["Pick block → Elementary | Secondary tabs → Generate"],
     }),
     mock("schoolWork", 2, {
-      activeSidebar: "Expenses",
-      sidebarItems: ["Dashboard", "School Work", "Monthly Billing", "Expenses", "Field Team"],
-      windowTitle: "FlexHRM · Expenses",
-      heading: "School Work Expenses",
-      toolbar: [{ kind: "button", label: "Add Expense", highlight: true }],
+      activeSidebar: "Monthly Billing",
+      subTabs: [{ label: "Create Invoice" }, { label: "View Saved", active: true }],
+      heading: "View Saved Billings",
+      toolbar: [{ kind: "button", label: "Export PDF", highlight: true }],
       table: {
-        headers: ["Date", "Category", "Amount", "Notes"],
-        rows: [["12 Jun", "Materials", "₹2,400", "Stationery supply"]],
+        headers: ["Period", "Block", "Amount", "Status"],
+        rows: [["June 2025", "Haveli", "₹4.8L", "Saved"]],
       },
     }),
     mock("schoolWork", 3, {
-      windowTitle: "FlexHRM · Field Team",
-      activeSidebar: "Field Team",
-      heading: "Field Team — Supervisors",
-      toolbar: [{ kind: "button", label: "Add Supervisor", highlight: true }],
+      activeSidebar: "Monthly Billing",
+      subTabs: [{ label: "Partner Pay", active: true }],
+      heading: "Partner Pay — Bulk Pay",
+      toolbar: [{ kind: "button", label: "Bulk Pay", highlight: true }],
+      panelLines: ["→ archives to Saved School Bulk Pay"],
+    }),
+    mock("schoolWork", 4, {
+      activeSidebar: "Expenses",
+      windowTitle: "FlexHRM · Expenses",
+      heading: "School Expenses",
+      toolbar: [{ kind: "button", label: "Add Expense", highlight: true }],
       table: {
-        headers: ["Name", "Phone", "Blocks", "Visits Today"],
-        rows: [["Amit Patil", "+91 98xxx", "Haveli", "3"]],
+        headers: ["Date", "School", "Amount", "Notes"],
+        rows: [["12 Jun", "Govt. Primary", "₹2,400", "Stationery"]],
       },
+    }),
+    mock("schoolWork", 5, {
+      activeSidebar: "Saved School Bulk Pay",
+      windowTitle: "FlexHRM · Saved School Bulk Pay",
+      heading: "Partner Bulk Pay Archive",
+      toolbar: [{ kind: "button", label: "Re-download", highlight: true }],
+      table: {
+        headers: ["Month", "Filename", "Total"],
+        rows: [["June 2025", "partner_bulk_june.xls", "₹1.2L"]],
+      },
+    }),
+  ],
+  fieldTeam: [
+    mock("fieldTeam", 0, {
+      subTabs: [
+        { label: "Visits", active: true },
+        { label: "Supervisors" },
+        { label: "Requests (2)" },
+        { label: "Commitment Diary" },
+      ],
+      heading: "Field Team Panel",
+      panelLines: ["School Work → Field Team · or Dashboard shortcuts"],
+    }),
+    mock("fieldTeam", 1, {
+      subTabs: [{ label: "Visits" }, { label: "Supervisors", active: true }],
+      heading: "Add Supervisor Account",
+      formFields: SUPERVISOR_ADD_FORM,
+      toolbar: [{ kind: "button", label: "Add Supervisor", highlight: true }],
+    }),
+    mock("fieldTeam", 2, {
+      subTabs: [{ label: "Visits", active: true }],
+      heading: "Review Visits",
+      toolbar: [
+        { kind: "filter", label: "Status: Submitted ▾", highlight: true },
+        { kind: "button", label: "Approve", highlight: true },
+        { kind: "button", label: "Reject" },
+      ],
+      table: {
+        headers: ["Supervisor", "School", "Date", "Status"],
+        rows: [["Amit Patil", "Govt. Primary", "12 Jun", "Submitted"]],
+      },
+    }),
+    mock("fieldTeam", 3, {
+      subTabs: [{ label: "Requests (2)", active: true }],
+      heading: "Supervisor Requests",
+      panelLines: ["Click request → read message/photos", "Type response → Respond → Close"],
+      toolbar: [{ kind: "button", label: "Respond", highlight: true }],
+    }),
+    mock("fieldTeam", 4, {
+      subTabs: [{ label: "Commitment Diary", active: true }],
+      heading: "Commitment Diary",
+      table: {
+        headers: ["Supervisor", "Date", "School", "Status"],
+        rows: [["Amit Patil", "15 Jun", "ZP School", "Overdue"]],
+      },
+      panelLines: ["Update status · Admin notes · Overdue badge"],
     }),
   ],
   bids: [
     mock("bids", 0, {
       activeSidebar: "Tenders",
-      windowTitle: "FlexHRM · Tenders",
       heading: "Tender Filings",
-      toolbar: [{ kind: "button", label: "Add Tender", highlight: true }],
+      cards: [
+        { label: "All", value: "24" },
+        { label: "Upcoming", value: "5" },
+        { label: "Passed", value: "12" },
+      ],
+      toolbar: [
+        { kind: "button", label: "Add Tender", highlight: true },
+        { kind: "button", label: "Import Excel" },
+      ],
       table: {
-        headers: ["Bid No", "Department", "End Date", "Amount"],
-        rows: [["TND-2025-04", "Education Dept", "30 Jun", "₹12,00,000"]],
+        headers: ["Bid No", "Dept", "End Date", "Amount"],
+        rows: [["TND-04", "Education", "30 Jun", "₹12L"]],
       },
     }),
     mock("bids", 1, {
+      activeSidebar: "Tenders",
+      heading: "Tender Detail & GeM Link",
+      panelLines: ["Expand row → GeM PDF link · Edit · Delete", "Needs Attention: deadline ≤7 days"],
+    }),
+    mock("bids", 2, {
       windowTitle: "FlexHRM · Contracts",
       activeSidebar: "Contracts",
       heading: "Active Contracts",
+      toolbar: [{ kind: "button", label: "Add Contract", highlight: true }],
       table: {
-        headers: ["Contract", "Party", "Start", "End", "Value"],
-        rows: [["CTR-101", "ABC Corp", "01 Jan", "31 Dec", "₹24,00,000"]],
+        headers: ["Contract", "Party", "End", "Value"],
+        rows: [["CTR-101", "ABC Corp", "31 Dec", "₹24L"]],
       },
+      panelLines: ["Link to won tender · → then BG & DD if needed"],
     }),
-    mock("bids", 2, {
-      windowTitle: "FlexHRM · Car Papers",
-      activeSidebar: "Renewals",
-      heading: "Renewals — Car Papers",
+  ],
+  renewals: [
+    mock("renewals", 0, {
+      activeSidebar: "Car Papers",
+      heading: "Car Papers Renewals",
+      cards: [
+        { label: "Total", value: "8" },
+        { label: "Expiring Soon", value: "2" },
+        { label: "Expired", value: "1" },
+      ],
+      toolbar: [{ kind: "button", label: "Add Renewal", highlight: true }],
       table: {
         headers: ["Vehicle", "Document", "Expiry", "Status"],
         rows: [["MH-12-AB-1234", "Insurance", "15 Jul", "Due soon"]],
       },
     }),
+    mock("renewals", 1, {
+      activeSidebar: "IT Renewals",
+      windowTitle: "FlexHRM · IT Renewals",
+      heading: "IT Renewals — Domains & Servers",
+      toolbar: [{ kind: "button", label: "Add Renewal", highlight: true }],
+      table: {
+        headers: ["Name", "Owner", "Expiry", "Status"],
+        rows: [["flexhrm.com", "IT Team", "01 Aug", "Expiring"]],
+      },
+    }),
+    mock("renewals", 2, {
+      activeSidebar: "Licenses",
+      windowTitle: "FlexHRM · Licenses",
+      heading: "License Renewals",
+      toolbar: [
+        { kind: "button", label: "Add Renewal", highlight: true },
+        { kind: "button", label: "Import Excel" },
+      ],
+      panelLines: ["Upload documents · Expiring Soon card weekly"],
+    }),
+  ],
+  bgDd: [
+    mock("bgDd", 0, {
+      heading: "BG & DD Register",
+      cards: [
+        { label: "Total", value: "15" },
+        { label: "Expiring Soon", value: "3" },
+        { label: "Expired", value: "1" },
+      ],
+      toolbar: [
+        { kind: "search", label: "Search..." },
+        { kind: "filter", label: "Type: BG/DD ▾" },
+      ],
+    }),
+    mock("bgDd", 1, {
+      heading: "Add BG / DD Record",
+      formFields: BG_DD_FORM,
+      toolbar: [{ kind: "button", label: "Add BG / DD", highlight: true }],
+    }),
+    mock("bgDd", 2, {
+      heading: "Document Attachments",
+      panelLines: ["Row → Documents → Upload PDF/image", "View preview · Delete if allowed"],
+      toolbar: [{ kind: "button", label: "Upload Document", highlight: true }],
+    }),
   ],
   roleAccess: [
     mock("roleAccess", 0, {
-      heading: "Admin Accounts",
-      toolbar: [{ kind: "button", label: "Grant Access", highlight: true }],
-      panelLines: ["Username · Password · Role · Location limits"],
-      table: {
-        headers: ["Username", "Role", "Locations", "Status"],
-        rows: [["hr.admin", "Super Admin", "All", "Active"]],
-      },
+      subTabs: [{ label: "Admin Accounts", active: true }, { label: "Roles & Permissions" }, { label: "Activity Log" }, { label: "Device Rules" }],
+      heading: "Invite New Admin",
+      formFields: ADMIN_INVITE_FORM,
+      toolbar: [{ kind: "button", label: "Grant Administrator Access", highlight: true }],
     }),
     mock("roleAccess", 1, {
-      heading: "Roles & Permissions",
+      subTabs: [{ label: "Admin Accounts", active: true }],
+      heading: "Configure Existing Admin",
       table: {
-        headers: ["Module", "View", "Edit"],
+        headers: ["Username", "Role", "Status", "Action"],
+        rows: [["hr.admin", "Super Admin", "Active", "Configure"]],
+      },
+      panelLines: ["Configure → change role · disable login · locations → Save"],
+    }),
+    mock("roleAccess", 2, {
+      subTabs: [{ label: "Roles & Permissions", active: true }],
+      heading: "Permission Matrix",
+      table: {
+        headers: ["Module", "View ☑", "Edit ☑"],
         rows: [
           ["Employees", "✓", "✓"],
           ["Salary", "✓", "—"],
+          ["School Work", "✓", "✓"],
         ],
       },
-      toolbar: [{ kind: "button", label: "Save Role", highlight: true }],
-    }),
-    mock("roleAccess", 2, {
-      heading: "Activity Log",
-      toolbar: [{ kind: "search", label: "Search audit logs..." }],
-      table: {
-        headers: ["Admin", "Action", "Time"],
-        rows: [["hr.admin", "Updated employee EMP-001", "Today 10:42"]],
-      },
+      toolbar: [{ kind: "button", label: "Save role permissions", highlight: true }],
     }),
     mock("roleAccess", 3, {
-      heading: "Device Rules",
-      panelLines: ["Blocked Android apps before Field Team login"],
+      subTabs: [{ label: "Activity Log", active: true }],
+      heading: "Activity Log / Audit Trail",
+      toolbar: [
+        { kind: "search", label: "Search logs..." },
+        { kind: "button", label: "Export Excel", highlight: true },
+        { kind: "button", label: "Flush Trail (admin)" },
+      ],
       table: {
-        headers: ["App Name", "Package ID"],
-        rows: [["WhatsApp", "com.whatsapp"]],
+        headers: ["Admin", "Action", "Time"],
+        rows: [["hr.admin", "Updated EMP-001", "10:42"]],
       },
+    }),
+    mock("roleAccess", 4, {
+      subTabs: [{ label: "Device Rules", active: true }],
+      heading: "Blocked Android Apps",
+      table: {
+        headers: ["App", "Package ID", "Delete"],
+        rows: [["WhatsApp", "com.whatsapp", "✕"]],
+      },
+      toolbar: [{ kind: "button", label: "Add blocked app", highlight: true }],
     }),
   ],
   supervisorApp: [
     mock("supervisorApp", 0, {
-      heading: "Install FlexHRM Field Team",
-      panelLines: ["Android APK · One device per account · Secure share only"],
+      heading: "Install APK",
+      panelLines: [
+        "Admin shares APK securely",
+        "Android → Allow unknown sources → Install",
+        "One device per account on first login",
+      ],
     }),
     mock("supervisorApp", 1, {
       heading: "Supervisor Login",
-      panelLines: ["Phone number · Password", "Device Rules check before sign-in"],
+      formFields: MOBILE_LOGIN_FORM,
       toolbar: [{ kind: "button", label: "Sign In", highlight: true }],
     }),
     mock("supervisorApp", 2, {
       heading: "Today's Visits",
       table: {
-        headers: ["School", "Block", "Status"],
+        headers: ["School", "Block", "Action"],
         rows: [
-          ["Govt. Primary School", "Haveli", "Check in"],
-          ["ZP School No. 4", "Baramati", "Done ✓"],
+          ["Govt. Primary", "Haveli", "Check In →"],
+          ["ZP School #4", "Baramati", "Done ✓"],
         ],
       },
+      panelLines: ["Tap visit → photos · notes → Submit"],
     }),
     mock("supervisorApp", 3, {
       heading: "Profile & Requests",
-      panelLines: ["Update photo · Language · Submit leave request"],
-      toolbar: [{ kind: "button", label: "My Profile", highlight: true }],
+      toolbar: [
+        { kind: "button", label: "Raise Request", highlight: true },
+        { kind: "button", label: "My Profile" },
+      ],
+      panelLines: ["Profile → photo · language", "Requests → admin responds in portal"],
+    }),
+    mock("supervisorApp", 4, {
+      heading: "Calendar & Commitments",
+      panelLines: ["Calendar tab → commitments by date", "Tap → complete visit when due"],
     }),
   ],
-  portalTips: [
-    mock("portalTips", 0, {
-      heading: "Dashboard",
-      toolbar: [
-        { kind: "filter", label: "Month: June", highlight: true },
-        { kind: "filter", label: "Year: 2025-2026", highlight: true },
-      ],
-      cards: [
-        { label: "Active Employees", value: "142" },
-        { label: "This Month Payroll", value: "₹4.8L" },
-      ],
-    }),
-    mock("portalTips", 1, {
-      heading: "Profile Menu",
+  monthlyPayroll: [
+    mock("monthlyPayroll", 0, {
+      subTabs: [{ label: "Configuration", active: true }],
+      heading: "Step 1 — Confirm Setup",
       panelLines: [
-        "My Account Profile",
-        "System Tour",
-        "Portal Settings",
-        "Sign Out / Logout",
+        "Employees → Configuration → rules · bank · locations",
+        "Employee List → all active staff correct",
       ],
     }),
-    mock("portalTips", 2, {
-      heading: "Sidebar — Role Permissions",
-      panelLines: ["Missing tab? Your role may lack View access.", "Ask super-admin under Role & Access"],
-      sidebarItems: ["Dashboard", "Employees", "Attendance", "Salary (hidden)"],
+    mock("monthlyPayroll", 1, {
+      activeSidebar: "Attendance",
+      heading: "Step 2 — Mark Attendance",
+      toolbar: [
+        { kind: "filter", label: "Month: June ▾", highlight: true },
+        { kind: "button", label: "Bulk Mark Attendance" },
+      ],
+      panelLines: ["Mark every day P or A · Bulk for holidays"],
     }),
-    mock("portalTips", 3, {
-      heading: "Notifications",
-      toolbar: [{ kind: "button", label: "Bell · 3 unread", highlight: true }],
-      panelLines: ["New supervisor request", "Visit photo uploaded", "Field team alert"],
+    mock("monthlyPayroll", 2, {
+      activeSidebar: "Advance & Penalty",
+      heading: "Step 3 — Ledger Entries",
+      toolbar: [{ kind: "button", label: "Settle Selected", highlight: true }],
+      panelLines: ["Select employees → Advance/Penalty → batch settle"],
+    }),
+    mock("monthlyPayroll", 3, {
+      activeSidebar: "Salary",
+      heading: "Step 4 — Salary & Bank Pay",
+      toolbar: [
+        { kind: "button", label: "Export PDF" },
+        { kind: "button", label: "Bulk Pay", highlight: true },
+      ],
+      panelLines: ["Verify net pay → Bulk Pay → Saved Bulk Pay archive"],
+    }),
+  ],
+  leave: [
+    mock("leave", 0, {
+      heading: "Leave Module — Coming Soon",
+      panelLines: [
+        "Full leave register planned",
+        "For now: Attendance → mark A or H on leave days",
+        "Sidebar → Leave → read status message",
+      ],
     }),
   ],
 };
@@ -518,7 +762,7 @@ const STEP_MOCKS: Record<string, TourThumbnailMock[]> = {
 export function getTourThumbnailMock(sectionId: string, stepIndex: number): TourThumbnailMock {
   const steps = STEP_MOCKS[sectionId];
   if (steps?.[stepIndex]) return steps[stepIndex];
-  const fallback = SYSTEM_MOCK_DEFAULTS[sectionId] ?? SYSTEM_MOCK_DEFAULTS.portalTips;
+  const fallback = SYSTEM_MOCK_DEFAULTS[sectionId] ?? SYSTEM_MOCK_DEFAULTS.gettingStarted;
   return {
     ...fallback,
     month: "June",

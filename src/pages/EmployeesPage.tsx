@@ -636,8 +636,14 @@ export default function EmployeesPage() {
   } = useHRMS();
 
   const [isBulkEditMode, setIsBulkEditMode] = useState(false);
+  const [showPendingApprovalsModal, setShowPendingApprovalsModal] = useState(false);
 
   const canReviewBulkEdits = !!userPermissions.admin?.edit;
+
+  const openPendingApprovalsModal = () => {
+    void fetchEmployeeChangeRequests();
+    setShowPendingApprovalsModal(true);
+  };
   return (
     <>
                             <>
@@ -723,9 +729,13 @@ export default function EmployeesPage() {
                                       </div>
                                       <div className="flex items-center gap-2 flex-wrap">
                                         {pendingChangeCount > 0 && (
-                                          <span className="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full border border-amber-200">
+                                          <button
+                                            type="button"
+                                            onClick={openPendingApprovalsModal}
+                                            className="text-xs font-bold bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full border border-amber-200 hover:bg-amber-200 transition cursor-pointer"
+                                          >
                                             {pendingChangeCount} pending approval{pendingChangeCount !== 1 ? "s" : ""}
-                                          </span>
+                                          </button>
                                         )}
                                         <button
                                           type="button"
@@ -779,20 +789,16 @@ export default function EmployeesPage() {
                                             : "Edit, delete, or bulk-export rows into statutory Indian onboarding templates"}
                                         </p>
                                       </div>
+                                      {pendingChangeCount > 0 && !userPermissions.employees?.edit && (
+                                        <button
+                                          type="button"
+                                          onClick={openPendingApprovalsModal}
+                                          className="text-xs font-bold bg-amber-100 text-amber-800 px-3 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-200 transition cursor-pointer shrink-0"
+                                        >
+                                          {pendingChangeCount} pending approval{pendingChangeCount !== 1 ? "s" : ""}
+                                        </button>
+                                      )}
                                     </div>
-
-                                    {pendingChangeCount > 0 && (
-                                      <div className="mb-5 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                                        <EmployeeChangeRequestsPanel
-                                          requests={employeeChangeRequests}
-                                          isLoading={isFetchingChangeRequests}
-                                          canReview={canReviewBulkEdits}
-                                          onApprove={handleApproveEmployeeChanges}
-                                          onReject={handleRejectEmployeeChanges}
-                                          onRefresh={fetchEmployeeChangeRequests}
-                                        />
-                                      </div>
-                                    )}
           
                                     {isLoading ? (
                                       <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-400 font-medium">
@@ -846,6 +852,29 @@ export default function EmployeesPage() {
                                 </>
                               )}
                             </>
+      {showPendingApprovalsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+          onClick={() => setShowPendingApprovalsModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="overflow-y-auto p-5">
+              <EmployeeChangeRequestsPanel
+                requests={employeeChangeRequests}
+                isLoading={isFetchingChangeRequests}
+                canReview={canReviewBulkEdits}
+                onApprove={handleApproveEmployeeChanges}
+                onReject={handleRejectEmployeeChanges}
+                onRefresh={fetchEmployeeChangeRequests}
+                onClose={() => setShowPendingApprovalsModal(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

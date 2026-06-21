@@ -9,28 +9,28 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Cover-crops the image to the ID card photo slot (fills the round frame). */
+/** Cover-crops to the circular portrait slot (center-top, same as card CSS). */
 function renderCoverPhoto(img: HTMLImageElement): string {
-  const { width: targetW, height: targetH } = CARD_PHOTO;
+  const targetSize = CARD_PHOTO.circleSize;
   const srcW = img.naturalWidth;
   const srcH = img.naturalHeight;
 
-  const scale = Math.max(targetW / srcW, targetH / srcH);
+  const scale = Math.max(targetSize / srcW, targetSize / srcH);
   const drawW = srcW * scale;
   const drawH = srcH * scale;
-  const offsetX = (targetW - drawW) / 2;
-  const offsetY = (targetH - drawH) / 2;
+  const offsetX = (targetSize - drawW) / 2;
+  const offsetY = 0;
 
   const canvas = document.createElement("canvas");
-  canvas.width = targetW;
-  canvas.height = targetH;
+  canvas.width = targetSize;
+  canvas.height = targetSize;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("Unable to process the selected photo.");
   }
 
   ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
-  return canvas.toDataURL("image/jpeg", 0.88);
+  return canvas.toDataURL("image/jpeg", 0.92);
 }
 
 /** Fits the photo for the round ID card slot on upload. */

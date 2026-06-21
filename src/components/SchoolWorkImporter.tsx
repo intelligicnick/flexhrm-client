@@ -2,22 +2,26 @@ import React, { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Upload, Download, AlertTriangle, CheckCircle, FileSpreadsheet, X } from "lucide-react";
 import * as XLSX from "xlsx";
-import ExcelJS from "exceljs";
-import { SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
+import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   analyzeSchoolHeaders,
   parseSchoolSheetRows,
   validateSchoolWork,
 } from "../lib/school-work-helpers";
+import { downloadSchoolWorkTemplate } from "../lib/school-work-template";
 
 interface SchoolWorkImporterProps {
   onImportSuccess: (schools: Partial<SchoolWork>[]) => void;
   existingUdiseCodes: string[];
+  districts?: SchoolDistrict[];
+  blocks?: SchoolBlock[];
 }
 
 export default function SchoolWorkImporter({
   onImportSuccess,
   existingUdiseCodes,
+  districts = [],
+  blocks = [],
 }: SchoolWorkImporterProps) {
   const [dragActive, setDragActive] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
@@ -32,47 +36,18 @@ export default function SchoolWorkImporter({
     invalid: { row: Partial<SchoolWork>; index: number; errors: Record<string, string> }[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const configuredDistricts = districts.filter((d) => !d.deleted && d.name.trim());
+  const configuredBlocks = blocks.filter((b) => !b.deleted && b.name.trim());
+  const hasLocationLists = configuredDistricts.length > 0 && configuredBlocks.length > 0;
 
   const handleDownloadTemplate = async (isSample = false) => {
-    const workbook = new ExcelJS.Workbook();
-    const ws = workbook.addWorksheet("School Work Template");
-    ws.addRow(SCHOOL_EXCEL_ROW_HEADERS);
-    const headerRow = ws.getRow(1);
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF791A" } };
-    if (isSample) {
-      ws.addRow([
-        1,
-        "Govt. Primary School Example",
-        "12345678901",
-        "Primary School",
-        "Ramesh Kumar",
-        "9876543210",
-        "Suresh Das",
-        "Suresh Das",
-        "302910243689",
-        "PUNB0121400",
-        "Bank Transfer",
-        4,
-        50,
-        3750,
-        3750,
-        "Standard rate per toilet",
-        "Block A",
-        "Patna",
-        12000,
-        "Sample entry",
-      ]);
+    try {
+      await downloadSchoolWorkTemplate({ isSample, districts, blocks });
+    } catch (err: unknown) {
+      setErrorDetails(
+        "Failed to create Excel template: " + (err instanceof Error ? err.message : String(err)),
+      );
     }
-    ws.columns.forEach((col) => { col.width = 18; });
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = isSample ? "school_work_sample.xlsx" : "school_work_template.xlsx";
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const processFile = (file: File) => {
@@ -97,7 +72,7 @@ export default function SchoolWorkImporter({
         const valid: Partial<SchoolWork>[] = [];
         const invalid: { row: Partial<SchoolWork>; index: number; errors: Record<string, string> }[] = [];
         rows.forEach((row, i) => {
-          const errors = validateSchoolWork(row);
+          const errors = validateSchoolWork(row, { districts, blocks });
           const udise = row.udise || "";
           if (existingUdiseCodes.includes(udise)) {
             errors.udise = `UDISE "${udise}" already exists.`;
@@ -140,7 +115,7 @@ export default function SchoolWorkImporter({
             Bulk School Work Import
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Upload Excel matching the school work column layout (school name, UDISE, headmaster, bank details, etc.)
+            Upload Excel matching the school work column layout. Choose district first — block dropdown lists only blocks under that district.
           </p>
         </div>
         <div className="flex gap-2">
@@ -160,6 +135,13 @@ export default function SchoolWorkImporter({
           </button>
         </div>
       </div>
+
+      {!hasLocationLists && (
+        <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-amber-800 text-xs flex items-start gap-2">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          Add districts and blocks under Employees → Configuration to enable Block and District dropdowns in the Excel template.
+        </div>
+      )}
 
       <div
         onDragEnter={handleDrag}

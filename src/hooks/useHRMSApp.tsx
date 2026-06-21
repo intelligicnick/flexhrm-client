@@ -162,6 +162,7 @@ import DialerOverlay from "../components/ui/DialerOverlay";
 import DirectoryContactCard from "../components/DirectoryContactCard";
 import { formatPhoneDisplay, phoneToDialString } from "../lib/phone-helpers";
 import ConfettiRain from "../components/ui/ConfettiRain";
+import { TOAST_DURATION_MS } from "../components/ui/AppToast";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 
@@ -1839,8 +1840,8 @@ export function useHRMSApp() {
         };
       });
 
-      triggerSuccess(`Bulk marked ${filtered.length} employees as "${bulkStatus}" from Day ${start} to ${end} for ${selectedMonth}.`);
-      await fetchExitEligibility(selectedMonth, true);
+      triggerSuccess("Attendance marked successfully.");
+      scheduleFetchExitEligibility(selectedMonth, true, TOAST_DURATION_MS);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply bulk attendance.");
     }
@@ -1930,8 +1931,8 @@ export function useHRMSApp() {
         return nextDb;
       });
 
-      triggerSuccess(`Successfully bulk marked ${bulkSelEmployees.length} employees as Present on selected dates for ${bulkSelMonths.join(", ")}!`);
-    
+      triggerSuccess("Attendance marked successfully.");
+
       // Reset wizard
       setBulkWizardStep("employees");
       setBulkSelEmployees([]);
@@ -1941,7 +1942,7 @@ export function useHRMSApp() {
       setIsBulkWizardOpen(false);
       setAttendanceSubView("grid"); // Go back to daily grid sheet screen!
       const refMonth = pickLatestMonthKey(bulkSelMonths.length > 0 ? bulkSelMonths : [selectedMonth]);
-      await fetchExitEligibility(refMonth, true);
+      scheduleFetchExitEligibility(refMonth, true, TOAST_DURATION_MS);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply wizard attendance.");
     }
@@ -4355,7 +4356,7 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
-    if (isLoggedIn && activeSidebarTab === "Employee Management") {
+    if (isLoggedIn && activeSidebarTab === "Employees") {
       fetchEmployeeChangeRequests();
     }
   }, [isLoggedIn, activeSidebarTab]);
@@ -4792,6 +4793,7 @@ export function useHRMSApp() {
           ? { skillCategory: normalizeSkillCategory(empData.skillCategory) || empData.skillCategory }
           : {}),
       };
+      delete (payload as Partial<Employee>).contractId;
       
       const url = isEdit ? `/api/employees/${empData.id}` : "/api/employees";
       const method = isEdit ? "PUT" : "POST";
@@ -6014,6 +6016,7 @@ export function useHRMSApp() {
     });
     if (!res.ok) throw await parseApiError(res, "Failed to create contract.");
     await fetchContracts();
+    await fetchBgDdRecords();
     triggerSuccess("Contract added.");
   };
 
@@ -6028,6 +6031,7 @@ export function useHRMSApp() {
     });
     if (!res.ok) throw await parseApiError(res, "Failed to update contract.");
     await fetchContracts();
+    await fetchBgDdRecords();
     triggerSuccess("Contract updated.");
   };
 
@@ -6049,6 +6053,7 @@ export function useHRMSApp() {
     if (!res.ok) throw await parseApiError(res, "Failed to import contracts.");
     const data = await res.json();
     await fetchContracts();
+    await fetchBgDdRecords();
     triggerSuccess(
       `Imported ${data.created || 0} new, updated ${data.updated || 0}, skipped ${data.skipped || 0}.`,
     );
@@ -6123,6 +6128,7 @@ export function useHRMSApp() {
     if (!res.ok) throw await parseApiError(res, "Failed to create BG/DD record.");
     const created = await res.json();
     await fetchBgDdRecords();
+    await fetchContracts();
     triggerSuccess("BG/DD record added.");
     return created;
   };
@@ -6138,6 +6144,7 @@ export function useHRMSApp() {
     });
     if (!res.ok) throw await parseApiError(res, "Failed to update BG/DD record.");
     await fetchBgDdRecords();
+    await fetchContracts();
     triggerSuccess("BG/DD record updated.");
   };
 

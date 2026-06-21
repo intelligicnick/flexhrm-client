@@ -11,6 +11,7 @@ import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
 import DashboardLayout from "./layouts/DashboardLayout";
 import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
+import EmployeeDataGatherPage from "./pages/EmployeeDataGatherPage";
 import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
 import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
 import { DEFAULT_PATH } from "./routes";
@@ -115,6 +116,7 @@ export default function App() {
         <Route path="/verify/:idNo/:verifyToken" element={<EmployeeVerifyPage />} />
         <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />
+        <Route path="/employee/update/:token" element={<EmployeeDataGatherPage />} />
         <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
         <Route path="/supervisor" element={<SupervisorLayout />}>
