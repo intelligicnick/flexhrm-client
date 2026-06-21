@@ -46,9 +46,9 @@ export default function EmployeeVerifyPage({
   const idNo = idOverride ?? parseIdCardFromVerifyParam(routeIdNo);
   const verifyToken =
     verifyTokenOverride ??
-    searchParams.get("token")?.trim() ||
-    parseVerifyTokenFromParam(routeVerifyToken, searchParams.toString()) ||
-    routeVerifyToken.trim();
+    (searchParams.get("token")?.trim() ||
+      parseVerifyTokenFromParam(routeVerifyToken, searchParams.toString()) ||
+      routeVerifyToken.trim());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [record, setRecord] = useState<IdCardVerifyResult | null>(null);

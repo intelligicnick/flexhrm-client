@@ -76,7 +76,6 @@ function PortalRoutes() {
   return (
     <Routes>
       <Route path={LOGIN_PATH} element={<PublicRoute><LoginPage /></PublicRoute>} />
-      <Route path="/" element={<NotFoundPage />} />
       <Route
         path="*"
         element={
@@ -150,6 +149,8 @@ export default function App() {
             }
           />
         </Route>
+        <Route path="/" element={<NotFoundPage />} />
+        <Route path="/login" element={<NotFoundPage />} />
         <Route
           path="/*"
           element={

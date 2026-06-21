@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { apiUrl } from "../../api";
 
@@ -17,24 +17,33 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
   const [svg, setSvg] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const loadCaptcha = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const res = await fetch(apiUrl("/api/auth/captcha"), { credentials: "include" });
-      if (!res.ok) throw new Error("Unable to load captcha.");
+      if (!res.ok) {
+        const message =
+          res.status === 404
+            ? "Captcha API is unavailable. Restart the backend server and try again."
+            : "Unable to load captcha.";
+        throw new Error(message);
+      }
       const data = (await res.json()) as { id: string; svg: string };
+      if (!data.id || !data.svg) throw new Error("Invalid captcha response.");
       setSvg(data.svg);
-      onChange({ id: data.id, answer: "" });
+      onChangeRef.current({ id: data.id, answer: "" });
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Unable to load captcha.");
       setSvg("");
-      onChange({ id: "", answer: "" });
+      onChangeRef.current({ id: "", answer: "" });
     } finally {
       setLoading(false);
     }
-  }, [onChange]);
+  }, []);
 
   useEffect(() => {
     void loadCaptcha();
