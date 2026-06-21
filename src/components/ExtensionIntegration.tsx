@@ -44,12 +44,11 @@ export function ExtensionIntegrationModal({ open, onClose, onCopied }: Extension
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("hrms_session_token");
       const response = await fetch("/api/smart-capture/connection-code", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ flexhrmUrl: extensionApiUrl() }),
       });

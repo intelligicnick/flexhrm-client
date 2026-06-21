@@ -1381,9 +1381,14 @@ export function downloadSchoolAxisBulkPayXls(
   return { exported, totalAmount, fileBase64: uint8ToBase64(archiveBuffer) };
 }
 
-export function getEmployeePhotoUrl(employeeId: string, photo?: string): string | null {
-  if (!employeeId?.trim() || !photo?.trim()) return null;
-  return `/api/employees/${encodeURIComponent(employeeId)}/photo`;
+import { resolveEmployeePhotoUrl } from "./lib/media-url";
+
+export function getEmployeePhotoUrl(
+  employeeId: string,
+  photo?: string,
+  photoUrl?: string,
+): string | null {
+  return resolveEmployeePhotoUrl(employeeId, photo, photoUrl);
 }
 
 export function readImageFileAsDataUrl(file: File): Promise<string> {

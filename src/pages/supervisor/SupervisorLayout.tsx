@@ -108,15 +108,6 @@ function SupervisorLayoutInner() {
       }
 
       setValid(true);
-      try {
-        const unreadRes = await supervisorFetch("/api/notifications/supervisor/unread-count");
-        if (unreadRes.ok) {
-          const data = await unreadRes.json();
-          setUnreadCount(data.count || 0);
-        }
-      } catch {
-        setUnreadCount(0);
-      }
     } catch {
       setValid((current) => (current === null || current === true ? true : false));
     }
@@ -130,7 +121,7 @@ function SupervisorLayoutInner() {
     if (valid !== true) return;
     const timer = window.setInterval(() => {
       void checkSession();
-    }, 45_000);
+    }, 120_000);
     return () => window.clearInterval(timer);
   }, [valid, checkSession]);
 
@@ -165,13 +156,15 @@ function SupervisorLayoutInner() {
     fetchUnreadCount: fetchSupervisorUnreadCount,
     fetchNotifications: fetchSupervisorNotifications,
     lang,
+    pollIntervalMs: 60_000,
   });
 
   useEffect(() => {
     if (valid === true) {
+      void fetchSupervisorUnreadCount();
       void requestBrowserNotificationPermission();
     }
-  }, [valid]);
+  }, [valid, fetchSupervisorUnreadCount]);
 
   const logout = async () => {
     try {

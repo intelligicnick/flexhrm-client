@@ -22,15 +22,16 @@ import {
   setNotificationSoundEnabled,
 } from "../../lib/notification-alerts";
 import { getSupervisorNotificationTarget } from "../../lib/notification-navigation";
+import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import { localizeSupervisorNotification } from "../../lib/supervisor-notifications-i18n";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 
 type PageTab = "raise" | "mine" | "notifications";
 
-function photoSrc(photo: { photoDataBase64: string; mimeType: string }) {
-  return photo.photoDataBase64.startsWith("data:")
-    ? photo.photoDataBase64
-    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`;
+import { resolvePhotoSrc } from "../../lib/media-url";
+
+function photoSrc(photo: { photoDataBase64: string; mimeType: string; imagekitUrl?: string }) {
+  return resolvePhotoSrc(photo);
 }
 
 function formatWhen(iso?: string) {
@@ -113,18 +114,17 @@ export default function SupervisorRequestsPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [schoolsRes, requestsRes, notificationsRes, unreadRes] = await Promise.all([
-        supervisorFetch("/api/school-visits/supervisor/schools"),
+      const [schoolList, requestsRes, summaryRes] = await Promise.all([
+        fetchSupervisorSchools(supervisorFetch),
         supervisorFetch("/api/supervisor-requests/supervisor/mine"),
-        supervisorFetch("/api/notifications/supervisor/mine"),
-        supervisorFetch("/api/notifications/supervisor/unread-count"),
+        supervisorFetch("/api/notifications/supervisor/summary"),
       ]);
-      if (schoolsRes.ok) setSchools(await schoolsRes.json());
+      setSchools(schoolList);
       if (requestsRes.ok) setRequests(await requestsRes.json());
-      if (notificationsRes.ok) setNotifications(await notificationsRes.json());
-      if (unreadRes.ok) {
-        const data = await unreadRes.json();
-        setUnreadCount(data.count || 0);
+      if (summaryRes.ok) {
+        const data = await summaryRes.json();
+        setNotifications(Array.isArray(data.items) ? data.items : []);
+        setUnreadCount(Number(data.count) || 0);
       }
     } catch {
       /* ignore */
@@ -151,14 +151,22 @@ export default function SupervisorRequestsPage() {
     );
     if (unread.length === 0) return;
     void (async () => {
-      for (const req of unread) {
-        await supervisorFetch(`/api/supervisor-requests/supervisor/${req.id}/read`, {
-          method: "PATCH",
-        });
-      }
-      await loadData();
+      await Promise.all(
+        unread.map((req) =>
+          supervisorFetch(`/api/supervisor-requests/supervisor/${req.id}/read`, {
+            method: "PATCH",
+          }),
+        ),
+      );
+      setRequests((prev) =>
+        prev.map((req) =>
+          unread.some((u) => u.id === req.id)
+            ? { ...req, supervisorReadAt: new Date().toISOString() }
+            : req,
+        ),
+      );
     })();
-  }, [tab, loading, requests, supervisorFetch, loadData]);
+  }, [tab, loading, requests, supervisorFetch]);
 
   const filteredSchools = useMemo(() => {
     const q = schoolSearch.trim().toLowerCase();

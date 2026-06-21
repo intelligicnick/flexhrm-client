@@ -1,4 +1,5 @@
 import { Employee } from "../types";
+import { getMonthLedger } from "./ledger-helpers";
 import {
   normalizeSkillCategory,
   computeProratedGrossAndBasic,
@@ -8,6 +9,7 @@ import {
   isPfEsicCompliant,
   isProfessionalTaxApplicable,
   resolveFullMonthSalary,
+  resolveEmployeeDailyWage,
 } from "../utils";
 import { safeNumber, getDaysInMonthStatic } from "./date-helpers";
 import { isEmployeeExitedOnDayStatic } from "./employee-helpers";
@@ -62,13 +64,13 @@ export const getSalaryColumnValue = (
     month,
   });
   
-  const ledger = emp.monthlyLedger?.[month];
-  const adv = ledger ? safeNumber(ledger.advance) : 0;
-  const pen = ledger ? safeNumber(ledger.penalty) : 0;
-  const uniform = ledger ? safeNumber(ledger.uniform) : 0;
-  const food = ledger ? safeNumber(ledger.foodPerk) : 0;
-  const acc = ledger ? safeNumber(ledger.accommodationPerk) : 0;
-  const conv = ledger ? safeNumber(ledger.conveyancePerk) : 0;
+  const ledger = getMonthLedger(emp, month);
+  const adv = ledger.advance;
+  const pen = ledger.penalty;
+  const uniform = ledger.uniform;
+  const food = ledger.foodPerk;
+  const acc = ledger.accommodationPerk;
+  const conv = ledger.conveyancePerk;
   
   const netSalaryVal = safeNumber(gross) - safeNumber(empPf) - safeNumber(empEsic) - safeNumber(pt);
   const totalDeductionsVal = safeNumber(empPf) + safeNumber(empEsic) + safeNumber(pt) + safeNumber(adv) + safeNumber(pen) + safeNumber(uniform);

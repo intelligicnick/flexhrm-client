@@ -16,10 +16,10 @@ import { SupervisorEmptyState, SupervisorLoadingScreen } from "./SupervisorUI";
 
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 
+import { resolvePhotoSrc } from "../../lib/media-url";
+
 function photoSrc(photo: SchoolVisit["photos"][number]) {
-  return photo.photoDataBase64.startsWith("data:")
-    ? photo.photoDataBase64
-    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`;
+  return resolvePhotoSrc(photo);
 }
 
 function VisitCard({ visit, tStatus }: { visit: SchoolVisit; tStatus: (s: string) => string }) {

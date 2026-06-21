@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { resolveProfilePhotoSrc } from "../lib/media-url";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -198,9 +198,9 @@ export default function SchoolSupervisorViewModal({
             <div className="relative flex items-start justify-between gap-4">
               <div className="flex min-w-0 items-start gap-4">
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[#ff791a] text-lg font-black tracking-wide text-white shadow-lg sm:h-20 sm:w-20 overflow-hidden">
-                  {supervisor.profilePhotoBase64 ? (
+                  {resolveProfilePhotoSrc(supervisor) ? (
                     <img
-                      src={supervisor.profilePhotoBase64}
+                      src={resolveProfilePhotoSrc(supervisor)}
                       alt=""
                       className="h-full w-full object-cover"
                     />

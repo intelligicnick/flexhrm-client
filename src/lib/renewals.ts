@@ -4,6 +4,7 @@ import {
   RenewalCategory,
   RenewalDocument,
 } from "../types";
+import { resolveDocumentViewUrl } from "./media-url";
 
 export const RENEWAL_TAB_TO_CATEGORY: Record<string, RenewalCategory> = {
   "Car Papers": "car_papers",
@@ -39,8 +40,10 @@ export function getSubtypeLabels(category: RenewalCategory): Record<string, stri
   return LICENSE_SUBTYPE_LABELS;
 }
 
-export function getRenewalDocumentUrl(renewalId: string, docId: string): string {
-  return `/api/renewals/${encodeURIComponent(renewalId)}/documents/${encodeURIComponent(docId)}`;
+export function getRenewalDocumentUrl(renewalId: string, doc: Pick<RenewalDocument, "id" | "imagekitUrl">): string {
+  return resolveDocumentViewUrl(doc, (docId) =>
+    `/api/renewals/${encodeURIComponent(renewalId)}/documents/${encodeURIComponent(docId)}`,
+  );
 }
 
 async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {

@@ -24,6 +24,7 @@ export default function IdCardPanel({
   onIdCardEnsured,
 }: IdCardPanelProps) {
   const [idCard, setIdCard] = useState(employee.idCard?.trim() || "");
+  const [verifyToken, setVerifyToken] = useState("");
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [cardPhotoUrl, setCardPhotoUrl] = useState<string | null>(null);
   const [idLoading, setIdLoading] = useState(true);
@@ -46,9 +47,13 @@ export default function IdCardPanel({
         if (!res.ok) {
           throw new Error("Unable to assign ID card number.");
         }
-        const payload = (await res.json()) as { idCard: string };
+        const payload = (await res.json()) as {
+          idCard: string;
+          idCardVerifyToken: string;
+        };
         if (cancelled) return;
         setIdCard(payload.idCard);
+        setVerifyToken(payload.idCardVerifyToken);
         onIdCardEnsured?.(payload.idCard);
       } catch (err) {
         console.error(err);
@@ -102,7 +107,7 @@ export default function IdCardPanel({
     let cancelled = false;
 
     async function buildQr() {
-      if (!idCard || idCard === "—" || idLoading) {
+      if (!idCard || idCard === "—" || !verifyToken || idLoading) {
         setQrCode(null);
         return;
       }
@@ -110,6 +115,7 @@ export default function IdCardPanel({
       try {
         const url = await generateEmployeeQrDataUrl({
           idNo: idCard,
+          verifyToken,
           name: data.name,
           employeeCode: employee.employeeCode || employee.id,
           designation: data.designation,
@@ -135,6 +141,7 @@ export default function IdCardPanel({
     };
   }, [
     idCard,
+    verifyToken,
     idLoading,
     data.name,
     data.designation,
@@ -171,7 +178,7 @@ export default function IdCardPanel({
     height: CARD_SIZE.heightPx,
   };
 
-  const exportsDisabled = !!busy || idLoading || !idCard || idCard === "—";
+  const exportsDisabled = !!busy || idLoading || !idCard || idCard === "—" || !verifyToken;
 
   return (
     <div className="space-y-4">

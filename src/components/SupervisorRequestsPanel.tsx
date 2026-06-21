@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle, MessageSquare, XCircle } from "lucide-react";
 import { SupervisorRequest } from "../types";
+import { resolvePhotoSrc } from "../lib/media-url";
 
 interface SupervisorRequestsPanelProps {
   requests: SupervisorRequest[];
@@ -30,10 +31,8 @@ function formatDate(iso?: string): string {
   }
 }
 
-function photoSrc(photo: { photoDataBase64: string; mimeType: string }) {
-  return photo.photoDataBase64.startsWith("data:")
-    ? photo.photoDataBase64
-    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`;
+function photoSrc(photo: { photoDataBase64: string; mimeType: string; imagekitUrl?: string }) {
+  return resolvePhotoSrc(photo);
 }
 
 function StatusBadge({ status }: { status: string }) {

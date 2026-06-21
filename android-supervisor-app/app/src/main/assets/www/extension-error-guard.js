@@ -1,5 +1,5 @@
 /**
- * Suppress noisy browser-extension errors in DevTools (password managers, tab sync, ad blockers).
+ * Suppress noisy browser-extension and dev-PWA errors in DevTools.
  * Extensions call chrome.runtime.sendMessage without listeners — not an app bug.
  */
 (function () {
@@ -19,6 +19,12 @@
   var DEVTOOLS_PROMOS = [
     'download the react devtools',
     'react.dev/link/react-devtools',
+  ];
+
+  var DEV_NOISE = [
+    'precaching did not find a match',
+    'no route found for:',
+    '%cworkbox',
   ];
 
   function flatten(value, depth) {
@@ -44,20 +50,23 @@
     return String(value);
   }
 
-  function isExtensionNoise(value) {
-    var text = flatten(value, 0).toLowerCase();
-    for (var i = 0; i < MARKERS.length; i++) {
-      if (text.indexOf(MARKERS[i]) !== -1) return true;
+  function containsMarker(text, markers) {
+    for (var i = 0; i < markers.length; i++) {
+      if (text.indexOf(markers[i]) !== -1) return true;
     }
     return false;
   }
 
+  function isExtensionNoise(value) {
+    return containsMarker(flatten(value, 0).toLowerCase(), MARKERS);
+  }
+
   function isDevToolsPromo(value) {
-    var text = flatten(value, 0).toLowerCase();
-    for (var i = 0; i < DEVTOOLS_PROMOS.length; i++) {
-      if (text.indexOf(DEVTOOLS_PROMOS[i]) !== -1) return true;
-    }
-    return false;
+    return containsMarker(flatten(value, 0).toLowerCase(), DEVTOOLS_PROMOS);
+  }
+
+  function isDevNoise(value) {
+    return containsMarker(flatten(value, 0).toLowerCase(), DEV_NOISE);
   }
 
   function isExtensionSource(filename) {
@@ -66,6 +75,7 @@
       filename.indexOf('chrome-extension://') !== -1 ||
       filename.indexOf('moz-extension://') !== -1 ||
       /(^|\/)vendor\.js($|\?)/.test(filename) ||
+      /(^|\/)bg-dd($|\?|:)/.test(filename) ||
       /^VM\d+ /.test(filename)
     );
   }
@@ -125,6 +135,7 @@
       var text = argsToText(arguments);
       if (isExtensionNoise(text)) return;
       if (isDevToolsPromo(text)) return;
+      if (isDevNoise(text)) return;
       if (/vendor\.js/.test(text) && isExtensionNoise(text)) return;
       return original.apply(console, arguments);
     };

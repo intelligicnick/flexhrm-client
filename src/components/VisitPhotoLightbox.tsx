@@ -2,11 +2,12 @@ import React, { useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, MapPin, X, ZoomIn } from "lucide-react";
 import { SchoolVisit, SchoolVisitPhoto } from "../types";
+import { resolvePhotoSrc } from "../lib/media-url";
 
-export function visitPhotoSrc(photo: { photoDataBase64: string; mimeType: string }) {
-  return photo.photoDataBase64.startsWith("data:")
-    ? photo.photoDataBase64
-    : `data:${photo.mimeType};base64,${photo.photoDataBase64}`;
+export function visitPhotoSrc(
+  photo: Pick<SchoolVisitPhoto, "photoDataBase64" | "mimeType" | "imagekitUrl">,
+) {
+  return resolvePhotoSrc(photo);
 }
 
 interface VisitPhotoLightboxProps {

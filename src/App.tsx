@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
-import { parseIdCardFromVerifyParam } from "./components/id-card/verify-url";
+import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
 import "./index.css";
 import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
@@ -13,17 +13,33 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
 import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
 import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
-import SupervisorHomePage from "./pages/supervisor/SupervisorHomePage";
-import SupervisorVisitPage from "./pages/supervisor/SupervisorVisitPage";
-import SupervisorCalendarPage from "./pages/supervisor/SupervisorCalendarPage";
-import SupervisorHistoryPage from "./pages/supervisor/SupervisorHistoryPage";
-import SupervisorProfilePage from "./pages/supervisor/SupervisorProfilePage";
-import SupervisorRequestsPage from "./pages/supervisor/SupervisorRequestsPage";
 import { DEFAULT_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 
+const SupervisorHomePage = lazy(() => import("./pages/supervisor/SupervisorHomePage"));
+const SupervisorVisitPage = lazy(() => import("./pages/supervisor/SupervisorVisitPage"));
+const SupervisorCalendarPage = lazy(() => import("./pages/supervisor/SupervisorCalendarPage"));
+const SupervisorHistoryPage = lazy(() => import("./pages/supervisor/SupervisorHistoryPage"));
+const SupervisorRequestsPage = lazy(() => import("./pages/supervisor/SupervisorRequestsPage"));
+const SupervisorProfilePage = lazy(() => import("./pages/supervisor/SupervisorProfilePage"));
+
+function SupervisorRouteFallback() {
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center text-slate-400 bg-[#f4f6f9]">
+      <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isLoggedIn } = useHRMS();
+  const { isLoggedIn, authBootstrapping } = useHRMS();
+  if (authBootstrapping) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm text-slate-500">
+        Checking session…
+      </div>
+    );
+  }
   if (!isLoggedIn) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
@@ -37,19 +53,39 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 function VerifyByQuery() {
   const [searchParams] = useSearchParams();
   const idParam = searchParams.get("id") ?? searchParams.get("idCard");
+  const tokenParam = searchParams.get("token");
   if (!idParam?.trim()) {
-    return <EmployeeVerifyPage idOverride="" />;
+    return <EmployeeVerifyPage idOverride="" verifyTokenOverride="" />;
   }
   const id = parseIdCardFromVerifyParam(idParam);
-  return <Navigate to={`/verify/${encodeURIComponent(id)}`} replace />;
+  const token = tokenParam?.trim() || parseVerifyTokenFromParam(idParam, searchParams.toString());
+  if (token) {
+    return (
+      <Navigate
+        to={`/verify/${encodeURIComponent(id)}/${encodeURIComponent(token)}`}
+        replace
+      />
+    );
+  }
+  return <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />;
 }
 
 function HomeRedirect() {
   const [searchParams] = useSearchParams();
   const idParam = searchParams.get("id") ?? searchParams.get("idCard");
+  const tokenParam = searchParams.get("token");
   if (idParam?.trim()) {
     const id = parseIdCardFromVerifyParam(idParam);
-    return <Navigate to={`/verify/${encodeURIComponent(id)}`} replace />;
+    const token = tokenParam?.trim() || parseVerifyTokenFromParam(idParam, searchParams.toString());
+    if (token) {
+      return (
+        <Navigate
+          to={`/verify/${encodeURIComponent(id)}/${encodeURIComponent(token)}`}
+          replace
+        />
+      );
+    }
+    return <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />;
   }
   return <Navigate to={DEFAULT_PATH} replace />;
 }
@@ -76,17 +112,60 @@ export default function App() {
     <BrowserRouter>
       <GlobalHorizontalScroll />
       <Routes>
+        <Route path="/verify/:idNo/:verifyToken" element={<EmployeeVerifyPage />} />
         <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />
         <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
         <Route path="/supervisor" element={<SupervisorLayout />}>
-          <Route index element={<SupervisorHomePage />} />
-          <Route path="visit/:schoolId" element={<SupervisorVisitPage />} />
-          <Route path="calendar" element={<SupervisorCalendarPage />} />
-          <Route path="history" element={<SupervisorHistoryPage />} />
-          <Route path="requests" element={<SupervisorRequestsPage />} />
-          <Route path="profile" element={<SupervisorProfilePage />} />
+          <Route
+            index
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorHomePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="visit/:schoolId"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorVisitPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="calendar"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorCalendarPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="history"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorHistoryPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="requests"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorRequestsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="profile"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorProfilePage />
+              </Suspense>
+            }
+          />
         </Route>
         <Route
           path="/*"

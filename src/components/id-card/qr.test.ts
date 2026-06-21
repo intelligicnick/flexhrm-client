@@ -9,12 +9,19 @@ vi.mock("../../env", () => ({
 }));
 
 import { buildQrPayload } from "./qr";
-import { getIdCardVerifyUrl, parseIdCardFromVerifyParam } from "./verify-url";
+import {
+  getIdCardVerifyUrl,
+  parseIdCardFromVerifyParam,
+  parseVerifyTokenFromParam,
+} from "./verify-url";
+
+const SAMPLE_TOKEN =
+  "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456";
 
 describe("getIdCardVerifyUrl", () => {
-  it("uses a dedicated public verify route instead of the portal root", () => {
-    expect(getIdCardVerifyUrl("IS0111")).toBe(
-      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111`,
+  it("uses a dedicated public verify route with a secret token", () => {
+    expect(getIdCardVerifyUrl("IS0111", SAMPLE_TOKEN)).toBe(
+      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111/${encodeURIComponent(SAMPLE_TOKEN)}`,
     );
   });
 });
@@ -35,9 +42,28 @@ describe("parseIdCardFromVerifyParam", () => {
   it("reads the id query param from a full verification URL", () => {
     expect(
       parseIdCardFromVerifyParam(
-        `${PRODUCTION_FRONTEND_ORIGIN}/verify?id=IS0111`,
+        `${PRODUCTION_FRONTEND_ORIGIN}/verify?id=IS0111&token=${SAMPLE_TOKEN}`,
       ),
     ).toBe("IS0111");
+  });
+});
+
+describe("parseVerifyTokenFromParam", () => {
+  it("reads the token from a full verification URL path", () => {
+    expect(
+      parseVerifyTokenFromParam(
+        getIdCardVerifyUrl("IS0111", SAMPLE_TOKEN),
+      ),
+    ).toBe(SAMPLE_TOKEN);
+  });
+
+  it("reads the token query param from a full verification URL", () => {
+    expect(
+      parseVerifyTokenFromParam(
+        `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111`,
+        `token=${encodeURIComponent(SAMPLE_TOKEN)}`,
+      ),
+    ).toBe(SAMPLE_TOKEN);
   });
 });
 
@@ -45,6 +71,7 @@ describe("buildQrPayload", () => {
   it("encodes only the verification URL", () => {
     const payload = buildQrPayload({
       idNo: "IS0111",
+      verifyToken: SAMPLE_TOKEN,
       name: "Jane Doe",
       employeeCode: "IS-01",
       designation: "Supervisor",
@@ -54,7 +81,7 @@ describe("buildQrPayload", () => {
     });
 
     expect(payload).toBe(
-      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111`,
+      `${PRODUCTION_FRONTEND_ORIGIN}/verify/IS0111/${encodeURIComponent(SAMPLE_TOKEN)}`,
     );
   });
 });

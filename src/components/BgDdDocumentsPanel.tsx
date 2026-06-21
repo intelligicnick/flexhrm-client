@@ -67,7 +67,7 @@ function SavedDocumentPreviewModal({
   document: BgDdDocument;
   onClose: () => void;
 }) {
-  const apiPath = getBgDdDocumentUrl(bgDdId, document.id);
+  const apiPath = getBgDdDocumentUrl(bgDdId, document);
   const blobUrl = useAuthenticatedBlobUrl(apiPath);
   const isPdf = document.mimeType === "application/pdf";
 

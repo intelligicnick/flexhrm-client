@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { BadgeCheck, ShieldAlert, UserRound } from "lucide-react";
 import { apiUrl } from "../api";
-import { parseIdCardFromVerifyParam } from "../components/id-card/verify-url";
+import {
+  parseIdCardFromVerifyParam,
+  parseVerifyTokenFromParam,
+} from "../components/id-card/verify-url";
 
 export interface IdCardVerifyResult {
   verified: boolean;
@@ -21,13 +24,31 @@ export interface IdCardVerifyResult {
   hasPhoto: boolean;
 }
 
-function idCardPhotoUrl(idCard: string): string {
-  return apiUrl(`/api/employees/id-card/${encodeURIComponent(idCard)}/photo`);
+function idCardPhotoUrl(idCard: string, verifyToken: string): string {
+  const params = new URLSearchParams({ token: verifyToken });
+  return apiUrl(
+    `/api/employees/id-card/${encodeURIComponent(idCard)}/photo?${params.toString()}`,
+  );
 }
 
-export default function EmployeeVerifyPage({ idOverride }: { idOverride?: string } = {}) {
-  const { idNo: routeIdNo = "" } = useParams<{ idNo: string }>();
+export default function EmployeeVerifyPage({
+  idOverride,
+  verifyTokenOverride,
+}: {
+  idOverride?: string;
+  verifyTokenOverride?: string;
+} = {}) {
+  const { idNo: routeIdNo = "", verifyToken: routeVerifyToken = "" } = useParams<{
+    idNo: string;
+    verifyToken: string;
+  }>();
+  const [searchParams] = useSearchParams();
   const idNo = idOverride ?? parseIdCardFromVerifyParam(routeIdNo);
+  const verifyToken =
+    verifyTokenOverride ??
+    parseVerifyTokenFromParam(routeVerifyToken, searchParams.toString()) ??
+    searchParams.get("token")?.trim() ??
+    "";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [record, setRecord] = useState<IdCardVerifyResult | null>(null);
@@ -43,15 +64,26 @@ export default function EmployeeVerifyPage({ idOverride }: { idOverride?: string
       setPhotoFailed(false);
 
       const trimmed = idNo.trim();
+      const token = verifyToken.trim();
       if (!trimmed) {
         setError("No ID card number was provided.");
         setLoading(false);
         return;
       }
+      if (!token) {
+        setError(
+          "This verification link is incomplete or outdated. Scan the QR code on the employee ID card again.",
+        );
+        setLoading(false);
+        return;
+      }
 
       try {
+        const params = new URLSearchParams({ token });
         const res = await fetch(
-          apiUrl(`/api/employees/id-card/${encodeURIComponent(trimmed)}/verify`),
+          apiUrl(
+            `/api/employees/id-card/${encodeURIComponent(trimmed)}/verify?${params.toString()}`,
+          ),
         );
         if (!res.ok) {
           throw new Error(
@@ -80,7 +112,7 @@ export default function EmployeeVerifyPage({ idOverride }: { idOverride?: string
     return () => {
       cancelled = true;
     };
-  }, [idNo]);
+  }, [idNo, verifyToken]);
 
   const statusLabel = useMemo(() => {
     if (!record) return "";
@@ -141,7 +173,7 @@ export default function EmployeeVerifyPage({ idOverride }: { idOverride?: string
                 <div className="w-20 h-20 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
                   {record.hasPhoto && !photoFailed ? (
                     <img
-                      src={idCardPhotoUrl(record.idCard)}
+                      src={idCardPhotoUrl(record.idCard, verifyToken)}
                       alt={record.name}
                       className="w-full h-full object-cover"
                       onError={() => setPhotoFailed(true)}

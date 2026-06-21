@@ -19,10 +19,10 @@ import { getMaterialLabel } from "../../lib/supervisor-materials";
 import {
   canVisitSchoolAgain,
   daysUntilSchoolVisitAllowed,
-  latestVisitDateBySchool,
 } from "../../lib/supervisor-visit-cooldown";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
+import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import { SupervisorLoadingScreen } from "./SupervisorUI";
 
 export default function SupervisorVisitPage() {
@@ -100,25 +100,26 @@ export default function SupervisorVisitPage() {
       setSchoolLoading(true);
       setSchoolLoadFailed(false);
       try {
-        const directRes = await supervisorFetch(
-          `/api/school-visits/supervisor/schools/${encodeURIComponent(schoolId)}`,
-        );
+        const [directRes, lastVisitRes] = await Promise.all([
+          supervisorFetch(`/api/school-visits/supervisor/schools/${encodeURIComponent(schoolId)}`),
+          supervisorFetch(
+            `/api/school-visits/supervisor/schools/${encodeURIComponent(schoolId)}/last-visit`,
+          ),
+        ]);
         if (directRes.ok) {
           const data = (await directRes.json()) as SchoolWork;
           if (!cancelled) setSchool(data);
         } else {
-          const listRes = await supervisorFetch("/api/school-visits/supervisor/schools");
-          if (listRes.ok) {
-            const schools: SchoolWork[] = await listRes.json();
-            const found = schools.find((entry) => String(entry.id) === String(schoolId)) || null;
-            if (!cancelled) {
-              setSchool(found);
-              if (!found) setSchoolLoadFailed(true);
-            }
-          } else if (!cancelled) {
-            setSchool(null);
-            setSchoolLoadFailed(true);
+          const schools = await fetchSupervisorSchools(supervisorFetch);
+          const found = schools.find((entry) => String(entry.id) === String(schoolId)) || null;
+          if (!cancelled) {
+            setSchool(found);
+            if (!found) setSchoolLoadFailed(true);
           }
+        }
+        if (!cancelled && lastVisitRes.ok) {
+          const data = (await lastVisitRes.json()) as { lastVisitDate?: string | null };
+          setLastVisitDate(data.lastVisitDate ?? null);
         }
       } catch {
         if (!cancelled) {
@@ -128,23 +129,12 @@ export default function SupervisorVisitPage() {
       } finally {
         if (!cancelled) setSchoolLoading(false);
       }
-
-      const lookback = new Date();
-      lookback.setDate(lookback.getDate() - 30);
-      const visitsRes = await supervisorFetch(
-        `/api/school-visits/supervisor/mine?fromDate=${lookback.toISOString().slice(0, 10)}&toDate=${visitDate}`,
-      );
-      if (!cancelled && visitsRes.ok && schoolId) {
-        const visits: SchoolVisit[] = await visitsRes.json();
-        const map = latestVisitDateBySchool(visits);
-        setLastVisitDate(map.get(schoolId) ?? null);
-      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [schoolId, supervisorFetch, visitDate]);
+  }, [schoolId, supervisorFetch]);
 
   const visitBlocked = useMemo(
     () => !canVisitSchoolAgain(lastVisitDate),
@@ -259,7 +249,7 @@ export default function SupervisorVisitPage() {
     <div className="space-y-4 pb-28">
       {lightboxIndex !== null && photos[lightboxIndex] && (
         <SupervisorPhotoLightbox
-          src={photos[lightboxIndex].photoDataBase64}
+          src={visitPhotoSrc(photos[lightboxIndex])}
           alt={photos[lightboxIndex].caption}
           caption={photos[lightboxIndex].locationLabel}
           onClose={() => setLightboxIndex(null)}
@@ -423,7 +413,7 @@ export default function SupervisorVisitPage() {
                   className="relative rounded-xl overflow-hidden border border-slate-200 cursor-pointer text-left"
                 >
                   <img
-                    src={photo.photoDataBase64}
+                    src={visitPhotoSrc(photo)}
                     alt={photo.caption}
                     className="w-full aspect-[4/3] object-cover"
                   />

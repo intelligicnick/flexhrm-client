@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -19,13 +19,19 @@ function resolveScrollContainer(target: EventTarget | null): HTMLElement | null 
   return hovered && isHorizontallyScrollable(hovered) ? hovered : null;
 }
 
+function isScrollControlsTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest("[data-horizontal-scroll-controls]"));
+}
+
 export default function GlobalHorizontalScroll() {
   const [activeContainer, setActiveContainer] = useState<HTMLElement | null>(null);
   const [controlsRect, setControlsRect] = useState<DOMRect | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const activeContainerRef = useRef<HTMLElement | null>(null);
 
   const syncContainerState = useCallback((container: HTMLElement | null) => {
+    activeContainerRef.current = container;
     setActiveContainer(container);
     if (!container) {
       setControlsRect(null);
@@ -41,6 +47,8 @@ export default function GlobalHorizontalScroll() {
 
   const markHoveredContainer = useCallback(
     (target: EventTarget | null) => {
+      if (isScrollControlsTarget(target)) return;
+
       document
         .querySelectorAll<HTMLElement>("[data-horizontal-scroll-hover='true']")
         .forEach((el) => el.removeAttribute("data-horizontal-scroll-hover"));
@@ -177,9 +185,12 @@ export default function GlobalHorizontalScroll() {
         disabled={!canScrollLeft}
         aria-label="Scroll left"
         title="Scroll left (Shift+←)"
-        onClick={() => {
-          scrollHorizontalContainer(activeContainer, "left");
-          syncContainerState(activeContainer);
+        onMouseDown={(event) => {
+          event.preventDefault();
+          const container = activeContainerRef.current;
+          if (!container) return;
+          scrollHorizontalContainer(container, "left");
+          syncContainerState(container);
         }}
       >
         <ChevronLeft size={18} aria-hidden />
@@ -191,9 +202,12 @@ export default function GlobalHorizontalScroll() {
         disabled={!canScrollRight}
         aria-label="Scroll right"
         title="Scroll right (Shift+→)"
-        onClick={() => {
-          scrollHorizontalContainer(activeContainer, "right");
-          syncContainerState(activeContainer);
+        onMouseDown={(event) => {
+          event.preventDefault();
+          const container = activeContainerRef.current;
+          if (!container) return;
+          scrollHorizontalContainer(container, "right");
+          syncContainerState(container);
         }}
       >
         <ChevronRight size={18} aria-hidden />

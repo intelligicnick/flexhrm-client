@@ -1172,18 +1172,20 @@ const TenderTableRow = React.memo(function TenderTableRow({
           {missed && <span className="block text-[9px] font-bold text-red-600 uppercase mt-0.5">Missed</span>}
           {urgent && !missed && <span className="block text-[9px] font-bold text-amber-700 uppercase mt-0.5">Due soon</span>}
         </td>
-        <td className="px-2 py-2.5 align-middle min-w-[130px]">
-          <span
-            className={hasPreBid && preBidTime ? "text-slate-800 font-medium" : "text-slate-400"}
-            title={hasPreBid && preBidTime ? preBidTime : "No pre bid"}
-          >
-            {hasPreBid && preBidTime ? preBidTime : "No pre bid"}
-          </span>
-          {hasPreBid && preBidVenue ? (
-            <span className="block text-[10px] text-slate-500 truncate mt-0.5" title={preBidVenue}>
-              {preBidVenue}
+        <td className="px-2 py-2.5 align-middle w-[150px] min-w-[150px] max-w-[150px] overflow-hidden">
+          <div className="min-w-0">
+            <span
+              className={`block truncate ${hasPreBid && preBidTime ? "text-slate-800 font-medium" : "text-slate-400"}`}
+              title={hasPreBid && preBidTime ? preBidTime : "No pre bid"}
+            >
+              {hasPreBid && preBidTime ? preBidTime : "No pre bid"}
             </span>
-          ) : null}
+            {hasPreBid && preBidVenue ? (
+              <span className="block text-[10px] text-slate-500 truncate mt-0.5" title={preBidVenue}>
+                {preBidVenue}
+              </span>
+            ) : null}
+          </div>
         </td>
         <td className="px-2 py-2.5 align-middle min-w-[160px]">
           {readOnly || locked ? (
@@ -2008,7 +2010,7 @@ export default function TendersPanel({
                     <th className="px-2 py-2.5 font-bold">Type</th>
                     <th className="px-2 py-2.5 font-bold">Category / Org</th>
                     <th className="px-2 py-2.5 font-bold">End Date</th>
-                    <th className="px-2 py-2.5 font-bold">Pre-bid</th>
+                    <th className="px-2 py-2.5 font-bold w-[150px] min-w-[150px] max-w-[150px]">Pre-bid</th>
                     <th className="px-2 py-2.5 font-bold">Status</th>
                     <th className="px-2 py-2.5 font-bold">GeM Sync</th>
                     {!readOnly && <th className="px-2 py-2.5 font-bold w-20" aria-label="Actions" />}

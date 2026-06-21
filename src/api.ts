@@ -69,17 +69,7 @@ function isApiUrl(urlStr: string): boolean {
   return urlStr.startsWith("/api/") || urlStr.includes("/api/");
 }
 
-function appendAuthHeader(init: RequestInit | undefined, token: string): RequestInit {
-  const next = init ? { ...init } : {};
-  const headers = new Headers(next.headers || {});
-  if (!headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  next.headers = headers;
-  return next;
-}
-
-/** Install global fetch interceptor before React mounts so early effects send auth tokens. */
+/** Install global fetch interceptor before React mounts for API URL resolution and cookies. */
 export function setupFetchInterceptor(): void {
   if (typeof window === "undefined") return;
   const marker = "__flexhrm_fetch_interceptor__";
@@ -89,21 +79,19 @@ export function setupFetchInterceptor(): void {
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
-    const token = localStorage.getItem("hrms_session_token");
     const urlStr = resolveFetchUrl(input);
     const isApiCall = isApiUrl(urlStr);
-    const isPublicAuth = isPublicAuthUrl(urlStr);
-    const isPublicApi = isPublicAuth || isPublicIdCardUrl(urlStr);
+    const isPublicApi = isPublicAuthUrl(urlStr) || isPublicIdCardUrl(urlStr);
 
     let resolvedInput = input;
     if (isApiCall && typeof input === "string" && input.startsWith("/api/")) {
       resolvedInput = apiUrl(input);
     }
 
-    let resolvedInit = init;
-    if (isApiCall && token && !isPublicApi) {
-      resolvedInit = appendAuthHeader(init, token);
-    }
+    const resolvedInit: RequestInit = {
+      ...(init ?? {}),
+      credentials: isApiCall ? (init?.credentials ?? "include") : init?.credentials,
+    };
 
     let response: Response;
     try {
@@ -113,18 +101,14 @@ export function setupFetchInterceptor(): void {
       throw err;
     }
 
-    if (
-      isApiCall &&
-      !isPublicApi &&
-      response.status === 401 &&
-      localStorage.getItem("hrms_logged_in") === "true"
-    ) {
-      localStorage.removeItem("hrms_logged_in");
-      localStorage.removeItem("hrms_session_token");
-      localStorage.removeItem("hrms_username");
-      localStorage.removeItem("hrms_role");
-      localStorage.removeItem("hrms_locations");
-      window.location.reload();
+    if (isApiCall && !isPublicApi && response.status === 401) {
+      if (localStorage.getItem("hrms_logged_in") === "true") {
+        localStorage.removeItem("hrms_logged_in");
+        localStorage.removeItem("hrms_username");
+        localStorage.removeItem("hrms_role");
+        localStorage.removeItem("hrms_locations");
+        window.location.reload();
+      }
     }
 
     return response;
@@ -150,7 +134,6 @@ export async function parseApiError(response: Response, fallback: string): Promi
           ? data.message.join(", ")
           : "";
     const error = typeof data.error === "string" ? data.error : "";
-    // NestJS puts the helpful text in `message` and a generic HTTP label in `error`.
     const genericErrors = new Set([
       "Bad Request",
       "Unauthorized",
@@ -167,4 +150,3 @@ export async function parseApiError(response: Response, fallback: string): Promi
     return new Error(fallback);
   }
 }
-

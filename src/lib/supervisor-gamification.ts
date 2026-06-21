@@ -59,6 +59,10 @@ export const BADGE_LABEL_KEYS: Record<SupervisorBadgeId, string> = {
 
 export const DEFAULT_WEEKLY_GOAL = 12;
 
+function visitPhotoCount(visit: SchoolVisit): number {
+  return visit.photoCount ?? visit.photos?.length ?? 1;
+}
+
 export function computeVisitStreak(visits: SchoolVisit[], today = new Date()): number {
   const visitDays = new Set(visits.map((v) => toIsoDate(new Date(v.visitDate))));
   if (visitDays.size === 0) return 0;
@@ -93,10 +97,7 @@ function getLevel(totalPoints: number): SupervisorLevel {
 }
 
 function computeVisitPoints(visits: SchoolVisit[]): number {
-  return visits.reduce((sum, visit) => {
-    const photoCount = visit.photos?.length ?? 1;
-    return sum + pointsForVisit(photoCount);
-  }, 0);
+  return visits.reduce((sum, visit) => sum + pointsForVisit(visitPhotoCount(visit)), 0);
 }
 
 export function computeGamificationStats(params: {

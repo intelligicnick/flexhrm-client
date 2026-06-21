@@ -5,6 +5,7 @@ import {
   BgDdStatus,
   CreateBgDdInput,
 } from "../types";
+import { resolveDocumentViewUrl } from "./media-url";
 
 export const BG_DD_STATUS_LABELS: Record<BgDdStatus, string> = {
   submitted_to_dept: "Submitted to Dept",
@@ -29,8 +30,10 @@ export const BG_DD_INSTRUMENT_LABELS: Record<BgDdInstrumentType, string> = {
   dd: "Demand Draft",
 };
 
-export function getBgDdDocumentUrl(bgDdId: string, docId: string): string {
-  return `/api/bg-dd/${encodeURIComponent(bgDdId)}/documents/${encodeURIComponent(docId)}`;
+export function getBgDdDocumentUrl(bgDdId: string, doc: Pick<BgDdDocument, "id" | "imagekitUrl">): string {
+  return resolveDocumentViewUrl(doc, (docId) =>
+    `/api/bg-dd/${encodeURIComponent(bgDdId)}/documents/${encodeURIComponent(docId)}`,
+  );
 }
 
 async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {

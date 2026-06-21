@@ -158,7 +158,7 @@ function SavedDocumentPreviewModal({
   document: RenewalDocument;
   onClose: () => void;
 }) {
-  const apiPath = getRenewalDocumentUrl(renewalId, document.id);
+  const apiPath = getRenewalDocumentUrl(renewalId, document);
   const blobUrl = useAuthenticatedBlobUrl(apiPath);
   const isPdf = document.mimeType === "application/pdf";
 
@@ -439,7 +439,7 @@ const RenewalDocumentsPanel = forwardRef<RenewalDocumentsPanelHandle, RenewalDoc
       if (!renewalId) return;
       setAdjustingId(doc.id);
       try {
-        const res = await fetch(getRenewalDocumentUrl(renewalId, doc.id));
+        const res = await fetch(getRenewalDocumentUrl(renewalId, doc));
         if (!res.ok) throw new Error("Failed to load document.");
         const blob = await res.blob();
         const dataUrl = await new Promise<string>((resolve, reject) => {

@@ -1,4 +1,5 @@
 import { EmployeeDocument } from "../types";
+import { resolveDocumentViewUrl } from "./media-url";
 
 export const DOCUMENT_LABEL_PRESETS = [
   "PAN Card",
@@ -11,8 +12,10 @@ export const DOCUMENT_LABEL_PRESETS = [
 
 export type DocumentLabelPreset = (typeof DOCUMENT_LABEL_PRESETS)[number];
 
-export function getEmployeeDocumentUrl(employeeId: string, docId: string): string {
-  return `/api/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(docId)}`;
+export function getEmployeeDocumentUrl(employeeId: string, doc: Pick<EmployeeDocument, "id" | "imagekitUrl">): string {
+  return resolveDocumentViewUrl(doc, (docId) =>
+    `/api/employees/${encodeURIComponent(employeeId)}/documents/${encodeURIComponent(docId)}`,
+  );
 }
 
 export async function fetchEmployeeDocuments(

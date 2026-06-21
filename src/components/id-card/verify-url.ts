@@ -10,9 +10,42 @@ export function getIdCardVerifySiteOrigin(): string {
 }
 
 /** QR-friendly public verification URL (dedicated route, not the portal root). */
-export function getIdCardVerifyUrl(idNo: string): string {
+export function getIdCardVerifyUrl(idNo: string, verifyToken: string): string {
   const id = idNo.trim();
-  return `${getIdCardVerifySiteOrigin()}/verify/${encodeURIComponent(id)}`;
+  const token = verifyToken.trim();
+  return `${getIdCardVerifySiteOrigin()}/verify/${encodeURIComponent(id)}/${encodeURIComponent(token)}`;
+}
+
+/** Read verify token from a verification URL path or query string. */
+export function parseVerifyTokenFromParam(raw: string, search?: string): string {
+  const queryToken = new URLSearchParams(search ?? '').get('token')?.trim();
+  if (queryToken) return queryToken;
+
+  let value = raw.trim();
+  if (!value) return "";
+
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // keep raw value when encoding is malformed
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      const fromQuery = url.searchParams.get("token");
+      if (fromQuery?.trim()) return fromQuery.trim();
+      const parts = url.pathname.split("/").filter(Boolean);
+      const verifyIdx = parts.findIndex((part) => part.toLowerCase() === "verify");
+      if (verifyIdx >= 0 && parts[verifyIdx + 2]) {
+        return parts[verifyIdx + 2].trim();
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  return "";
 }
 
 /** Public supervisor mobile login URL (open on phone to log field visits). */

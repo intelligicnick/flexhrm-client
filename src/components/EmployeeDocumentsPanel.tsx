@@ -169,7 +169,7 @@ function DocumentPreviewModal({
   document: EmployeeDocument;
   onClose: () => void;
 }) {
-  const apiPath = getEmployeeDocumentUrl(employeeId, document.id);
+  const apiPath = getEmployeeDocumentUrl(employeeId, document);
   const blobUrl = useAuthenticatedBlobUrl(apiPath);
   const isPdf = document.mimeType === "application/pdf";
 
@@ -563,7 +563,7 @@ export default function EmployeeDocumentsPanel({
     setAdjustingId(doc.id);
     setError(null);
     try {
-      const res = await fetch(getEmployeeDocumentUrl(employeeId, doc.id));
+      const res = await fetch(getEmployeeDocumentUrl(employeeId, doc));
       if (!res.ok) throw new Error("Failed to load document for editing.");
       const blob = await res.blob();
       const dataUrl = await new Promise<string>((resolve, reject) => {

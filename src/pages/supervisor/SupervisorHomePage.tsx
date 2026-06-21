@@ -14,6 +14,7 @@ import { SchoolWork, CommitmentDiary, SchoolVisit } from "../../types";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import { toIsoDate } from "../../lib/supervisor-dates";
 import { computeGamificationStats } from "../../lib/supervisor-gamification";
+import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import {
   canVisitSchoolAgain,
   daysUntilSchoolVisitAllowed,
@@ -59,9 +60,7 @@ export default function SupervisorHomePage() {
   const navigate = useNavigate();
   const [schools, setSchools] = useState<SchoolWork[]>([]);
   const [commitments, setCommitments] = useState<CommitmentDiary[]>([]);
-  const [weekVisits, setWeekVisits] = useState<SchoolVisit[]>([]);
-  const [streakVisits, setStreakVisits] = useState<SchoolVisit[]>([]);
-  const [recentVisits, setRecentVisits] = useState<SchoolVisit[]>([]);
+  const [allVisits, setAllVisits] = useState<SchoolVisit[]>([]);
   const [search, setSearch] = useState("");
   const [blockFilter, setBlockFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
@@ -71,38 +70,46 @@ export default function SupervisorHomePage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { fromDate, toDate } = getWeekBounds();
+      const { toDate } = getWeekBounds();
       const streakBounds = getStreakLookbackBounds();
-      const cooldownFrom = new Date();
-      cooldownFrom.setDate(cooldownFrom.getDate() - 30);
       try {
-        const [schoolsRes, commitRes, visitsRes, streakRes, recentRes] = await Promise.all([
-          supervisorFetch("/api/school-visits/supervisor/schools"),
+        const [schoolList, commitRes, visitsRes] = await Promise.all([
+          fetchSupervisorSchools(supervisorFetch),
           supervisorFetch("/api/commitment-diary/supervisor/mine"),
-          supervisorFetch(`/api/school-visits/supervisor/mine?fromDate=${fromDate}&toDate=${toDate}`),
           supervisorFetch(
-            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${streakBounds.toDate}`,
-          ),
-          supervisorFetch(
-            `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(cooldownFrom)}&toDate=${toDate}`,
+            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${toDate}&lite=1`,
           ),
         ]);
-        if (schoolsRes.ok) setSchools(await schoolsRes.json());
+        setSchools(schoolList);
         if (commitRes.ok) setCommitments(await commitRes.json());
-        if (visitsRes.ok) setWeekVisits(await visitsRes.json());
-        if (streakRes.ok) setStreakVisits(await streakRes.json());
-        if (recentRes.ok) setRecentVisits(await recentRes.json());
+        if (visitsRes.ok) setAllVisits(await visitsRes.json());
+        else setAllVisits([]);
       } catch {
         setSchools([]);
         setCommitments([]);
-        setWeekVisits([]);
-        setStreakVisits([]);
-        setRecentVisits([]);
+        setAllVisits([]);
       } finally {
         setLoading(false);
       }
     })();
   }, [supervisorFetch]);
+
+  const { fromDate: weekFrom, toDate: weekTo } = getWeekBounds();
+  const cooldownFromIso = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return toIsoDate(d);
+  }, []);
+
+  const weekVisits = useMemo(
+    () => allVisits.filter((v) => v.visitDate >= weekFrom && v.visitDate <= weekTo),
+    [allVisits, weekFrom, weekTo],
+  );
+  const streakVisits = allVisits;
+  const recentVisits = useMemo(
+    () => allVisits.filter((v) => v.visitDate >= cooldownFromIso),
+    [allVisits, cooldownFromIso],
+  );
 
   const blocks = useMemo(() => {
     const set = new Set(schools.map((s) => s.block).filter(Boolean));

@@ -95,7 +95,7 @@ export default function EmployeeViewModal({
   const [exitReasonCategory, setExitReasonCategory] = useState<string>(EXIT_REASON_OPTIONS[0]);
   const [exitReasonDetails, setExitReasonDetails] = useState("");
   const [isMarkingExit, setIsMarkingExit] = useState(false);
-  const employeePhotoUrl = useEmployeePhotoUrl(employee.id, employee.photo);
+  const employeePhotoUrl = useEmployeePhotoUrl(employee.id, employee.photo, employee.photoUrl);
 
   const resolvedExitDate = employee.exitDate || (() => {
     if (employee.customFields && Array.isArray(employee.customFields)) {

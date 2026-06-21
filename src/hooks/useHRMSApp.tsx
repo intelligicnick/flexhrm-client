@@ -127,11 +127,21 @@ import {
 } from "../lib/date-helpers";
 import {
   parseNonNegativeNumber,
-  validateLedgerEntries,
   validateNonNegativeNumberField,
 } from "../lib/number-validation";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
+import {
+  appendLedgerItem,
+  clearItemsOfType,
+  defaultTempLedgerEntry,
+  getMonthLedger,
+  monthLedgerToPayload,
+  removeLedgerItem,
+  TempLedgerEntry,
+  todayDateInputValue,
+  LedgerItemType,
+} from "../lib/ledger-helpers";
 import {
   countMonthAttendance,
   getEffectiveAttendanceStatus,
@@ -145,6 +155,7 @@ import {
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
+import { useAuth } from "./useAuth";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -273,48 +284,58 @@ function applyBulkEditCustomFieldUpdate(
 export function useHRMSApp() {
   const navigate = useNavigate();
   const location = useLocation();
+  const auth = useAuth();
+  const {
+    authBootstrapping,
+    isLoggedIn,
+    setIsLoggedIn,
+    sessionUser,
+    setSessionUser,
+    sessionRole,
+    setSessionRole,
+    sessionLocations,
+    setSessionLocations,
+    sessionPermissions,
+    setSessionPermissions,
+    applySessionFromAuthMe,
+    usernameInput,
+    setUsernameInput,
+    passwordInput,
+    setPasswordInput,
+    loginError,
+    setLoginError,
+    loginView,
+    setLoginView,
+    forgotUsername,
+    setForgotUsername,
+    forgotError,
+    setForgotError,
+    forgotMessage,
+    setForgotMessage,
+    issuedResetToken,
+    setIssuedResetToken,
+    resetTokenInput,
+    setResetTokenInput,
+    resetNewPassword,
+    setResetNewPassword,
+    resetConfirmPassword,
+    setResetConfirmPassword,
+    resetError,
+    setResetError,
+    resetSuccess,
+    setResetSuccess,
+    isLoggingIn,
+    isSendingResetCode,
+    setIsSendingResetCode,
+    isUpdatingPassword,
+    setIsUpdatingPassword,
+    handleLoginSubmit: authHandleLoginSubmit,
+    handleLogout: authHandleLogout,
+  } = auth;
 
-  // Authentication & Session
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem("hrms_logged_in") === "true" && !!localStorage.getItem("hrms_session_token");
-  });
-  const [sessionUser, setSessionUser] = useState<string>(() => {
-    return localStorage.getItem("hrms_username") || "admin";
-  });
-  const [sessionRole, setSessionRole] = useState<string>(() => {
-    return localStorage.getItem("hrms_role") || "admin";
-  });
-  const [sessionLocations, setSessionLocations] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem("hrms_locations");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [sessionPermissions, setSessionPermissions] = useState<Record<string, { view: boolean; edit: boolean }> | null>(null);
-  
   // Custom Roles & Permissions States
   const [rolesList, setRolesList] = useState<any[]>([]);
   const [isFetchingRoles, setIsFetchingRoles] = useState(false);
-  
-  // Login Form States
-  const [usernameInput, setUsernameInput] = useState("");
-  const [passwordInput, setPasswordInput] = useState("");
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [loginView, setLoginView] = useState<"signin" | "forgot" | "reset">("signin");
-  const [forgotUsername, setForgotUsername] = useState("");
-  const [forgotError, setForgotError] = useState<string | null>(null);
-  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
-  const [issuedResetToken, setIssuedResetToken] = useState<string | null>(null);
-  const [resetTokenInput, setResetTokenInput] = useState("");
-  const [resetNewPassword, setResetNewPassword] = useState("");
-  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
-  const [resetError, setResetError] = useState<string | null>(null);
-  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isSendingResetCode, setIsSendingResetCode] = useState(false);
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   // Admin module invitation states
   const [adminsList, setAdminsList] = useState<any[]>([]);
@@ -339,37 +360,7 @@ export function useHRMSApp() {
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
-
-
   const PERMISSION_MODULES = ["employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
-
-  const applySessionFromAuthMe = (data: {
-    username?: string;
-    role?: string;
-    locations?: string[];
-    permissions?: Record<string, { view?: boolean; edit?: boolean }>;
-  }) => {
-    if (data.username) {
-      setSessionUser(data.username);
-      localStorage.setItem("hrms_username", data.username);
-    }
-    if (data.role) {
-      setSessionRole(data.role);
-      localStorage.setItem("hrms_role", data.role);
-    }
-    if (data.locations) {
-      setSessionLocations(data.locations);
-      localStorage.setItem("hrms_locations", JSON.stringify(data.locations));
-    }
-    if (data.permissions) {
-      const normalized: Record<string, { view: boolean; edit: boolean }> = {};
-      PERMISSION_MODULES.forEach((m) => {
-        const perm = data.permissions?.[m];
-        normalized[m] = { view: !!perm?.view, edit: !!perm?.edit };
-      });
-      setSessionPermissions(normalized);
-    }
-  };
 
   // Parse permissions dynamically — prefer server session from /api/auth/me
   const userPermissions = useMemo(() => {
@@ -499,7 +490,6 @@ export function useHRMSApp() {
   const [isSavingPayrollConfig, setIsSavingPayrollConfig] = useState(false);
 
   // Custom locations list with sync and edit capabilities
-  const [rawCustomLocations, setRawCustomLocations] = useState<string[]>([]);
   const [registeredLocations, setRegisteredLocations] = useState<string[]>([]);
   const [locationCompliance, setLocationCompliance] = useState<Record<string, boolean>>({});
   const [locationPtEnabled, setLocationPtEnabled] = useState<Record<string, boolean>>({});
@@ -552,15 +542,26 @@ export function useHRMSApp() {
     return rawEmployees;
   }, [rawEmployees, isLoggedIn, sessionUser, sessionLocations]);
 
+  const mergedLocationNames = useMemo(() => {
+    const empLocations = rawEmployees.map((e) => e.location).filter(Boolean) as string[];
+    return Array.from(new Set([...registeredLocations, ...empLocations]));
+  }, [registeredLocations, rawEmployees]);
+
+  const rawCustomLocations = mergedLocationNames;
+
+  const setRawCustomLocations = useCallback(() => {
+    /* Location names are derived from the registry and location API. */
+  }, []);
+
   const customLocations = useMemo(() => {
     const isLocationRestricted = isLoggedIn && sessionUser !== "admin" && Array.isArray(sessionLocations) && sessionLocations.length > 0;
     if (isLocationRestricted) {
-      return rawCustomLocations.filter((loc) =>
+      return mergedLocationNames.filter((loc) =>
         sessionLocations.some((sl) => sl.toLowerCase() === loc.toLowerCase())
       );
     }
-    return rawCustomLocations;
-  }, [rawCustomLocations, isLoggedIn, sessionUser, sessionLocations]);
+    return mergedLocationNames;
+  }, [mergedLocationNames, isLoggedIn, sessionUser, sessionLocations]);
 
   const registryLocations = useMemo(() => {
     const isLocationRestricted = isLoggedIn && sessionUser !== "admin" && Array.isArray(sessionLocations) && sessionLocations.length > 0;
@@ -580,9 +581,7 @@ export function useHRMSApp() {
       const data = await res.json();
       const locationRecords = Array.isArray(data) ? data : [];
       const apiLocations = locationRecords.map((loc: any) => loc.name).filter(Boolean);
-      const empLocations = rawEmployees.map((e) => e.location).filter(Boolean) as string[];
       setRegisteredLocations(apiLocations);
-      setRawCustomLocations(Array.from(new Set([...apiLocations, ...empLocations])));
 
       const complianceMap: Record<string, boolean> = {};
       const ptEnabledMap: Record<string, boolean> = {};
@@ -605,12 +604,20 @@ export function useHRMSApp() {
     } finally {
       setIsFetchingLocations(false);
     }
-  }, [rawEmployees]);
+  }, []);
 
   // Custom roles list with sync and edit capabilities
-  const [customRoles, setCustomRoles] = useState<string[]>([]);
   const [registeredJobRoles, setRegisteredJobRoles] = useState<string[]>([]);
   const [isFetchingJobRoles, setIsFetchingJobRoles] = useState(false);
+
+  const customRoles = useMemo(() => {
+    const empRoles = rawEmployees.map((e) => e.role).filter(Boolean) as string[];
+    return Array.from(new Set([...registeredJobRoles, ...empRoles]));
+  }, [registeredJobRoles, rawEmployees]);
+
+  const setCustomRoles = useCallback(() => {
+    /* Roles are derived from the registry and job-role API. */
+  }, []);
 
   const fetchJobRoles = useCallback(async () => {
     setIsFetchingJobRoles(true);
@@ -619,15 +626,13 @@ export function useHRMSApp() {
       if (!res.ok) throw await parseApiError(res, "Failed to fetch job roles.");
       const data = await res.json();
       const apiRoles = Array.isArray(data) ? data.map((role: any) => role.name).filter(Boolean) : [];
-      const empRoles = rawEmployees.map(e => e.role).filter(Boolean) as string[];
       setRegisteredJobRoles(apiRoles);
-      setCustomRoles(Array.from(new Set([...apiRoles, ...empRoles])));
     } catch (err: any) {
       setErrorMessage(err.message || "Could not load job roles.");
     } finally {
       setIsFetchingJobRoles(false);
     }
-  }, [rawEmployees]);
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -1183,28 +1188,6 @@ export function useHRMSApp() {
     }
   };
 
-  // Validate server session on startup and after login (prevents stale localStorage-only auth)
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    const token = localStorage.getItem("hrms_session_token");
-    if (!token) {
-      handleLogout();
-      return;
-    }
-    fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error("Session invalid");
-        return res.json();
-      })
-      .then((data) => {
-        applySessionFromAuthMe(data);
-      })
-      .catch(() => {
-        handleLogout();
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
-
   // Fetch security audit logs when Role & Access → Activity Log is open
   useEffect(() => {
     if (isLoggedIn && isAdminModuleTab(activeSidebarTab) && roleAccessSection === "audit") {
@@ -1241,7 +1224,7 @@ export function useHRMSApp() {
     const cleanName = locName.trim();
     if (!cleanName) return;
     
-    if (rawCustomLocations.some(l => l.toLowerCase() === cleanName.toLowerCase())) {
+    if (mergedLocationNames.some(l => l.toLowerCase() === cleanName.toLowerCase())) {
       setErrorMessage(`Location "${cleanName}" already exists.`);
       return;
     }
@@ -1378,15 +1361,20 @@ export function useHRMSApp() {
   const ledgerUniqueRoles = useMemo(() => {
     return Array.from(new Set(employees.map(e => e.role).filter(Boolean)));
   }, [employees]);
-  const [tempLedgerEntries, setTempLedgerEntries] = useState<Record<string, {
-    advance: string;
-    penalty: string;
-    uniform: string;
-    foodPerk: string;
-    accommodationPerk: string;
-    conveyancePerk: string;
-    penaltyReason: string;
-  }>>({});
+
+  const [tempLedgerEntries, setTempLedgerEntries] = useState<Record<string, TempLedgerEntry>>({});
+
+  useEffect(() => {
+    setTempLedgerEntries((prev) => {
+      const updated = { ...prev };
+      ledgerSelectedEmployeeIds.forEach((empId) => {
+        if (!updated[empId]) {
+          updated[empId] = defaultTempLedgerEntry();
+        }
+      });
+      return updated;
+    });
+  }, [ledgerSelectedEmployeeIds]);
 
   const [bulkEditDrafts, setBulkEditDrafts] = useState<Record<string, Partial<Employee>>>({});
   const [bulkEditSalaryAnchors, setBulkEditSalaryAnchors] = useState<
@@ -1559,6 +1547,8 @@ export function useHRMSApp() {
   const [attendanceDb, setAttendanceDb] = useState<Record<string, Record<string, Record<number, string>>>>({});
   const [isFetchingAttendance, setIsFetchingAttendance] = useState(false);
   const [exitEligibleEmployees, setExitEligibleEmployees] = useState<ExitEligibleEmployee[]>([]);
+  const exitEligibilityTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const employeesFetchInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const [exitEligibilityCheckedMonths, setExitEligibilityCheckedMonths] = useState<string[]>([]);
   const [exitedEmployeesCount, setExitedEmployeesCount] = useState(0);
   const [isFetchingExitEligibility, setIsFetchingExitEligibility] = useState(false);
@@ -1666,6 +1656,28 @@ export function useHRMSApp() {
     [selectedMonth, isLoggedIn],
   );
 
+  const scheduleFetchExitEligibility = useCallback(
+    (referenceMonth?: string, showModalIfEligible = false, delayMs = 1200) => {
+      if (exitEligibilityTimerRef.current) {
+        window.clearTimeout(exitEligibilityTimerRef.current);
+      }
+      exitEligibilityTimerRef.current = window.setTimeout(() => {
+        exitEligibilityTimerRef.current = null;
+        void fetchExitEligibility(referenceMonth, showModalIfEligible);
+      }, delayMs);
+    },
+    [fetchExitEligibility],
+  );
+
+  const shouldTrackExitEligibility = useMemo(() => {
+    return (
+      !!userPermissions.attendance?.view &&
+      (activeSidebarTab === "Attendance" ||
+        activeSidebarTab === "Employees" ||
+        activeSidebarTab === "Dashboard")
+    );
+  }, [userPermissions.attendance?.view, activeSidebarTab]);
+
   useEffect(() => {
     if (selectedMonth) {
       localStorage.setItem("hrms_selected_month", selectedMonth);
@@ -1673,10 +1685,12 @@ export function useHRMSApp() {
       setBulkCalendarMonth(selectedMonth);
       if (isLoggedIn) {
         fetchAttendanceForMonth(selectedMonth);
-        fetchExitEligibility(selectedMonth, false);
+        if (shouldTrackExitEligibility) {
+          scheduleFetchExitEligibility(selectedMonth, false);
+        }
       }
     }
-  }, [selectedMonth, isLoggedIn, fetchAttendanceForMonth, fetchExitEligibility]);
+  }, [selectedMonth, isLoggedIn, shouldTrackExitEligibility, fetchAttendanceForMonth, scheduleFetchExitEligibility]);
 
   useEffect(() => {
     if (!MONTHS_LIST.length) return;
@@ -1743,7 +1757,7 @@ export function useHRMSApp() {
           }
         };
       });
-      await fetchExitEligibility(selectedMonth, false);
+      scheduleFetchExitEligibility(selectedMonth, false);
     } catch (err: any) {
       setErrorMessage(err.message || `Failed to mark attendance for ${empName}.`);
     }
@@ -2585,96 +2599,126 @@ export function useHRMSApp() {
     }
   };
 
-  // Effect to automatically synchronize local text boxes with the database whenever selected month or employees list changes
-  useEffect(() => {
-    setTempLedgerEntries(prev => {
-      const updated = { ...prev };
-      ledgerSelectedEmployeeIds.forEach(empId => {
-        const emp = employees.find(e => e.id === empId);
-        if (emp) {
-          const monthLedger = emp.monthlyLedger?.[selectedMonth];
-          updated[empId] = {
-            advance: monthLedger ? String(monthLedger.advance) : String(emp.advance || 0),
-            penalty: monthLedger ? String(monthLedger.penalty) : String(emp.penalty || 0),
-            uniform: monthLedger ? String(monthLedger.uniform || 0) : String(emp.uniform || 0),
-            foodPerk: monthLedger ? String(monthLedger.foodPerk) : String(emp.foodPerk || 0),
-            accommodationPerk: monthLedger ? String(monthLedger.accommodationPerk) : String(emp.accommodationPerk || 0),
-            conveyancePerk: monthLedger ? String(monthLedger.conveyancePerk) : String(emp.conveyancePerk || 0),
-            penaltyReason: monthLedger ? monthLedger.penaltyReason : ""
-          };
-        }
-      });
-      return updated;
+  const persistEmployeeMonthLedger = async (empId: string, monthKey: string, ledger: ReturnType<typeof getMonthLedger>) => {
+    const emp = employees.find((e) => e.id === empId);
+    if (!emp) throw new Error("Selected employee was not found in database.");
+    const updatedEmp = {
+      ...emp,
+      monthlyLedger: {
+        ...(emp.monthlyLedger || {}),
+        [monthKey]: monthLedgerToPayload(ledger),
+      },
+    };
+    const res = await fetch(`/api/employees/${empId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updatedEmp),
     });
-  }, [ledgerSelectedEmployeeIds, selectedMonth, employees]);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || "Server rejected the update.");
+    }
+  };
 
-  // Handler to save batch monthly entries in Advance & Penalty tab
-  const handleSaveBatchLedgerRecords = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveBatchLedgerRecords = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!userPermissions.ledger?.edit) {
       alert("Action locked: You do not have write permissions for Ledgers.");
       return;
     }
     if (ledgerSelectedEmployeeIds.length === 0) {
-      setErrorMessage("Please select at least one employee to record entries.");
+      setErrorMessage("Please select at least one employee.");
+      return;
+    }
+
+    const apiEntries: Array<{
+      employeeId: string;
+      type: LedgerItemType;
+      amount: number;
+      entryDate: string;
+      note: string;
+    }> = [];
+
+    for (const empId of ledgerSelectedEmployeeIds) {
+      const entry = tempLedgerEntries[empId] ?? defaultTempLedgerEntry();
+      if (!entry.entryDate) {
+        setErrorMessage("Please select an entry date for each employee.");
+        return;
+      }
+      const note = entry.penaltyReason.trim();
+      const fields: Array<[LedgerItemType, string]> = [
+        ["advance", entry.advance],
+        ["uniform", entry.uniform],
+        ["penalty", entry.penalty],
+        ["foodPerk", entry.foodPerk],
+        ["accommodationPerk", entry.accommodationPerk],
+        ["conveyancePerk", entry.conveyancePerk],
+      ];
+      for (const [type, rawAmount] of fields) {
+        const amount = parseNonNegativeNumber(rawAmount, 0);
+        if (amount > 0) {
+          apiEntries.push({
+            employeeId: empId,
+            type,
+            amount,
+            entryDate: entry.entryDate,
+            note,
+          });
+        }
+      }
+    }
+
+    if (apiEntries.length === 0) {
+      setErrorMessage("Enter at least one amount greater than zero.");
       return;
     }
 
     try {
       setErrorMessage(null);
-      let successCount = 0;
+      const byEmployee = new Map<string, Array<{ type: LedgerItemType; amount: number; entryDate: string; note: string }>>();
+      for (const entry of apiEntries) {
+        const list = byEmployee.get(entry.employeeId) ?? [];
+        list.push(entry);
+        byEmployee.set(entry.employeeId, list);
+      }
 
-      for (const empId of ledgerSelectedEmployeeIds) {
-        const emp = employees.find(e => e.id === empId);
+      let savedCount = 0;
+      for (const [empId, items] of byEmployee) {
+        const emp = employees.find((e) => e.id === empId);
         if (!emp) continue;
-
-        const entries = tempLedgerEntries[empId] || {
-          advance: "0",
-          penalty: "0",
-          uniform: "0",
-          foodPerk: "0",
-          accommodationPerk: "0",
-          conveyancePerk: "0",
-          penaltyReason: ""
-        };
-
-        const ledgerError = validateLedgerEntries(entries);
-        if (ledgerError) {
-          setErrorMessage(`${emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode}: ${ledgerError}`);
-          return;
+        let ledger = getMonthLedger(emp, selectedMonth);
+        for (const item of items) {
+          ledger = appendLedgerItem(ledger, item);
         }
-
-        const updatedEmp = {
-          ...emp,
-          monthlyLedger: {
-            ...(emp.monthlyLedger || {}),
-            [selectedMonth]: {
-              advance: parseNonNegativeNumber(entries.advance),
-              penalty: parseNonNegativeNumber(entries.penalty),
-              uniform: parseNonNegativeNumber(entries.uniform),
-              foodPerk: parseNonNegativeNumber(entries.foodPerk),
-              accommodationPerk: parseNonNegativeNumber(entries.accommodationPerk),
-              conveyancePerk: parseNonNegativeNumber(entries.conveyancePerk),
-              penaltyReason: entries.penaltyReason || ""
-            }
-          }
-        };
-
-        const res = await fetch(`/api/employees/${empId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatedEmp)
-        });
-
-        if (res.ok) {
-          successCount++;
-        }
+        await persistEmployeeMonthLedger(empId, selectedMonth, ledger);
+        savedCount += items.length;
       }
 
       await fetchEmployees();
-      triggerSuccess(`Successfully recorded and synced monthly entries for ${successCount} employee(s) for ${selectedMonth}.`);
+      setTempLedgerEntries((prev) => {
+        const next = { ...prev };
+        for (const empId of ledgerSelectedEmployeeIds) {
+          next[empId] = defaultTempLedgerEntry();
+        }
+        return next;
+      });
+      triggerSuccess(`Saved ${savedCount} ledger entry line(s) for ${selectedMonth}.`);
     } catch (err: any) {
-      setErrorMessage("Failed to save batch entries: " + err.message);
+      setErrorMessage("Failed to save ledger entries: " + err.message);
+    }
+  };
+
+  const handleDeleteLedgerItem = async (employeeId: string, itemId: string) => {
+    if (!userPermissions.ledger?.edit) return;
+    try {
+      setErrorMessage(null);
+      const emp = employees.find((e) => e.id === employeeId);
+      if (!emp) throw new Error("Employee not found.");
+      const ledger = removeLedgerItem(getMonthLedger(emp, selectedMonth), itemId);
+      await persistEmployeeMonthLedger(employeeId, selectedMonth, ledger);
+      await fetchEmployees();
+    } catch (err: any) {
+      setErrorMessage("Failed to delete entry: " + err.message);
     }
   };
 
@@ -2699,35 +2743,15 @@ export function useHRMSApp() {
       return;
     }
 
-    const updatedEmp = {
-      ...emp,
-      monthlyLedger: {
-        ...(emp.monthlyLedger || {}),
-        [selectedMonth]: {
-          ...(emp.monthlyLedger?.[selectedMonth] || {
-            advance: Number(emp.advance || 0),
-            penalty: Number(emp.penalty || 0),
-            foodPerk: Number(emp.foodPerk || 0),
-            accommodationPerk: Number(emp.accommodationPerk || 0),
-            conveyancePerk: Number(emp.conveyancePerk || 0),
-            penaltyReason: ""
-          }),
-          [ledgerType]: (Number(emp.monthlyLedger?.[selectedMonth]?.[ledgerType] || emp[ledgerType] || 0) + amountNum)
-        }
-      }
-    };
-
     try {
       setErrorMessage(null);
-      const res = await fetch(`/api/employees/${cleanEmpId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedEmp)
+      const ledger = appendLedgerItem(getMonthLedger(emp, selectedMonth), {
+        type: ledgerType,
+        amount: amountNum,
+        entryDate: todayDateInputValue(),
+        note: "",
       });
-
-      if (!res.ok) {
-        throw new Error("Server rejected the update.");
-      }
+      await persistEmployeeMonthLedger(cleanEmpId, selectedMonth, ledger);
 
       await fetchEmployees();
       setLedgerAmount("");
@@ -2746,23 +2770,13 @@ export function useHRMSApp() {
     const emp = employees.find(e => e.id === empId);
     if (!emp) return;
 
+    const cleared = clearItemsOfType(getMonthLedger(emp, selectedMonth), type);
     const updatedEmp = {
       ...emp,
       monthlyLedger: {
         ...(emp.monthlyLedger || {}),
-        [selectedMonth]: {
-          ...(emp.monthlyLedger?.[selectedMonth] || {
-            advance: Number(emp.advance || 0),
-            penalty: Number(emp.penalty || 0),
-            uniform: Number(emp.uniform || 0),
-            foodPerk: Number(emp.foodPerk || 0),
-            accommodationPerk: Number(emp.accommodationPerk || 0),
-            conveyancePerk: Number(emp.conveyancePerk || 0),
-            penaltyReason: ""
-          }),
-          [type]: 0
-        }
-      }
+        [selectedMonth]: monthLedgerToPayload(cleared),
+      },
     };
 
     try {
@@ -2849,37 +2863,9 @@ export function useHRMSApp() {
       return;
     }
 
-    const updatedEmp = {
-      ...emp,
-      monthlyLedger: {
-        ...(emp.monthlyLedger || {}),
-        [selectedMonth]: {
-          ...(emp.monthlyLedger?.[selectedMonth] || {
-            advance: Number(emp.advance || 0),
-            penalty: Number(emp.penalty || 0),
-            foodPerk: Number(emp.foodPerk || 0),
-            accommodationPerk: Number(emp.accommodationPerk || 0),
-            conveyancePerk: Number(emp.conveyancePerk || 0),
-            penaltyReason: ""
-          }),
-          [perkName]: numericVal
-        }
-      }
-    };
-
     try {
       setErrorMessage(null);
-      const res = await fetch(`/api/employees/${empId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedEmp)
-      });
-
-      if (!res.ok) {
-        throw new Error("Server rejected the update.");
-      }
-
-      await fetchEmployees();
+      await savePayrollLedgerFields(empId, { [perkName]: numericVal });
     } catch (err: any) {
       setErrorMessage("Failed to update perk value: " + err.message);
     }
@@ -2897,37 +2883,9 @@ export function useHRMSApp() {
     const currentStatus = emp.monthlyLedger?.[selectedMonth]?.paymentStatus || "Unpaid";
     if (currentStatus === status) return; // No change
 
-    const updatedEmp = {
-      ...emp,
-      monthlyLedger: {
-        ...(emp.monthlyLedger || {}),
-        [selectedMonth]: {
-          ...(emp.monthlyLedger?.[selectedMonth] || {
-            advance: Number(emp.advance || 0),
-            penalty: Number(emp.penalty || 0),
-            foodPerk: Number(emp.foodPerk || 0),
-            accommodationPerk: Number(emp.accommodationPerk || 0),
-            conveyancePerk: Number(emp.conveyancePerk || 0),
-            penaltyReason: ""
-          }),
-          paymentStatus: status
-        }
-      }
-    };
-
     try {
       setErrorMessage(null);
-      const res = await fetch(`/api/employees/${empId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedEmp)
-      });
-
-      if (!res.ok) {
-        throw new Error("Server rejected the update.");
-      }
-
-      await fetchEmployees();
+      await savePayrollLedgerFields(empId, { paymentStatus: status });
       triggerSuccess(`Salary payment status for ${emp.nameAsPerAadhar} updated to "${status}" for ${selectedMonth}.`);
     } catch (err: any) {
       setErrorMessage("Failed to update payment status: " + err.message);
@@ -2951,42 +2909,31 @@ export function useHRMSApp() {
 
     try {
       setErrorMessage(null);
-      let successCount = 0;
+      const updates = selectedSalaryEmployeeIds
+        .filter((empId) => employees.some((e) => e.id === empId))
+        .map((empId) => ({ id: empId, paymentStatus: status }));
 
+      const res = await fetch("/api/employees/payroll-ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monthKey: selectedMonth, updates }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to bulk update payment status.");
+
+      const result = await res.json();
+      const successCount = Number(result.count) || updates.length;
       for (const empId of selectedSalaryEmployeeIds) {
-        const emp = employees.find(e => e.id === empId);
-        if (!emp) continue;
-
-        const updatedEmp = {
-          ...emp,
+        patchEmployeeInState(empId, (emp) => ({
           monthlyLedger: {
             ...(emp.monthlyLedger || {}),
             [selectedMonth]: {
-              ...(emp.monthlyLedger?.[selectedMonth] || {
-                advance: Number(emp.advance || 0),
-                penalty: Number(emp.penalty || 0),
-                foodPerk: Number(emp.foodPerk || 0),
-                accommodationPerk: Number(emp.accommodationPerk || 0),
-                conveyancePerk: Number(emp.conveyancePerk || 0),
-                penaltyReason: ""
-              }),
-              paymentStatus: status
-            }
-          }
-        };
-
-        const res = await fetch(`/api/employees/${empId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatedEmp)
-        });
-
-        if (res.ok) {
-          successCount++;
-        }
+              ...(emp.monthlyLedger?.[selectedMonth] || defaultMonthLedgerEntry(emp)),
+              paymentStatus: status,
+            },
+          },
+        }));
       }
 
-      await fetchEmployees();
       setSelectedSalaryEmployeeIds([]);
       triggerSuccess(`Successfully marked payment status as "${status}" for ${successCount} employee(s) in ${selectedMonth}.`);
     } catch (err: any) {
@@ -3661,23 +3608,97 @@ export function useHRMSApp() {
   };
 
   // Fetch employees on component mount
-  const fetchEmployees = async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      const res = await fetch("/api/employees");
-      if (!res.ok) {
-        throw new Error(`Failed to load employee list (${res.status})`);
-      }
-      const data = await res.json();
-      setRawEmployees(data);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage("Could not connect to HRMS server: " + err.message);
-    } finally {
-      setIsLoading(false);
+  const patchEmployeeInState = useCallback(
+    (id: string, updater: Partial<Employee> | ((emp: Employee) => Partial<Employee>)) => {
+      setRawEmployees((prev) =>
+        prev.map((emp) => {
+          if (emp.id !== id) return emp;
+          const patch = typeof updater === "function" ? updater(emp) : updater;
+          return { ...emp, ...patch };
+        }),
+      );
+    },
+    [],
+  );
+
+  const defaultMonthLedgerEntry = useCallback((emp: Employee) => ({
+    advance: Number(emp.advance || 0),
+    penalty: Number(emp.penalty || 0),
+    foodPerk: Number(emp.foodPerk || 0),
+    accommodationPerk: Number(emp.accommodationPerk || 0),
+    conveyancePerk: Number(emp.conveyancePerk || 0),
+    penaltyReason: "",
+    paymentStatus: "Unpaid" as const,
+  }), []);
+
+  const savePayrollLedgerFields = useCallback(
+    async (empId: string, fields: Record<string, string | number>) => {
+      if (!selectedMonth) throw new Error("No payroll month selected.");
+      const res = await fetch("/api/employees/payroll-ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthKey: selectedMonth,
+          updates: [{ id: empId, ...fields }],
+        }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to update payroll ledger.");
+      patchEmployeeInState(empId, (emp) => ({
+        monthlyLedger: {
+          ...(emp.monthlyLedger || {}),
+          [selectedMonth]: {
+            ...(emp.monthlyLedger?.[selectedMonth] || defaultMonthLedgerEntry(emp)),
+            ...fields,
+          },
+        },
+      }));
+    },
+    [selectedMonth, patchEmployeeInState, defaultMonthLedgerEntry],
+  );
+
+  const fetchEmployees = useCallback(async (options?: { forceLedger?: boolean }) => {
+    const includeLedger =
+      options?.forceLedger ?? (activeSidebarTab === "Salary" || activeSidebarTab === "Ledger");
+    const params = new URLSearchParams();
+    if (!includeLedger) {
+      params.set("lite", "1");
+    } else if (selectedMonth) {
+      params.set("ledgerMonth", selectedMonth);
     }
-  };
+    const query = params.toString();
+    const url = `/api/employees${query ? `?${query}` : ""}`;
+
+    const inFlight = employeesFetchInFlightRef.current.get(url);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+
+    const task = (async () => {
+      setIsLoading(true);
+      setErrorMessage(null);
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`Failed to load employee list (${res.status})`);
+        }
+        const data = await res.json();
+        setRawEmployees(data);
+      } catch (err: any) {
+        console.error(err);
+        setErrorMessage("Could not connect to HRMS server: " + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+
+    employeesFetchInFlightRef.current.set(url, task);
+    try {
+      await task;
+    } finally {
+      employeesFetchInFlightRef.current.delete(url);
+    }
+  }, [activeSidebarTab, selectedMonth]);
 
   const fetchSchoolWorks = async () => {
     setIsSchoolLoading(true);
@@ -3785,19 +3806,12 @@ export function useHRMSApp() {
   const fetchAdminNotifications = useCallback(async (): Promise<AppNotification[]> => {
     setIsFetchingAdminNotifications(true);
     try {
-      const [listRes, countRes] = await Promise.all([
-        fetch("/api/notifications"),
-        fetch("/api/notifications/unread-count"),
-      ]);
-      let items: AppNotification[] = [];
-      if (listRes.ok) {
-        items = await listRes.json();
-        setAdminNotifications(items);
-      }
-      if (countRes.ok) {
-        const data = await countRes.json();
-        setAdminNotificationUnreadCount(data.count || 0);
-      }
+      const res = await fetch("/api/notifications/summary");
+      if (!res.ok) throw new Error("Failed to load notifications.");
+      const data = await res.json();
+      const items: AppNotification[] = Array.isArray(data.items) ? data.items : [];
+      setAdminNotifications(items);
+      setAdminNotificationUnreadCount(Number(data.count) || 0);
       return items;
     } catch {
       setAdminNotifications([]);
@@ -4252,6 +4266,18 @@ export function useHRMSApp() {
   }, [isLoggedIn]);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
+    if (activeSidebarTab === "Salary" || activeSidebarTab === "Ledger") {
+      void fetchEmployees({ forceLedger: true });
+    }
+  }, [isLoggedIn, activeSidebarTab, selectedMonth]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !selectedMonth || !shouldTrackExitEligibility) return;
+    scheduleFetchExitEligibility(selectedMonth, false);
+  }, [isLoggedIn, selectedMonth, shouldTrackExitEligibility, activeSidebarTab, scheduleFetchExitEligibility]);
+
+  useEffect(() => {
     if (isLoggedIn && isSchoolWorkTab(activeSidebarTab)) {
       fetchSchoolWorks();
       if (activeSidebarTab === "Field Team" || activeSidebarTab === "Schools") {
@@ -4493,43 +4519,10 @@ export function useHRMSApp() {
   };
 
   // Login handler
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanUser = usernameInput.trim();
-    if (!cleanUser) {
-      setLoginError("Please enter a username.");
-      return;
-    }
-    try {
-      setIsLoggingIn(true);
-      setLoginError(null);
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: cleanUser, password: passwordInput }),
-      });
-      if (!res.ok) {
-        throw await parseApiError(res, "Incorrect administrator username or password.");
-      }
-      const data = await res.json();
-      localStorage.setItem("hrms_logged_in", "true");
-      localStorage.setItem("hrms_session_token", data.token);
-      localStorage.setItem("hrms_username", data.username);
-      localStorage.setItem("hrms_role", data.role || "admin");
-      localStorage.setItem("hrms_locations", JSON.stringify(data.locations || []));
-      setSessionUser(data.username);
-      setSessionRole(data.role || "admin");
-      setSessionLocations(data.locations || []);
-      setIsLoggedIn(true);
-      navigate(DEFAULT_PATH);
-      triggerSuccess(`Successfully authenticated. Welcome back, ${data.username}!`);
-      // Permissions loaded via /api/auth/me effect when isLoggedIn becomes true
-    } catch (err: any) {
-      setLoginError(err.message);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
+  const handleLoginSubmit = (e: React.FormEvent) =>
+    authHandleLoginSubmit(e, (username) =>
+      triggerSuccess(`Successfully authenticated. Welcome back, ${username}!`),
+    );
 
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4720,30 +4713,9 @@ export function useHRMSApp() {
 
   // Logout handler
   const handleLogout = async () => {
-    const token = localStorage.getItem("hrms_session_token");
-    if (token) {
-      try {
-        await fetch("/api/auth/logout", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch {
-        // Ignore network errors during logout
-      }
-    }
-    localStorage.removeItem("hrms_logged_in");
-    localStorage.removeItem("hrms_session_token");
-    localStorage.removeItem("hrms_username");
-    localStorage.removeItem("hrms_role");
-    localStorage.removeItem("hrms_locations");
-    setIsLoggedIn(false);
     setIsProfileOpen(false);
-    setUsernameInput("");
-    setPasswordInput("");
-    setSessionRole("admin");
-    setSessionLocations([]);
-    setSessionPermissions(null);
-    navigate("/login");
+    setIsMobileProfileOpen(false);
+    await authHandleLogout();
   };
 
   // Save / Update a custom role
@@ -4836,7 +4808,7 @@ export function useHRMSApp() {
       }
 
       const savedEmployee = (await res.json()) as Employee;
-      await fetchEmployees();
+      patchEmployeeInState(savedEmployee.id, savedEmployee);
       triggerSuccess(
         isEdit 
           ? `Successfully saved changes for employee "${empData.employeeCode}". ID card updated.` 
@@ -7090,6 +7062,7 @@ export function useHRMSApp() {
 
 
   return {
+    authBootstrapping,
     isLoggedIn,
     sessionUser,
     sessionRole,
@@ -7353,6 +7326,7 @@ export function useHRMSApp() {
     handleEditRoleFromConfig,
     handleDeleteRoles,
     handleSaveBatchLedgerRecords,
+    handleDeleteLedgerItem,
     handleSaveLedgerRecord,
     handleClearLedgerValue,
     renderClearButtonOrConfirm,

@@ -18,6 +18,7 @@ import { getSupervisorDeviceId } from "../../lib/supervisor-device";
 import { SupervisorLang } from "../../lib/supervisor-i18n";
 import { computeGamificationStats } from "../../lib/supervisor-gamification";
 import { toIsoDate } from "../../lib/supervisor-dates";
+import { resolveProfilePhotoSrc, resolvePhotoSrc } from "../../lib/media-url";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorGamificationCard from "./SupervisorGamificationCard";
 interface SupervisorProfile {
@@ -27,6 +28,7 @@ interface SupervisorProfile {
   assignedBlocks: string[];
   status: string;
   profilePhotoBase64: string;
+  profilePhotoUrl?: string;
   registeredDeviceId: string;
   registeredDeviceName: string;
   deviceRegisteredAt: string | null;
@@ -107,6 +109,7 @@ export default function SupervisorProfilePage() {
           assignedBlocks: data.assignedBlocks || [],
           status: data.status || "active",
           profilePhotoBase64: data.profilePhotoBase64 || "",
+          profilePhotoUrl: data.profilePhotoUrl || "",
           registeredDeviceId: data.registeredDeviceId || "",
           registeredDeviceName: data.registeredDeviceName || "",
           deviceRegisteredAt: data.deviceRegisteredAt || null,
@@ -155,7 +158,9 @@ export default function SupervisorProfilePage() {
     setPhotoSuccess(false);
     try {
       const dataUrl = await captureLivePhotoDataUrl();
-      setProfile((prev) => (prev ? { ...prev, profilePhotoBase64: dataUrl } : prev));
+      setProfile((prev) =>
+        prev ? { ...prev, profilePhotoBase64: dataUrl, profilePhotoUrl: "" } : prev,
+      );
       setSavingPhoto(true);
       const res = await supervisorFetch("/api/auth/supervisor/profile-photo", {
         method: "POST",
@@ -210,8 +215,8 @@ export default function SupervisorProfilePage() {
         <div className="relative flex items-center gap-4">
           <div className="relative shrink-0">
             <div className="h-20 w-20 rounded-2xl border-2 border-orange-400/40 bg-white/10 overflow-hidden flex items-center justify-center shadow-lg">
-              {profile.profilePhotoBase64 ? (
-                <img src={profile.profilePhotoBase64} alt="" className="h-full w-full object-cover" />
+              {resolveProfilePhotoSrc(profile) ? (
+                <img src={resolveProfilePhotoSrc(profile)} alt="" className="h-full w-full object-cover" />
               ) : (
                 <User className="text-white/40" size={36} />
               )}

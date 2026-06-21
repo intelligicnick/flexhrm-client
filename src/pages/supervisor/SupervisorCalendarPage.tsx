@@ -15,6 +15,7 @@ import {
   canVisitSchoolAgain,
   latestVisitDateBySchool,
 } from "../../lib/supervisor-visit-cooldown";
+import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 
 type SelectionMode = "single" | "multi" | "range";
 
@@ -49,16 +50,16 @@ export default function SupervisorCalendarPage() {
     try {
       const lookback = new Date();
       lookback.setDate(lookback.getDate() - 30);
-      const [planRes, schoolRes, commitRes, visitsRes] = await Promise.all([
+      const [planRes, schoolList, commitRes, visitsRes] = await Promise.all([
         supervisorFetch(`/api/planned-visits/supervisor/mine?monthKey=${monthKey}`),
-        supervisorFetch("/api/school-visits/supervisor/schools"),
+        fetchSupervisorSchools(supervisorFetch),
         supervisorFetch("/api/commitment-diary/supervisor/mine"),
         supervisorFetch(
-          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(lookback)}&toDate=${toIsoDate(today)}`,
+          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(lookback)}&toDate=${toIsoDate(today)}&lite=1`,
         ),
       ]);
       if (planRes.ok) setPlanned(await planRes.json());
-      if (schoolRes.ok) setSchools(await schoolRes.json());
+      setSchools(schoolList);
       if (commitRes.ok) setCommitments(await commitRes.json());
       if (visitsRes.ok) setRecentVisits(await visitsRes.json());
     } catch {

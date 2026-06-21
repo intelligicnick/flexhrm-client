@@ -137,6 +137,14 @@ import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 import BulkAttendanceDateCalendar from "../components/BulkAttendanceDateCalendar";
+import { LedgerOverviewRow, filterEmployeesWithLedgerEntries } from "../components/LedgerOverviewRow";
+import {
+  getMonthLedger,
+  getTotalByType,
+  sumMonthTotals,
+  defaultTempLedgerEntry,
+  LEDGER_TYPE_LABELS,
+} from "../lib/ledger-helpers";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
 import AdminDashboardPage from "./AdminDashboardPage";
@@ -379,10 +387,9 @@ export default function ModuleContent() {
     handleEditRoleFromConfig,
     handleDeleteRoles,
     handleSaveBatchLedgerRecords,
+    handleDeleteLedgerItem,
     handleSaveLedgerRecord,
     handleClearLedgerValue,
-    renderClearButtonOrConfirm,
-    handleUpdatePerkValue,
     handleUpdatePaymentStatus,
     handleBulkUpdatePaymentStatus,
     handleCallInitiate,
@@ -2890,7 +2897,7 @@ export default function ModuleContent() {
                                         {(() => {
                                           const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => selectedSalaryColumns.includes(c)).length;
                                           return count > 0 ? (
-                                            <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks (Click to Edit)</th>
+                                            <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks</th>
                                           ) : null;
                                         })()}
                                         {selectedSalaryColumns.includes("Net Payable") && (
@@ -3151,60 +3158,18 @@ export default function ModuleContent() {
                                               )}
                                           
                                               {selectedSalaryColumns.includes("Food Perk") && (
-                                                <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                                  <input id={`salary-food-${emp.id}`} name={`salaryFood_${emp.id}`}
-                                                    key={`food-${emp.id}-${selectedMonth}-${food}`}
-                                                    type="number"
-                                                    min={0}
-                                                    defaultValue={food || ""}
-                                                    onBlur={(e) => handleUpdatePerkValue(emp.id, "foodPerk", e.target.value)}
-                                                    disabled={!userPermissions.salary?.edit}
-                                                    onKeyDown={(e) => {
-                                                      if (e.key === "Enter") {
-                                                        e.currentTarget.blur();
-                                                      }
-                                                    }}
-                                                    placeholder="0"
-                                                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-indigo-700 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 text-xs shadow-2xs"
-                                                  />
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
+                                                  {food || 0}
                                                 </td>
                                               )}
                                               {selectedSalaryColumns.includes("Accommodation Perk") && (
-                                                <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                                  <input id={`salary-accom-${emp.id}`} name={`salaryAccom_${emp.id}`}
-                                                    key={`accom-${emp.id}-${selectedMonth}-${acc}`}
-                                                    type="number"
-                                                    min={0}
-                                                    defaultValue={acc || ""}
-                                                    onBlur={(e) => handleUpdatePerkValue(emp.id, "accommodationPerk", e.target.value)}
-                                                    disabled={!userPermissions.salary?.edit}
-                                                    onKeyDown={(e) => {
-                                                      if (e.key === "Enter") {
-                                                        e.currentTarget.blur();
-                                                      }
-                                                    }}
-                                                    placeholder="0"
-                                                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-indigo-700 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 text-xs shadow-2xs"
-                                                  />
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
+                                                  {acc || 0}
                                                 </td>
                                               )}
                                               {selectedSalaryColumns.includes("Conveyance Perk") && (
-                                                <td className="px-2 py-1.5 border-r border-slate-150 text-center bg-indigo-50/10 align-middle">
-                                                  <input id={`salary-conv-${emp.id}`} name={`salaryConv_${emp.id}`}
-                                                    key={`conv-${emp.id}-${selectedMonth}-${conv}`}
-                                                    type="number"
-                                                    min={0}
-                                                    defaultValue={conv || ""}
-                                                    onBlur={(e) => handleUpdatePerkValue(emp.id, "conveyancePerk", e.target.value)}
-                                                    disabled={!userPermissions.salary?.edit}
-                                                    onKeyDown={(e) => {
-                                                      if (e.key === "Enter") {
-                                                        e.currentTarget.blur();
-                                                      }
-                                                    }}
-                                                    placeholder="0"
-                                                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded font-semibold text-center text-[#ff791a] focus:outline-none focus:border-orange-450 focus:ring-1 focus:ring-orange-450 text-xs shadow-2xs"
-                                                  />
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-[#ff791a] bg-indigo-50/10 font-semibold">
+                                                  {conv || 0}
                                                 </td>
                                               )}
                                           
@@ -3442,10 +3407,10 @@ export default function ModuleContent() {
                                     <Calculator size={20} className="text-[#ff791a]" /> Monthly Settlement & Penalty Ledger
                                   </h3>
                                   <p className="text-xs text-slate-400 mt-1">
-                                    Perform batch monthly settlements for advances, penalties, and perks. All entries are keyed and saved per-month dynamically.
+                                    Add multiple dated advances, penalties, and perks per employee each month. Totals are summed automatically from all entries.
                                   </p>
                                 </div>
-                            
+                        
                                 {/* Month Selection Sync */}
                                 <div className="flex items-center gap-2 shrink-0">
                                   <span className="text-xs font-bold text-slate-500">Active Month:</span>
@@ -3460,37 +3425,37 @@ export default function ModuleContent() {
                                   </select>
                                 </div>
                               </div>
-          
+      
                               {/* 2. Top Summary metrics computed for the selected Month */}
                               <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
                                   <span className="text-[9px] text-blue-500 font-bold uppercase tracking-wider block">Advances ({selectedMonth})</span>
                                   <span className="text-base font-extrabold text-blue-800 block mt-0.5">
-                                    ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.advance || 0)), 0).toLocaleString("en-IN")}
+                                    ₹{sumMonthTotals(employees, selectedMonth, "advance").toLocaleString("en-IN")}
                                   </span>
                                 </div>
                                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
                                   <span className="text-[9px] text-rose-500 font-bold uppercase tracking-wider block">Penalties ({selectedMonth})</span>
                                   <span className="text-base font-extrabold text-rose-800 block mt-0.5">
-                                    ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.penalty || 0)), 0).toLocaleString("en-IN")}
+                                    ₹{sumMonthTotals(employees, selectedMonth, "penalty").toLocaleString("en-IN")}
                                   </span>
                                 </div>
                                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
                                   <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Food Perks ({selectedMonth})</span>
                                   <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                    ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.foodPerk || 0)), 0).toLocaleString("en-IN")}
+                                    ₹{sumMonthTotals(employees, selectedMonth, "foodPerk").toLocaleString("en-IN")}
                                   </span>
                                 </div>
                                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left">
                                   <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Accom. Perks ({selectedMonth})</span>
                                   <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                    ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.accommodationPerk || 0)), 0).toLocaleString("en-IN")}
+                                    ₹{sumMonthTotals(employees, selectedMonth, "accommodationPerk").toLocaleString("en-IN")}
                                   </span>
                                 </div>
                                 <div className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-xs text-left col-span-2 lg:col-span-1">
                                   <span className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider block">Conv. Perks ({selectedMonth})</span>
                                   <span className="text-base font-extrabold text-indigo-800 block mt-0.5">
-                                    ₹{employees.reduce((sum, e) => sum + (Number(e.monthlyLedger?.[selectedMonth]?.conveyancePerk || 0)), 0).toLocaleString("en-IN")}
+                                    ₹{sumMonthTotals(employees, selectedMonth, "conveyancePerk").toLocaleString("en-IN")}
                                   </span>
                                 </div>
                               </div>
@@ -3533,7 +3498,7 @@ export default function ModuleContent() {
                                       </button>
                                     </div>
                                   </div>
-          
+      
                                   {/* Premium Spacious Dynamic Filters Grid */}
                                   <div className="grid grid-cols-1 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-150 text-[10px] text-left">
                                     {/* Location Filter */}
@@ -3556,7 +3521,7 @@ export default function ModuleContent() {
                                           </span>
                                           <span className="text-[8px] text-slate-400">▼</span>
                                         </button>
-                                    
+                                
                                         {isLedgerLocationDropdownOpen && (
                                           <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
                                             <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
@@ -3594,7 +3559,7 @@ export default function ModuleContent() {
                                         )}
                                       </div>
                                     </div>
-          
+      
                                     {/* Skill Filter */}
                                     <div className="space-y-1 relative" id="ledger-skill-multiselect-container">
                                       <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Skill Category</span>
@@ -3615,7 +3580,7 @@ export default function ModuleContent() {
                                           </span>
                                           <span className="text-[8px] text-slate-400">▼</span>
                                         </button>
-                                    
+                                
                                         {isLedgerSkillDropdownOpen && (
                                           <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
                                             <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
@@ -3653,7 +3618,7 @@ export default function ModuleContent() {
                                         )}
                                       </div>
                                     </div>
-          
+      
                                     {/* Role Filter */}
                                     <div className="space-y-1 relative" id="ledger-role-multiselect-container">
                                       <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Job Role</span>
@@ -3674,7 +3639,7 @@ export default function ModuleContent() {
                                           </span>
                                           <span className="text-[8px] text-slate-400">▼</span>
                                         </button>
-                                    
+                                
                                         {isLedgerRoleDropdownOpen && (
                                           <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
                                             <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
@@ -3713,7 +3678,7 @@ export default function ModuleContent() {
                                       </div>
                                     </div>
                                   </div>
-          
+      
                                   {/* Search box for checklist */}
                                   <div className="relative">
                                     <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
@@ -3725,7 +3690,7 @@ export default function ModuleContent() {
                                       className="w-full pl-8 pr-3 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-orange-500"
                                     />
                                   </div>
-          
+      
                                   {/* Employees list checkboxes */}
                                   <div className="flex-1 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg p-2 bg-slate-50/30">
                                     {employees.filter(emp => {
@@ -3773,14 +3738,14 @@ export default function ModuleContent() {
                                     )}
                                   </div>
                                 </div>
-          
-                                {/* Right Column: Dynamic inputs for each selected employee */}
+      
+                                {/* Right Column: per-employee row with date and all columns side by side */}
                                 <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
                                   <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider pb-2 border-b border-slate-100 flex items-center justify-between">
                                     <span>2. Record Monthly Settled Ledger Rows</span>
                                     <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">{ledgerSelectedEmployeeIds.length} Selected</span>
                                   </h4>
-          
+      
                                   {ledgerSelectedEmployeeIds.length === 0 ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-3">
                                       <div className="w-12 h-12 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center text-2xl">
@@ -3789,61 +3754,75 @@ export default function ModuleContent() {
                                       <div className="space-y-1">
                                         <p className="text-xs font-bold text-slate-600">Settlement Workspace Empty</p>
                                         <p className="text-[11px] text-slate-400 max-w-xs">
-                                          Select one or multiple employees from the list on the left to record monthly advances, penalties, perks, and reasons for {selectedMonth}.
+                                          Select one or multiple employees from the list on the left to record dated advances, penalties, perks, and reasons for {selectedMonth}.
                                         </p>
                                       </div>
                                     </div>
                                   ) : (
                                     <form onSubmit={handleSaveBatchLedgerRecords} className="flex flex-col flex-1 overflow-hidden">
-                                      {/* Scrollable list of employee rows */}
                                       <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 scrollbar-thin">
                                         {ledgerSelectedEmployeeIds.map((empId) => {
-                                          const emp = employees.find(e => e.id === empId);
+                                          const emp = employees.find((e) => e.id === empId);
                                           if (!emp) return null;
-          
-                                          const entry = tempLedgerEntries[empId] || {
-                                            advance: "0",
-                                            penalty: "0",
-                                            uniform: "0",
-                                            foodPerk: "0",
-                                            accommodationPerk: "0",
-                                            conveyancePerk: "0",
-                                            penaltyReason: ""
-                                          };
-          
+      
+                                          const entry = tempLedgerEntries[empId] || defaultTempLedgerEntry();
+      
                                           const updateField = (field: keyof typeof entry, val: string) => {
-                                            setTempLedgerEntries(prev => ({
+                                            setTempLedgerEntries((prev) => ({
                                               ...prev,
                                               [empId]: {
                                                 ...(prev[empId] || entry),
-                                                [field]: val
-                                              }
+                                                [field]: val,
+                                              },
                                             }));
                                           };
-          
+      
                                           return (
                                             <div key={empId} className="p-3 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2.5 relative text-left">
                                               <button
                                                 type="button"
-                                                onClick={() => setLedgerSelectedEmployeeIds(prev => prev.filter(id => id !== empId))}
+                                                onClick={async () => {
+                                                  const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
+                                                  const confirmed = await confirmAction({
+                                                    title: "Remove from list",
+                                                    message: `Remove ${empName} from the settlement list? Any unsaved amounts in this row will be lost.`,
+                                                    confirmLabel: "Remove",
+                                                    variant: "danger",
+                                                  });
+                                                  if (confirmed) {
+                                                    setLedgerSelectedEmployeeIds((prev) => prev.filter((id) => id !== empId));
+                                                  }
+                                                }}
                                                 className="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-extrabold text-xs cursor-pointer"
                                                 title="Remove from settlement list"
                                               >
                                                 ✕
                                               </button>
-          
+      
                                               <div className="pr-6">
                                                 <span className="text-xs font-black text-slate-800">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</span>
                                                 <span className="text-[9px] font-mono text-slate-400 ml-1.5">({emp.employeeCode})</span>
                                               </div>
-          
-                                              {/* Ledger inputs grid */}
-                                              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+      
+                                              <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
+                                                <div>
+                                                  <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📅 Date</label>
+                                                  <input
+                                                    id={`ledger-date-${empId}`}
+                                                    name={`ledgerDate_${empId}`}
+                                                    type="date"
+                                                    value={entry.entryDate}
+                                                    onChange={(e) => updateField("entryDate", e.target.value)}
+                                                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
+                                                  />
+                                                </div>
                                                 <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">💰 Advance</label>
-                                                  <input id={`ledger-advance-${empId}`} name={`ledgerAdvance_${empId}`}
+                                                  <input
+                                                    id={`ledger-advance-${empId}`}
+                                                    name={`ledgerAdvance_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.advance}
                                                     onChange={(e) => updateField("advance", e.target.value)}
                                                     placeholder="0"
@@ -3852,9 +3831,11 @@ export default function ModuleContent() {
                                                 </div>
                                                 <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">👕 Uniform</label>
-                                                  <input id={`ledger-uniform-${empId}`} name={`ledgerUniform_${empId}`}
+                                                  <input
+                                                    id={`ledger-uniform-${empId}`}
+                                                    name={`ledgerUniform_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.uniform}
                                                     onChange={(e) => updateField("uniform", e.target.value)}
                                                     placeholder="0"
@@ -3863,9 +3844,11 @@ export default function ModuleContent() {
                                                 </div>
                                                 <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">⚠️ Penalty</label>
-                                                  <input id={`ledger-penalty-${empId}`} name={`ledgerPenalty_${empId}`}
+                                                  <input
+                                                    id={`ledger-penalty-${empId}`}
+                                                    name={`ledgerPenalty_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.penalty}
                                                     onChange={(e) => updateField("penalty", e.target.value)}
                                                     placeholder="0"
@@ -3874,9 +3857,11 @@ export default function ModuleContent() {
                                                 </div>
                                                 <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🍔 Food</label>
-                                                  <input id={`ledger-food-${empId}`} name={`ledgerFood_${empId}`}
+                                                  <input
+                                                    id={`ledger-food-${empId}`}
+                                                    name={`ledgerFood_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.foodPerk}
                                                     onChange={(e) => updateField("foodPerk", e.target.value)}
                                                     placeholder="0"
@@ -3885,20 +3870,24 @@ export default function ModuleContent() {
                                                 </div>
                                                 <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🏠 Accom.</label>
-                                                  <input id={`ledger-accom-${empId}`} name={`ledgerAccom_${empId}`}
+                                                  <input
+                                                    id={`ledger-accom-${empId}`}
+                                                    name={`ledgerAccom_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.accommodationPerk}
                                                     onChange={(e) => updateField("accommodationPerk", e.target.value)}
                                                     placeholder="0"
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div className="col-span-2 sm:col-span-1">
+                                                <div>
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🚗 Conv.</label>
-                                                  <input id={`ledger-conv-${empId}`} name={`ledgerConv_${empId}`}
+                                                  <input
+                                                    id={`ledger-conv-${empId}`}
+                                                    name={`ledgerConv_${empId}`}
                                                     type="number"
-                                                    min={0}
+                                                    min="0"
                                                     value={entry.conveyancePerk}
                                                     onChange={(e) => updateField("conveyancePerk", e.target.value)}
                                                     placeholder="0"
@@ -3906,11 +3895,12 @@ export default function ModuleContent() {
                                                   />
                                                 </div>
                                               </div>
-          
-                                              {/* Textfield to remember penalty reason */}
+      
                                               <div>
                                                 <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📝 Settlement Reason / Penalty Notes</label>
-                                                <input id={`ledger-penalty-reason-${empId}`} name={`ledgerPenaltyReason_${empId}`}
+                                                <input
+                                                  id={`ledger-penalty-reason-${empId}`}
+                                                  name={`ledgerPenaltyReason_${empId}`}
                                                   type="text"
                                                   value={entry.penaltyReason}
                                                   onChange={(e) => updateField("penaltyReason", e.target.value)}
@@ -3922,8 +3912,7 @@ export default function ModuleContent() {
                                           );
                                         })}
                                       </div>
-          
-                                      {/* Save Button */}
+      
                                       <div className="pt-3 border-t border-slate-100 flex gap-2">
                                         <button
                                           type="submit"
@@ -3937,7 +3926,7 @@ export default function ModuleContent() {
                                   )}
                                 </div>
                               </div>
-          
+      
                               {/* 4. Bottom Section: Statement Overview Table for the Selected Month */}
                               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col space-y-4">
                                 <div className="text-left">
@@ -3945,7 +3934,7 @@ export default function ModuleContent() {
                                     Ledger Overview Sheet for {selectedMonth}
                                   </h4>
                                   <p className="text-[11px] text-slate-400 mt-0.5">
-                                    Visual registry of all recorded ledger records settled for the active month. Click [Clear] next to any component to reset individual fields dynamically.
+                                    Monthly totals at a glance. Click &quot;View entries&quot; on any employee to see date-wise lines and remove individual records.
                                   </p>
                                 </div>
                                 <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col">
@@ -3959,96 +3948,56 @@ export default function ModuleContent() {
                                     <span>Conv.</span>
                                     <span className="col-span-2 text-center">Settlement Reason / Notes</span>
                                   </div>
-          
+      
                                   <div className="divide-y divide-slate-150 max-h-[350px] overflow-y-auto" id="ledger-records-container">
                                     {employees.length === 0 ? (
                                       <div className="p-8 text-center text-xs text-slate-450 font-medium">No employees registered in the system database.</div>
-                                    ) : (
-                                      employees.map((emp) => {
-                                        const monthLedger = emp.monthlyLedger?.[selectedMonth];
-                                        const adv = monthLedger ? safeNumber(monthLedger.advance) : 0;
-                                        const uniform = monthLedger ? safeNumber(monthLedger.uniform) : 0;
-                                        const pen = monthLedger ? safeNumber(monthLedger.penalty) : 0;
-                                        const food = monthLedger ? safeNumber(monthLedger.foodPerk) : 0;
-                                        const acc = monthLedger ? safeNumber(monthLedger.accommodationPerk) : 0;
-                                        const conv = monthLedger ? safeNumber(monthLedger.conveyancePerk) : 0;
-                                        const reason = monthLedger ? monthLedger.penaltyReason : "";
-          
-                                        const hasAnyEntry = adv > 0 || uniform > 0 || pen > 0 || food > 0 || acc > 0 || conv > 0 || reason;
-          
+                                    ) : (() => {
+                                      const overviewRows = filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger);
+                                      if (overviewRows.length === 0) {
                                         return (
-                                          <div key={emp.id} className={`px-4 py-3 grid grid-cols-10 items-center hover:bg-slate-50/50 transition text-xs border-b border-slate-100 text-left ${hasAnyEntry ? "bg-orange-50/15" : ""}`}>
-                                            <div className="col-span-2 space-y-0.5 pr-2">
-                                              <p className="font-bold text-slate-800 truncate">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</p>
-                                              <p className="font-mono text-[9px] text-slate-450">{emp.employeeCode} • {emp.location || "Unassigned"}</p>
-                                            </div>
-          
-                                            {/* Advance */}
-                                            <div>
-                                              {adv > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "advance", adv, "text-blue-700")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Uniform */}
-                                            <div>
-                                              {uniform > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "uniform", uniform, "text-rose-600")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Penalty */}
-                                            <div>
-                                              {pen > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "penalty", pen, "text-rose-600")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Food */}
-                                            <div>
-                                              {food > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "foodPerk", food, "text-indigo-700")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Accommodation */}
-                                            <div>
-                                              {acc > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "accommodationPerk", acc, "text-indigo-700")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Conveyance */}
-                                            <div>
-                                              {conv > 0 ? (
-                                                renderClearButtonOrConfirm(emp.id, "conveyancePerk", conv, "text-indigo-700")
-                                              ) : (
-                                                <span className="text-slate-350 font-mono">-</span>
-                                              )}
-                                            </div>
-          
-                                            {/* Reason Column */}
-                                            <div className="col-span-2 text-slate-500 italic pr-2 font-medium truncate text-center" title={reason || "No remarks"}>
-                                              {reason ? (
-                                                <span className="not-italic text-slate-700 font-semibold text-[11px] block truncate">{reason}</span>
-                                              ) : (
-                                                <span className="text-slate-300 font-normal">None recorded</span>
-                                              )}
-                                            </div>
-                                          </div>
+                                          <div className="p-8 text-center text-xs text-slate-450 font-medium">No ledger entries recorded for {selectedMonth} yet.</div>
                                         );
-                                      })
-                                    )}
+                                      }
+                                      return overviewRows.map((emp) => {
+                                        const monthLedger = getMonthLedger(emp, selectedMonth);
+
+                                        return (
+                                          <LedgerOverviewRow
+                                            key={emp.id}
+                                            emp={emp}
+                                            monthLedger={monthLedger}
+                                            canEdit={!!userPermissions.ledger?.edit}
+                                            onDeleteItem={async (itemId) => {
+                                              const item = monthLedger.ledgerItems.find((i) => i.id === itemId);
+                                              if (!item) return;
+                                              const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
+                                              const typeLabel = LEDGER_TYPE_LABELS[item.type];
+                                              const confirmed = await confirmAction({
+                                                title: "Remove entry",
+                                                message: `Remove ${typeLabel} entry of ₹${item.amount.toLocaleString("en-IN")} for ${empName} in ${selectedMonth}?`,
+                                                confirmLabel: "Remove",
+                                                variant: "danger",
+                                              });
+                                              if (confirmed) await handleDeleteLedgerItem(emp.id, itemId);
+                                            }}
+                                            onClearType={async (type) => {
+                                              const total = getTotalByType(monthLedger, type);
+                                              if (total <= 0) return;
+                                              const typeLabel = LEDGER_TYPE_LABELS[type];
+                                              const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
+                                              const confirmed = await confirmAction({
+                                                title: `Clear ${typeLabel}`,
+                                                message: `Clear all ${typeLabel} entries (₹${total.toLocaleString("en-IN")}) for ${empName} in ${selectedMonth}?`,
+                                                confirmLabel: "Clear",
+                                                variant: "danger",
+                                              });
+                                              if (confirmed) await handleClearLedgerValue(emp.id, type);
+                                            }}
+                                          />
+                                        );
+                                      });
+                                    })()}
                                   </div>
                                 </div>
                               </div>

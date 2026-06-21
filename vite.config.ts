@@ -133,6 +133,18 @@ export default defineConfig(({ mode }) => {
           : {}),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            excel: ['exceljs'],
+            pdf: ['jspdf', 'jspdf-autotable'],
+            leaflet: ['leaflet'],
+            vendor: ['react', 'react-dom', 'react-router-dom'],
+          },
+        },
+      },
+    },
     server: {
       host: true,
       allowedHosts: true,

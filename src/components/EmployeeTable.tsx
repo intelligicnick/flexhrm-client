@@ -635,6 +635,7 @@ export default function EmployeeTable({
                   <tr
                     key={emp.id}
                     className={`transition group ${rowClassName}`}
+                    style={{ contentVisibility: "auto", containIntrinsicSize: "0 44px" }}
                   >
                     {/* Sticky column checkboxes with pixel-locked widths */}
                     <td className={`sticky left-0 z-[15] ${stickyCellClassName} p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.03)]`}>

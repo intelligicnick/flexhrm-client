@@ -3,6 +3,7 @@ import { getIdCardVerifyUrl } from "./verify-url";
 
 export interface QrEmployeePayload {
   idNo: string;
+  verifyToken: string;
   name: string;
   employeeCode: string;
   designation: string;
@@ -12,7 +13,7 @@ export interface QrEmployeePayload {
 }
 
 export function buildQrPayload(payload: QrEmployeePayload): string {
-  return getIdCardVerifyUrl(payload.idNo);
+  return getIdCardVerifyUrl(payload.idNo, payload.verifyToken);
 }
 
 const QR_DISPLAY_PX = 38;

@@ -4,6 +4,7 @@ import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 interface EmployeePhotoProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   employeeId: string;
   photo?: string | null;
+  photoUrl?: string | null;
   /** Local preview (e.g. data URL from file picker) overrides the API fetch */
   previewSrc?: string | null;
   fallback?: React.ReactNode;
@@ -12,6 +13,7 @@ interface EmployeePhotoProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 export default function EmployeePhoto({
   employeeId,
   photo,
+  photoUrl,
   previewSrc,
   fallback = null,
   alt = "Employee",
@@ -21,6 +23,7 @@ export default function EmployeePhoto({
   const remoteUrl = useEmployeePhotoUrl(
     previewSrc ? undefined : employeeId,
     previewSrc ? null : photo,
+    previewSrc ? null : photoUrl,
   );
   const src = previewSrc || remoteUrl;
 

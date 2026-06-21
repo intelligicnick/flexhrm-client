@@ -76,8 +76,16 @@ export interface Employee {
     conveyancePerk: number;
     penaltyReason: string;
     paymentStatus?: "Unpaid" | "Paid" | "Hold";
+    ledgerItems?: Array<{
+      id: string;
+      type: "advance" | "penalty" | "uniform" | "foodPerk" | "accommodationPerk" | "conveyancePerk";
+      amount: number;
+      entryDate: string;
+      note: string;
+    }>;
   }>;
   photo?: string;
+  photoUrl?: string;
   idCard?: string;
   idCardGeneratedAt?: string;
 }
@@ -93,6 +101,7 @@ export interface EmployeeDocument {
   quality?: number;
   uploadedBy: string;
   createdAt: string;
+  imagekitUrl?: string;
 }
 
 export interface EmployeeChangeEntry {
@@ -273,6 +282,7 @@ export interface SchoolSupervisor {
   status: string;
   hasRegisteredDevice?: boolean;
   profilePhotoBase64?: string;
+  profilePhotoUrl?: string;
   registeredDeviceId?: string;
   registeredDeviceName?: string;
   deviceRegisteredAt?: string | null;
@@ -492,6 +502,7 @@ export interface RenewalDocument {
   quality?: number;
   uploadedBy: string;
   createdAt: string;
+  imagekitUrl?: string;
 }
 
 export type BgDdInstrumentType = "bg" | "dd";
@@ -534,6 +545,7 @@ export interface BgDdDocument {
   quality?: number;
   uploadedBy: string;
   createdAt: string;
+  imagekitUrl?: string;
 }
 
 export interface SchoolBillingLineItem {
@@ -567,6 +579,7 @@ export interface SchoolVisitPhoto {
   mimeType: string;
   filename: string;
   photoDataBase64: string;
+  imagekitUrl?: string;
   takenAt: string;
   lat?: number;
   lng?: number;
@@ -584,7 +597,8 @@ export interface SchoolVisit {
   visitDate: string;
   materialsGiven: { item: string; qty: number }[];
   notes: string;
-  photos: SchoolVisitPhoto[];
+  photos?: SchoolVisitPhoto[];
+  photoCount?: number;
   gpsLocation?: { lat: number; lng: number; locationLabel?: string };
   status: "submitted" | "approved" | "rejected";
   visitType?: "commitment" | "adhoc";
@@ -597,6 +611,7 @@ export interface SupervisorRequestPhoto {
   mimeType: string;
   filename: string;
   photoDataBase64: string;
+  imagekitUrl?: string;
   takenAt: string;
 }
 
