@@ -12,9 +12,10 @@ import LoginPage from "./components/auth/LoginPage";
 import DashboardLayout from "./layouts/DashboardLayout";
 import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
 import EmployeeDataGatherPage from "./pages/EmployeeDataGatherPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
 import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
-import { DEFAULT_PATH } from "./routes";
+import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 
 const SupervisorHomePage = lazy(() => import("./pages/supervisor/SupervisorHomePage"));
@@ -41,7 +42,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!isLoggedIn) return <Navigate to="/login" replace />;
+  if (!isLoggedIn) return <Navigate to={LOGIN_PATH} replace />;
   return <>{children}</>;
 }
 
@@ -71,31 +72,11 @@ function VerifyByQuery() {
   return <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />;
 }
 
-function HomeRedirect() {
-  const [searchParams] = useSearchParams();
-  const idParam = searchParams.get("id") ?? searchParams.get("idCard");
-  const tokenParam = searchParams.get("token");
-  if (idParam?.trim()) {
-    const id = parseIdCardFromVerifyParam(idParam);
-    const token = tokenParam?.trim() || parseVerifyTokenFromParam(idParam, searchParams.toString());
-    if (token) {
-      return (
-        <Navigate
-          to={`/verify/${encodeURIComponent(id)}/${encodeURIComponent(token)}`}
-          replace
-        />
-      );
-    }
-    return <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />;
-  }
-  return <Navigate to={DEFAULT_PATH} replace />;
-}
-
 function PortalRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-      <Route path="/" element={<HomeRedirect />} />
+      <Route path={LOGIN_PATH} element={<PublicRoute><LoginPage /></PublicRoute>} />
+      <Route path="/" element={<NotFoundPage />} />
       <Route
         path="*"
         element={

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl, parseApiError } from "../api";
-import { DEFAULT_PATH } from "../routes";
+import { DEFAULT_PATH, LOGIN_PATH } from "../routes";
 
 const PERMISSION_MODULES = [
   "employees",
@@ -31,6 +31,8 @@ export function useAuth() {
 
   const [usernameInput, setUsernameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [captchaInput, setCaptchaInput] = useState({ id: "", answer: "" });
+  const [captchaRefreshKey, setCaptchaRefreshKey] = useState(0);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginView, setLoginView] = useState<"signin" | "forgot" | "reset">("signin");
   const [forgotUsername, setForgotUsername] = useState("");
@@ -100,7 +102,7 @@ export function useAuth() {
     clearLocalSession();
     setUsernameInput("");
     setPasswordInput("");
-    navigate("/login");
+    navigate(LOGIN_PATH);
   }, [clearLocalSession, navigate]);
 
   useEffect(() => {
@@ -139,6 +141,10 @@ export function useAuth() {
         setLoginError("Please enter a username.");
         return;
       }
+      if (!captchaInput.id || !captchaInput.answer.trim()) {
+        setLoginError("Please complete the security check.");
+        return;
+      }
       try {
         setIsLoggingIn(true);
         setLoginError(null);
@@ -146,7 +152,12 @@ export function useAuth() {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: cleanUser, password: passwordInput }),
+          body: JSON.stringify({
+            username: cleanUser,
+            password: passwordInput,
+            captchaId: captchaInput.id,
+            captchaAnswer: captchaInput.answer.trim(),
+          }),
         });
         if (!res.ok) {
           throw await parseApiError(res, "Incorrect administrator username or password.");
@@ -159,11 +170,12 @@ export function useAuth() {
         onSuccess?.(data.username || cleanUser);
       } catch (err: unknown) {
         setLoginError(err instanceof Error ? err.message : "Login failed.");
+        setCaptchaRefreshKey((key) => key + 1);
       } finally {
         setIsLoggingIn(false);
       }
     },
-    [usernameInput, passwordInput, applySessionFromAuthMe, navigate],
+    [usernameInput, passwordInput, captchaInput, applySessionFromAuthMe, navigate],
   );
 
   const userPermissions = useMemo(() => {
@@ -189,6 +201,9 @@ export function useAuth() {
     setUsernameInput,
     passwordInput,
     setPasswordInput,
+    captchaInput,
+    setCaptchaInput,
+    captchaRefreshKey,
     loginError,
     setLoginError,
     loginView,

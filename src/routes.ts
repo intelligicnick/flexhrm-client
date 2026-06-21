@@ -67,6 +67,8 @@ export const PATH_TO_TAB: Record<string, string> = Object.fromEntries(
 
 export const DEFAULT_PATH = "/dashboard";
 
+export const LOGIN_PATH = "/hrmlogin";
+
 export function tabToPath(tab: string): string {
   return TAB_TO_PATH[tab] ?? DEFAULT_PATH;
 }

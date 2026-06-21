@@ -1,7 +1,6 @@
 import React from "react";
 import PasswordInput from "../PasswordInput";
-import { Button } from "../ui/Button";
-import { Input } from "../ui/Input";
+import LoginCaptcha from "./LoginCaptcha";
 import { useHRMS } from "../../context/HRMSContext";
 
 export default function LoginPage() {
@@ -12,6 +11,9 @@ export default function LoginPage() {
     setUsernameInput,
     passwordInput,
     setPasswordInput,
+    captchaInput,
+    setCaptchaInput,
+    captchaRefreshKey,
     handleLoginSubmit,
     openForgotPassword,
     forgotError,
@@ -110,7 +112,14 @@ export default function LoginPage() {
                         id="login-password-field"
                       />
                     </div>
-    
+
+                    <LoginCaptcha
+                      key={captchaRefreshKey}
+                      value={captchaInput}
+                      onChange={setCaptchaInput}
+                      disabled={isLoggingIn}
+                    />
+
                     <div className="flex items-center justify-between pt-1">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input id="login-keep-logged-in" name="keepLoggedIn" type="checkbox" className="rounded text-[#ff791a] focus:ring-[#ff791a] w-3.5 h-3.5" defaultChecked />

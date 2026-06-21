@@ -49,6 +49,10 @@ describe("parseIdCardFromVerifyParam", () => {
 });
 
 describe("parseVerifyTokenFromParam", () => {
+  it("reads a plain token from the verify route path segment", () => {
+    expect(parseVerifyTokenFromParam(SAMPLE_TOKEN)).toBe(SAMPLE_TOKEN);
+  });
+
   it("reads the token from a full verification URL path", () => {
     expect(
       parseVerifyTokenFromParam(

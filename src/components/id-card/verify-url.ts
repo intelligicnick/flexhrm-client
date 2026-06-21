@@ -45,7 +45,7 @@ export function parseVerifyTokenFromParam(raw: string, search?: string): string 
     }
   }
 
-  return "";
+  return value;
 }
 
 /** Public supervisor mobile login URL (open on phone to log field visits). */
