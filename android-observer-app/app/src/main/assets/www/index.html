@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>/**
+ * Suppress noisy browser-extension and dev-PWA errors in DevTools.
+ * Extensions call chrome.runtime.sendMessage without listeners — not an app bug.
+ */
+(function () {
+  var MARKERS = [
+    'tabs:outgoing.message.ready',
+    'outgoing.message.ready',
+    'no listener:',
+    'message channel closed before a response was received',
+    'could not establish connection',
+    'receiving end does not exist',
+    'the message port closed before a response was received',
+    'a listener indicated an asynchronous response by returning true',
+    'extension context invalidated',
+    'chrome.runtime.sendmessage',
+  ];
+
+  var DEVTOOLS_PROMOS = [
+    'download the react devtools',
+    'react.dev/link/react-devtools',
+  ];
+
+  var DEV_NOISE = [
+    'precaching did not find a match',
+    'no route found for:',
+    '%cworkbox',
+  ];
+
+  function flatten(value, depth) {
+    if (value == null || depth > 6) return '';
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) {
+      return [value.message, value.stack, value.cause ? flatten(value.cause, depth + 1) : '']
+        .filter(Boolean)
+        .join(' ');
+    }
+    if (typeof value === 'object') {
+      return [
+        value.message,
+        value.name,
+        value.stack,
+        value.reason ? flatten(value.reason, depth + 1) : '',
+        value.error ? flatten(value.error, depth + 1) : '',
+        String(value),
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+    return String(value);
+  }
+
+  function containsMarker(text, markers) {
+    for (var i = 0; i < markers.length; i++) {
+      if (text.indexOf(markers[i]) !== -1) return true;
+    }
+    return false;
+  }
+
+  function isExtensionNoise(value) {
+    return containsMarker(flatten(value, 0).toLowerCase(), MARKERS);
+  }
+
+  function isDevToolsPromo(value) {
+    return containsMarker(flatten(value, 0).toLowerCase(), DEVTOOLS_PROMOS);
+  }
+
+  function isDevNoise(value) {
+    return containsMarker(flatten(value, 0).toLowerCase(), DEV_NOISE);
+  }
+
+  function isExtensionSource(filename) {
+    if (!filename) return false;
+    return (
+      filename.indexOf('chrome-extension://') !== -1 ||
+      filename.indexOf('moz-extension://') !== -1 ||
+      /(^|\/)vendor\.js($|\?)/.test(filename) ||
+      /(^|\/)bg-dd($|\?|:)/.test(filename) ||
+      /^VM\d+ /.test(filename)
+    );
+  }
+
+  function argsToText(args) {
+    return Array.prototype.slice.call(args).map(function (arg) {
+      return flatten(arg, 0);
+    }).join(' ');
+  }
+
+  function swallow(event, reason) {
+    if (!isExtensionNoise(reason)) return false;
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    if (event && typeof event.stopImmediatePropagation === 'function') {
+      event.stopImmediatePropagation();
+    }
+    return true;
+  }
+
+  function onUnhandledRejection(event) {
+    swallow(event, event.reason);
+  }
+
+  function onWindowError(event) {
+    if (
+      swallow(event, event.message) ||
+      swallow(event, event.error) ||
+      (isExtensionSource(event.filename) && swallow(event, event.message || event.error))
+    ) {
+      return;
+    }
+  }
+
+  var root = typeof globalThis !== 'undefined' ? globalThis : window;
+
+  root.addEventListener('unhandledrejection', onUnhandledRejection, true);
+  root.addEventListener('error', onWindowError, true);
+  root.onunhandledrejection = onUnhandledRejection;
+  root.onerror = function (message, source, _lineno, _colno, error) {
+    if (
+      isExtensionNoise(message) ||
+      isExtensionNoise(error) ||
+      (isExtensionSource(source) && isExtensionNoise(message || error))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  ['error', 'warn', 'info', 'log', 'debug'].forEach(function (method) {
+    var original = console[method];
+    if (typeof original !== 'function') return;
+
+    console[method] = function () {
+      var text = argsToText(arguments);
+      if (isExtensionNoise(text)) return;
+      if (isDevToolsPromo(text)) return;
+      if (isDevNoise(text)) return;
+      if (/vendor\.js/.test(text) && isExtensionNoise(text)) return;
+      return original.apply(console, arguments);
+    };
+  });
+})();
+</script>
+
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet" />
+    <title>Flex HRM an Intelligic product</title>
+    <script src="/extension-error-guard.js"></script>
+    <script>
+      (function () {
+        try {
+          if (navigator.serviceWorker && !location.pathname.startsWith("/supervisor")) {
+            navigator.serviceWorker.getRegistrations().then(function (regs) {
+              regs.forEach(function (reg) { reg.unregister(); });
+            }).catch(function () {});
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      (function () {
+        try {
+          var bridge = window.FlexHrmAndroid || window.Android;
+          if (!bridge || !bridge.getSupervisorSession) return;
+          var raw = bridge.getSupervisorSession();
+          if (!raw) return;
+          var session = JSON.parse(raw);
+          if (!session || !session.token) return;
+          localStorage.setItem("hrms_supervisor_token", session.token);
+          if (session.name) localStorage.setItem("hrms_supervisor_name", session.name);
+          if (session.supervisorId) localStorage.setItem("hrms_supervisor_id", session.supervisorId);
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Dd0gv8QR.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/pdf-BUUpnAFH.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-DgBtFzjp.js">
+    <link rel="modulepreload" crossorigin href="/assets/excel-b-Q7xqD0.js">
+    <link rel="modulepreload" crossorigin href="/assets/leaflet-DCIffZry.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-CsdxhIT0.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

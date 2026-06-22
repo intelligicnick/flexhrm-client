@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.flexhrm.observer'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.flexhrm.observer'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+
+        buildConfigField 'String', 'OBSERVER_URL',
+                '"https://appassets.androidplatform.net/observer/login"'
+        buildConfigField 'String', 'API_ORIGIN',
+                '"https://midnightblue-partridge-476451.hostingersite.com"'
+        buildConfigField 'String', 'API_BASE',
+                '"https://midnightblue-partridge-476451.hostingersite.com/api"'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+configurations.configureEach {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core:1.15.0'
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

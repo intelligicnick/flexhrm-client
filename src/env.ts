@@ -32,8 +32,14 @@ function isBundledNativeShellHost(): boolean {
   return window.location.hostname.toLowerCase().endsWith("appassets.androidplatform.net");
 }
 
+function isNativeObserverShell(): boolean {
+  if (typeof window === "undefined") return false;
+  return /FlexHrmObserver/i.test(navigator.userAgent);
+}
+
 function isNativeSupervisorShell(): boolean {
   if (typeof window === "undefined") return false;
+  if (isNativeObserverShell()) return false;
   if (isBundledNativeShellHost()) return true;
   return /FlexHrmSupervisor/i.test(navigator.userAgent);
 }
@@ -54,7 +60,7 @@ export function getApiBase(): string {
   const nativeBase = readNativeApiBase();
   if (nativeBase) return nativeBase;
 
-  if (isNativeSupervisorShell()) {
+  if (isNativeSupervisorShell() || isNativeObserverShell()) {
     return DEFAULT_PRODUCTION_API_BASE.replace(/\/$/, "");
   }
 

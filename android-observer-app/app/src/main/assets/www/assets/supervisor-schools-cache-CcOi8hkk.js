@@ -1,0 +1,1 @@
+let t=null,r=0,o=null;const l=9e4;async function i(e,a){const c=Date.now();return t&&c-r<l?t:o||(o=(async()=>{try{const n=await e("/api/school-visits/supervisor/schools");if(!n.ok)throw new Error("Failed to load schools.");const s=await n.json();return t=s,r=Date.now(),s}catch{return t??[]}finally{o=null}})(),o)}export{i as f};

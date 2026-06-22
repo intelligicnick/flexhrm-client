@@ -15,6 +15,7 @@ import EmployeeDataGatherPage from "./pages/EmployeeDataGatherPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
 import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
+import ObserverApp from "./pages/observer/ObserverApp";
 import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";
@@ -101,6 +102,7 @@ export default function App() {
         <Route path="/employee/update/:token" element={<EmployeeDataGatherPage />} />
         <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
+        <Route path="/observer/*" element={<ObserverApp />} />
         <Route path="/supervisor" element={<SupervisorLayout />}>
           <Route
             index

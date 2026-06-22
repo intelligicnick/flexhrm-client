@@ -43,7 +43,7 @@ function isSupervisorNativeOrProduction(): boolean {
   const host = window.location.hostname.toLowerCase();
   if (host.endsWith("hostingersite.com")) return true;
   if (host.endsWith("appassets.androidplatform.net")) return true;
-  return /FlexHrmSupervisor/i.test(navigator.userAgent);
+  return /FlexHrmSupervisor|FlexHrmObserver/i.test(navigator.userAgent);
 }
 
 export function formatNetworkFetchError(err: unknown, fallback?: string): Error {
