@@ -59,6 +59,10 @@ function statusBadgeClass(status: SchoolVisit["status"]) {
   return "bg-amber-100 text-amber-700";
 }
 
+function visitText(value: unknown): string {
+  return value == null ? "" : String(value);
+}
+
 function VisitTypeBadge({ visitType }: { visitType?: SchoolVisit["visitType"] }) {
   return (
     <span
@@ -201,10 +205,10 @@ export default function SupervisorVisitsPanel({
     if (q) {
       rows = rows.filter(
         (v) =>
-          v.schoolName.toLowerCase().includes(q) ||
-          v.supervisorName.toLowerCase().includes(q) ||
-          v.udise.toLowerCase().includes(q) ||
-          v.block.toLowerCase().includes(q),
+          visitText(v.schoolName).toLowerCase().includes(q) ||
+          visitText(v.supervisorName).toLowerCase().includes(q) ||
+          visitText(v.udise).toLowerCase().includes(q) ||
+          visitText(v.block).toLowerCase().includes(q),
       );
     }
     if (blockFilter) rows = rows.filter((v) => v.block === blockFilter);
@@ -212,7 +216,7 @@ export default function SupervisorVisitsPanel({
     if (statusFilter) rows = rows.filter((v) => v.status === statusFilter);
     if (visitTypeFilter) rows = rows.filter((v) => (v.visitType || "adhoc") === visitTypeFilter);
     if (dateFilter) rows = rows.filter((v) => visitMatchesFilter(v.visitDate, dateFilter));
-    return rows.sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+    return rows.sort((a, b) => visitText(b.visitDate).localeCompare(visitText(a.visitDate)));
   }, [visits, searchTerm, blockFilter, supervisorFilter, statusFilter, visitTypeFilter, dateFilter]);
 
   const selectableVisits = useMemo(

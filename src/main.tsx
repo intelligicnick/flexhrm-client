@@ -5,17 +5,25 @@ import { setupFetchInterceptor } from './api';
 import './index.css';
 import 'leaflet/dist/leaflet.css';
 
-/** Stale dev service workers intercept /api and spam workbox logs on admin routes. */
-async function cleanupDevServiceWorkers(): Promise<void> {
-  if (!import.meta.env.DEV || typeof navigator === 'undefined' || !navigator.serviceWorker) {
-    return;
-  }
+/** Field Team PWA service workers must not control admin routes (/field-team, etc.). */
+async function cleanupNonSupervisorServiceWorkers(): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
   if (window.location.pathname.startsWith('/supervisor')) return;
-  const registrations = await navigator.serviceWorker.getRegistrations();
-  await Promise.all(registrations.map((registration) => registration.unregister()));
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  } catch {
+    // Ignore — page should still load without SW cleanup.
+  }
 }
 
-void cleanupDevServiceWorkers();
+void cleanupNonSupervisorServiceWorkers();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', () => {
+    window.location.reload();
+  });
+}
 setupFetchInterceptor();
 
 if (typeof window !== 'undefined' && window.location.pathname.startsWith('/supervisor')) {

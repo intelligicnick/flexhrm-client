@@ -753,5 +753,6 @@ export interface CustomRole {
     directory: RolePermission;
     admin: RolePermission;
   };
+  uiRestrictions?: import("./lib/role-ui-restrictions").RoleUiRestrictions;
 }
 

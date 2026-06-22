@@ -17,6 +17,7 @@ import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
 import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
 import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
+import AppErrorBoundary from "./components/AppErrorBoundary";
 
 const SupervisorHomePage = lazy(() => import("./pages/supervisor/SupervisorHomePage"));
 const SupervisorVisitPage = lazy(() => import("./pages/supervisor/SupervisorVisitPage"));
@@ -90,9 +91,10 @@ function PortalRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <GlobalHorizontalScroll />
-      <Routes>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <GlobalHorizontalScroll />
+        <Routes>
         <Route path="/verify/:idNo/:verifyToken" element={<EmployeeVerifyPage />} />
         <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />
@@ -159,7 +161,8 @@ export default function App() {
             </HRMSProvider>
           }
         />
-      </Routes>
-    </BrowserRouter>
+        </Routes>
+      </BrowserRouter>
+    </AppErrorBoundary>
   );
 }

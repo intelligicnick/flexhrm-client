@@ -127,9 +127,15 @@ import {
   filterSelectableBulkDays,
   employeeMatchesAttendanceRecordFilter,
 } from "../lib/attendance-helpers";
-import { getModuleKey, PERMISSION_MODULES, ROLE_PERMISSION_MODULE_ROWS, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import { getModuleKey, PERMISSION_MODULES, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import {
+  isColumnAllowed,
+  isFilterLocked,
+  isFilterVisible,
+} from "../lib/role-ui-restrictions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
-import PercentIcon from "../components/ui/PercentIcon";
+import AdminAccountsPanel from "../components/admin/AdminAccountsPanel";
+import RolesPermissionsPanel from "../components/admin/RolesPermissionsPanel";
 import DialerOverlay from "../components/ui/DialerOverlay";
 import DirectoryContactCard from "../components/DirectoryContactCard";
 import { formatPhoneDisplay, phoneToDialString } from "../lib/phone-helpers";
@@ -148,6 +154,32 @@ import {
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
 import AdminDashboardPage from "./AdminDashboardPage";
+
+function attendanceBadgeClass(code: string): string {
+  const base = "text-[9px] font-black text-center rounded px-1 py-0.5 inline-block min-w-[1.5rem]";
+  switch (code) {
+    case "P":
+      return `${base} bg-emerald-100 text-emerald-800`;
+    case "A":
+      return `${base} bg-rose-100 text-rose-800`;
+    case "L":
+      return `${base} bg-amber-100 text-amber-800`;
+    case "H":
+      return `${base} bg-blue-100 text-blue-800`;
+    case "WO":
+      return `${base} bg-violet-100 text-violet-800`;
+    default:
+      return `${base} bg-slate-100 text-slate-400 font-semibold`;
+  }
+}
+
+function paymentStatusBadgeClass(status: string): string {
+  const base = "px-2 py-1 rounded text-xs font-bold border inline-block";
+  if (status === "Paid") return `${base} bg-emerald-50 border-emerald-200 text-emerald-700`;
+  if (status === "Hold") return `${base} bg-amber-50 border-amber-250 text-amber-700`;
+  return `${base} bg-slate-100 border-slate-200 text-slate-600`;
+}
+
 export default function ModuleContent() {
   const [isSchoolBulkEditMode, setIsSchoolBulkEditMode] = useState(false);
   const [isSchoolImporterOpen, setIsSchoolImporterOpen] = useState(false);
@@ -181,12 +213,18 @@ export default function ModuleContent() {
     editAdminRole,
     editAdminLocations,
     editAdminDisabled,
+    editAdminNewPassword,
+    editAdminPasswordError,
+    editAdminPasswordSuccess,
+    isResettingAdminPassword,
     inviteError,
     inviteSuccess,
     isFetchingAdmins,
     roleNameInput,
     roleDescInput,
     rolePermsInput,
+    roleUiInput,
+    salaryUiRestrictions,
     roleError,
     roleSuccess,
     activePimSubTab,
@@ -411,6 +449,8 @@ export default function ModuleContent() {
     backToSignIn,
     handleInviteAdminSubmit,
     handleUpdateAdminSubmit,
+    handleResetAdminPasswordSubmit,
+    resetEditAdminPasswordFields,
     handleLogout,
     handleSaveRoleSubmit,
     handleDeleteRole,
@@ -594,12 +634,14 @@ export default function ModuleContent() {
     setEditAdminRole,
     setEditAdminLocations,
     setEditAdminDisabled,
+    setEditAdminNewPassword,
     setInviteError,
     setInviteSuccess,
     setIsFetchingAdmins,
     setRoleNameInput,
     setRoleDescInput,
     setRolePermsInput,
+    setRoleUiInput,
     setRoleError,
     setRoleSuccess,
     setActivePimSubTab,
@@ -769,6 +811,21 @@ export default function ModuleContent() {
     confirmAction,
   } = useHRMS();
 
+  const canEditAdmin = !!userPermissions.admin?.edit;
+  const isSuperAdmin =
+    String(sessionRole || "").toLowerCase() === "admin" ||
+    String(sessionUser || "").toLowerCase() === "admin";
+  const canEditSalary = !!userPermissions.salary?.edit;
+  const canEditLedger = !!userPermissions.ledger?.edit;
+  const canEditAttendance = !!userPermissions.attendance?.edit;
+  const canEditDirectory = !!userPermissions.directory?.edit;
+
+  useEffect(() => {
+    if (!canEditAttendance && attendanceSubView === "wizard") {
+      setAttendanceSubView("grid");
+    }
+  }, [canEditAttendance, attendanceSubView, setAttendanceSubView]);
+
   const bulkCalendarMonthKey = bulkCalendarMonth || selectedMonth;
   const bulkWizardSelectedEmployees = useMemo(
     () => employees.filter((employee) => bulkSelEmployees.includes(employee.id)),
@@ -794,6 +851,21 @@ export default function ModuleContent() {
       previous.filter((day) => !bulkAttendanceDayMeta.disabledDays.has(day)),
     );
   }, [bulkWizardStep, bulkAttendanceDayMeta.disabledDays, bulkCalendarMonthKey, bulkSelEmployees, setBulkSelDates]);
+
+  const showSalaryFilter = useCallback(
+    (key: string) => isFilterVisible(salaryUiRestrictions, key),
+    [salaryUiRestrictions],
+  );
+  const lockSalaryFilter = useCallback(
+    (key: string) => isFilterLocked(salaryUiRestrictions, key),
+    [salaryUiRestrictions],
+  );
+  const allowSalaryColumn = useCallback(
+    (column: string) => isColumnAllowed(salaryUiRestrictions, column),
+    [salaryUiRestrictions],
+  );
+  const salaryColumnPickerLocked = !!salaryUiRestrictions?.hideColumnPicker;
+
 
   return (
                     <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 scrollbar-thin" id="viewport-scroll-shell">
@@ -1033,7 +1105,7 @@ export default function ModuleContent() {
                             ) : null}
                           </div>
                         ) : isAdminModuleTab(activeSidebarTab) ? (
-                          <div className="max-w-6xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
+                          <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="admin-module-view">
                             {/* Page header */}
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                               <div>
@@ -1058,7 +1130,7 @@ export default function ModuleContent() {
                             </div>
 
                             {/* Section tabs */}
-                            <div className="flex flex-wrap gap-1 p-1 bg-slate-100 rounded-xl">
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                               {ROLE_ACCESS_SECTIONS.map((section) => {
                                 const TabIcon = section.icon;
                                 const isActive = roleAccessSection === section.id;
@@ -1067,500 +1139,24 @@ export default function ModuleContent() {
                                     key={section.id}
                                     type="button"
                                     onClick={() => setRoleAccessSection(section.id)}
-                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                    className={`flex items-center gap-2 px-4 py-3 rounded-2xl text-xs font-bold transition cursor-pointer border ${
                                       isActive
-                                        ? "bg-white text-slate-800 shadow-sm"
-                                        : "text-slate-500 hover:text-slate-700"
+                                        ? "bg-white text-slate-900 border-[#ff791a]/40 shadow-sm ring-1 ring-[#ff791a]/20"
+                                        : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-white hover:text-slate-700"
                                     }`}
                                   >
-                                    <TabIcon size={14} className={isActive ? "text-[#ff791a]" : ""} />
+                                    <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? "bg-orange-100 text-[#ff791a]" : "bg-white text-slate-400"}`}>
+                                      <TabIcon size={15} />
+                                    </span>
                                     {section.label}
                                   </button>
                                 );
                               })}
                             </div>
 
-                            {roleAccessSection === "admins" && (
-                            <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-                              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-                                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                                  <Users size={16} className="text-[#ff791a]" />
-                                  Administrator Accounts
-                                </h3>
-                                <p className="text-xs text-slate-400 mt-0.5">
-                                  Invite and manage authorized logins. Public self-signup is disabled.
-                                </p>
-                              </div>
+                            {roleAccessSection === "admins" && <AdminAccountsPanel />}
 
-                              <div className="p-6 space-y-4">
-                                {inviteError && (
-                                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                    {inviteError}
-                                  </div>
-                                )}
-                                {inviteSuccess && (
-                                  <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                    {inviteSuccess}
-                                  </div>
-                                )}
-
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                  <form onSubmit={handleInviteAdminSubmit} className="rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
-                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                      <UserPlus size={14} className="text-[#ff791a]" />
-                                      Invite New Admin
-                                    </h4>
-
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Username</label>
-                                      <input
-                                        id="invite-username"
-                                        name="inviteUsername"
-                                        type="text"
-                                        value={inviteUsername}
-                                        onChange={(e) => setInviteUsername(e.target.value)}
-                                        placeholder="e.g. nikhil_admin"
-                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
-                                      />
-                                    </div>
-
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Temporary password</label>
-                                      <PasswordInput
-                                        id="invite-password"
-                                        name="invitePassword"
-                                        value={invitePassword}
-                                        onChange={(e) => setInvitePassword(e.target.value)}
-                                        placeholder="Set initial password"
-                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
-                                      />
-                                    </div>
-
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Security role</label>
-                                      <select
-                                        id="invite-role"
-                                        name="inviteRole"
-                                        value={inviteRole}
-                                        onChange={(e) => setInviteRole(e.target.value)}
-                                        className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
-                                      >
-                                        <option value="admin">Super-Admin (Full Access)</option>
-                                        {rolesList.map((r) => (
-                                          <option key={r.name} value={r.name}>{r.name}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-
-                                    <div>
-                                      <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Worksite locations</label>
-                                      <div className="border border-slate-200 rounded-lg p-3 bg-white max-h-36 overflow-y-auto space-y-2">
-                                        {customLocations.map((loc) => {
-                                          const isChecked = inviteLocations.includes(loc);
-                                          return (
-                                            <label key={loc} className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 hover:text-slate-900 font-medium select-none">
-                                              <input
-                                                id={`invite-loc-${loc}`}
-                                                name={`inviteLocation_${loc}`}
-                                                type="checkbox"
-                                                checked={isChecked}
-                                                onChange={() => {
-                                                  if (isChecked) {
-                                                    setInviteLocations((prev) => prev.filter((l) => l !== loc));
-                                                  } else {
-                                                    setInviteLocations((prev) => [...prev, loc]);
-                                                  }
-                                                }}
-                                                className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
-                                              />
-                                              <span>{loc}</span>
-                                            </label>
-                                          );
-                                        })}
-                                        {customLocations.length === 0 && (
-                                          <p className="text-[11px] text-slate-400 text-center py-2">No locations registered.</p>
-                                        )}
-                                      </div>
-                                      <p className="text-[10px] text-slate-400 mt-1.5">
-                                        Leave unchecked for unrestricted access to all locations.
-                                      </p>
-                                    </div>
-
-                                    <button
-                                      type="submit"
-                                      className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-[0.98] cursor-pointer"
-                                    >
-                                      Grant Administrator Access
-                                    </button>
-                                  </form>
-
-                                  <div className="space-y-3">
-                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                      Active administrators ({isFetchingAdmins ? "…" : adminsList.length})
-                                    </h4>
-                                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden bg-white max-h-[420px] overflow-y-auto">
-                                      {isFetchingAdmins ? (
-                                        <div className="p-8 text-center text-xs text-slate-400">Loading administrators…</div>
-                                      ) : adminsList.length === 0 ? (
-                                        <div className="p-8 text-center text-xs text-slate-400">No administrators found.</div>
-                                      ) : (
-                                        adminsList.map((adm) => {
-                                          const isRootAdmin = adm.username.toLowerCase() === "admin";
-
-                                          if (editingAdminUsername === adm.username) {
-                                            return (
-                                              <div key={adm.username} className="p-4 bg-orange-50/40 space-y-3 text-xs border-b border-slate-100">
-                                                <div className="flex items-center justify-between gap-2">
-                                                  <span className="font-extrabold text-slate-800 flex items-center gap-1.5">
-                                                    <Settings size={13} className="text-[#ff791a]" />
-                                                    Edit: {adm.username}
-                                                  </span>
-                                                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                                    {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}
-                                                  </span>
-                                                </div>
-
-                                                <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-200">
-                                                  <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Security role</label>
-                                                    <select
-                                                      id="edit-admin-role"
-                                                      name="editAdminRole"
-                                                      value={editAdminRole}
-                                                      onChange={(e) => setEditAdminRole(e.target.value)}
-                                                      className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs text-slate-800 focus:outline-none focus:border-[#ff791a] transition"
-                                                    >
-                                                      <option value="admin">Super-Admin (Full Access)</option>
-                                                      {rolesList.map((r) => (
-                                                        <option key={r.name} value={r.name}>{r.name}</option>
-                                                      ))}
-                                                    </select>
-                                                  </div>
-
-                                                  {!isRootAdmin && (
-                                                    <div>
-                                                      <label className="text-[10px] font-bold text-slate-500 block mb-1">Login access</label>
-                                                      <select
-                                                        id="editadmindisabled-disabled-active-4793"
-                                                        name="editadmindisabled-disabled-active"
-                                                        value={editAdminDisabled ? "disabled" : "active"}
-                                                        onChange={(e) => setEditAdminDisabled(e.target.value === "disabled")}
-                                                        className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs text-slate-800 focus:outline-none focus:border-[#ff791a] transition"
-                                                      >
-                                                        <option value="active">Active — login allowed</option>
-                                                        <option value="disabled">Restricted — block login</option>
-                                                      </select>
-                                                    </div>
-                                                  )}
-
-                                                  <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 block mb-1">Worksite locations</label>
-                                                    <div className="border border-slate-200 rounded-lg p-2.5 bg-slate-50 max-h-28 overflow-y-auto space-y-1.5">
-                                                      {rawCustomLocations.map((loc) => {
-                                                        const isChecked = editAdminLocations.includes(loc);
-                                                        return (
-                                                          <label key={loc} className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-700 font-medium select-none">
-                                                            <input
-                                                              id={`edit-admin-loc-${loc}`}
-                                                              name={`editAdminLocation_${loc}`}
-                                                              type="checkbox"
-                                                              checked={isChecked}
-                                                              onChange={() => {
-                                                                if (isChecked) {
-                                                                  setEditAdminLocations((prev) => prev.filter((l) => l !== loc));
-                                                                } else {
-                                                                  setEditAdminLocations((prev) => [...prev, loc]);
-                                                                }
-                                                              }}
-                                                              className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 h-3.5 w-3.5 cursor-pointer accent-orange-500"
-                                                            />
-                                                            <span>{loc}</span>
-                                                          </label>
-                                                        );
-                                                      })}
-                                                    </div>
-                                                  </div>
-
-                                                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100 justify-end">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => setEditingAdminUsername(null)}
-                                                      className="px-3 py-1.5 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition cursor-pointer"
-                                                    >
-                                                      Cancel
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleUpdateAdminSubmit(adm.username)}
-                                                      className="px-3 py-1.5 text-[11px] font-bold text-white bg-[#ff791a] hover:bg-[#e4640c] rounded-lg transition cursor-pointer"
-                                                    >
-                                                      Save changes
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            );
-                                          }
-
-                                          return (
-                                            <div key={adm.username} className="p-4 hover:bg-slate-50/60 flex items-start gap-3 transition text-xs">
-                                              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 text-slate-700 font-extrabold text-sm flex items-center justify-center shrink-0">
-                                                {adm.username.charAt(0).toUpperCase()}
-                                              </div>
-                                              <div className="flex-1 min-w-0">
-                                                <div className="flex items-start justify-between gap-2">
-                                                  <div className="min-w-0">
-                                                    <p className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
-                                                      <span className="truncate">{adm.username}</span>
-                                                      {adm.disabled ? (
-                                                        <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">Restricted</span>
-                                                      ) : (
-                                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">Active</span>
-                                                      )}
-                                                      {adm.username === sessionUser && (
-                                                        <span className="bg-orange-100 text-orange-700 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase">You</span>
-                                                      )}
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-400 mt-0.5">
-                                                      Invited by {adm.invitedBy || "System"} ·{" "}
-                                                      <span className="font-semibold text-slate-600">
-                                                        {adm.role === "admin" ? "Super-Admin" : adm.role || "Super-Admin"}
-                                                      </span>
-                                                    </p>
-                                                    <p className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
-                                                      <Map size={10} className="shrink-0" />
-                                                      {adm.locations && adm.locations.length > 0 ? adm.locations.join(", ") : "All locations"}
-                                                    </p>
-                                                  </div>
-                                                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                                                    <p className="text-[10px] text-slate-400 font-mono">
-                                                      {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}
-                                                    </p>
-                                                    {adm.username !== "admin" && (
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                          setEditingAdminUsername(adm.username);
-                                                          setEditAdminRole(adm.role || "admin");
-                                                          setEditAdminLocations(adm.locations || []);
-                                                          setEditAdminDisabled(!!adm.disabled);
-                                                        }}
-                                                        className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-lg flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
-                                                      >
-                                                        <Settings size={11} />
-                                                        Configure
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          );
-                                        })
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            )}
-
-                            {roleAccessSection === "roles" && (
-                            <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden text-left">
-                              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/80">
-                                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                                  <Shield size={16} className="text-[#ff791a]" />
-                                  Roles & Permissions
-                                </h3>
-                                <p className="text-xs text-slate-400 mt-0.5">
-                                  Choose what each role can view and edit. View shows the menu tab; Edit allows saving changes.
-                                </p>
-                              </div>
-
-                              <div className="p-6 space-y-4">
-                                {roleError && (
-                                  <div className="p-3 bg-rose-50 border border-rose-100 text-rose-800 rounded-lg text-xs font-semibold animate-shake">
-                                    {roleError}
-                                  </div>
-                                )}
-                                {roleSuccess && (
-                                  <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold">
-                                    {roleSuccess}
-                                  </div>
-                                )}
-
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                  <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-slate-50/60 p-5 space-y-4">
-                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                      Create or modify role
-                                    </h4>
-
-                                    <form onSubmit={handleSaveRoleSubmit} className="space-y-4">
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                          <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Role name</label>
-                                          <input
-                                            id="role-name-input"
-                                            name="roleNameInput"
-                                            type="text"
-                                            value={roleNameInput}
-                                            onChange={(e) => setRoleNameInput(e.target.value)}
-                                            placeholder="e.g. HR Assistant"
-                                            className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
-                                          />
-                                        </div>
-                                        <div>
-                                          <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Description</label>
-                                          <input
-                                            id="role-desc-input"
-                                            name="roleDescInput"
-                                            type="text"
-                                            value={roleDescInput}
-                                            onChange={(e) => setRoleDescInput(e.target.value)}
-                                            placeholder="Brief role description"
-                                            className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20 transition"
-                                          />
-                                        </div>
-                                      </div>
-
-                                      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
-                                        <table className="w-full border-collapse text-left text-xs">
-                                          <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
-                                            <tr>
-                                              <th className="p-3">Module</th>
-                                              <th className="p-3 text-center w-24">View</th>
-                                              <th className="p-3 text-center w-24">Edit</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-100 text-slate-700">
-                                            {ROLE_PERMISSION_MODULE_ROWS.map((mod) => (
-                                              <tr key={mod.key} className="hover:bg-slate-50/50">
-                                                <td className="p-3">
-                                                  <p className="font-semibold text-slate-800">{mod.name}</p>
-                                                  <p className="mt-0.5 text-[10px] font-normal leading-snug text-slate-400">{mod.includes}</p>
-                                                </td>
-                                                <td className="p-3 text-center">
-                                                  <input
-                                                    id={`role-perm-view-${mod.key}`}
-                                                    name={`rolePermView_${mod.key}`}
-                                                    type="checkbox"
-                                                    checked={!!rolePermsInput[mod.key]?.view}
-                                                    onChange={(e) => {
-                                                      const val = e.target.checked;
-                                                      setRolePermsInput((prev) => ({
-                                                        ...prev,
-                                                        [mod.key]: {
-                                                          ...prev[mod.key],
-                                                          view: val,
-                                                          edit: val ? prev[mod.key]?.edit : false,
-                                                        },
-                                                      }));
-                                                    }}
-                                                    className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer"
-                                                  />
-                                                </td>
-                                                <td className="p-3 text-center">
-                                                  <input
-                                                    id={`role-perm-edit-${mod.key}`}
-                                                    name={`rolePermEdit_${mod.key}`}
-                                                    type="checkbox"
-                                                    checked={!!rolePermsInput[mod.key]?.edit}
-                                                    disabled={!rolePermsInput[mod.key]?.view}
-                                                    onChange={(e) => {
-                                                      setRolePermsInput((prev) => ({
-                                                        ...prev,
-                                                        [mod.key]: {
-                                                          ...prev[mod.key],
-                                                          edit: e.target.checked,
-                                                        },
-                                                      }));
-                                                    }}
-                                                    className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer disabled:opacity-40"
-                                                  />
-                                                </td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-
-                                      <button
-                                        type="submit"
-                                        className="w-full py-2.5 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-sm transition active:scale-[0.98] cursor-pointer"
-                                      >
-                                        Save role permissions
-                                      </button>
-                                    </form>
-                                  </div>
-
-                                  <div className="space-y-3">
-                                    <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                      Configured roles ({isFetchingRoles ? "…" : rolesList.length})
-                                    </h4>
-                                    <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden bg-white max-h-[480px] overflow-y-auto">
-                                      {isFetchingRoles ? (
-                                        <div className="p-8 text-center text-xs text-slate-400">Loading roles…</div>
-                                      ) : rolesList.length === 0 ? (
-                                        <div className="p-8 text-center text-xs text-slate-400">No custom roles defined.</div>
-                                      ) : (
-                                        rolesList.map((role) => (
-                                          <div key={role.name} className="p-4 hover:bg-slate-50/60 space-y-2 transition text-xs group">
-                                            <div className="flex items-start justify-between gap-2">
-                                              <div className="min-w-0">
-                                                <p className="font-extrabold text-slate-800 flex items-center gap-1.5">
-                                                  <Shield size={12} className="text-[#ff791a] shrink-0" />
-                                                  {role.name}
-                                                </p>
-                                                <p className="text-[10px] text-slate-400 mt-0.5">{role.description || "No description"}</p>
-                                              </div>
-                                              <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition shrink-0">
-                                                <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                    setRoleNameInput(role.name);
-                                                    setRoleDescInput(role.description || "");
-                                                    setRolePermsInput(role.permissions || createEmptyRolePermissions());
-                                                    triggerSuccess(`Loaded security mappings for "${role.name}" into editor.`);
-                                                  }}
-                                                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
-                                                  title="Edit role"
-                                                >
-                                                  <Edit2 size={13} />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleDeleteRole(role.name)}
-                                                  className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
-                                                  title="Delete role"
-                                                >
-                                                  <Trash2 size={13} />
-                                                </button>
-                                              </div>
-                                            </div>
-                                            <div className="flex flex-wrap gap-1">
-                                              {Object.entries(role.permissions || {}).map(([mod, perm]: any) => {
-                                                if (!perm.view) return null;
-                                                const label =
-                                                  ROLE_PERMISSION_MODULE_ROWS.find((row) => row.key === mod)?.name ?? mod;
-                                                return (
-                                                  <span
-                                                    key={mod}
-                                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${perm.edit ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-600"}`}
-                                                  >
-                                                    {label}: {perm.edit ? "Edit" : "View"}
-                                                  </span>
-                                                );
-                                              })}
-                                            </div>
-                                          </div>
-                                        ))
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            )}
+                            {roleAccessSection === "roles" && <RolesPermissionsPanel />}
 
                             {roleAccessSection === "audit" && (
                             <div className="max-w-7xl mx-auto space-y-6 animate-fade-in text-left" id="audit-trail-viewport">
@@ -1584,7 +1180,7 @@ export default function ModuleContent() {
                                     <RotateCw size={13} className={isFetchingAuditLogs ? "animate-spin" : ""} /> Refresh Logs
                                   </button>
                               
-                                  {sessionUser.toLowerCase() === "admin" && (
+                                  {canEditAdmin && sessionUser.toLowerCase() === "admin" && (
                                     <button
                                       onClick={openFlushAuditModal}
                                       className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold text-rose-700 transition flex items-center gap-1 cursor-pointer"
@@ -1902,21 +1498,23 @@ export default function ModuleContent() {
                                   </div>
           
                                   <div className="flex flex-wrap items-center gap-3 shrink-0">
-                                    {/* Payroll Month Select */}
+                                    {showSalaryFilter("month") && (
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">🗓️ Month:</span>
                                       <select id="salary-month-select" name="selectedMonth"
                                         value={MONTHS_LIST.includes(selectedMonth) ? selectedMonth : (MONTHS_LIST[0] || selectedMonth)}
                                         onChange={(e) => setSelectedMonth(normalizeMonthKey(e.target.value))}
-                                        className="px-2.5 py-1 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-orange-500 shadow-sm transition"
+                                        disabled={lockSalaryFilter("month")}
+                                        className="px-2.5 py-1 bg-white border border-slate-250 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:border-orange-500 shadow-sm transition disabled:opacity-60"
                                       >
                                         {MONTHS_LIST.map((m) => (
                                           <option key={m} value={m}>{m}</option>
                                         ))}
                                       </select>
                                     </div>
-          
-                                    {/* Quick Balance segmented filter */}
+                                    )}
+
+                                    {showSalaryFilter("filterType") && (
                                     <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                                       {[
                                         { id: "all", label: "All Balances" },
@@ -1929,8 +1527,9 @@ export default function ModuleContent() {
                                           <button
                                             key={t.id}
                                             type="button"
+                                            disabled={lockSalaryFilter("filterType")}
                                             onClick={() => setSalaryFilterType(t.id as any)}
-                                            className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                                            className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                                               isSel ? "bg-[#ff791a] text-white shadow-sm" : "text-slate-650 hover:text-slate-900"
                                             }`}
                                           >
@@ -1939,12 +1538,13 @@ export default function ModuleContent() {
                                         );
                                       })}
                                     </div>
+                                    )}
                                   </div>
                                 </div>
           
                                 {/* Criteria Grid */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-150">
-                                  {/* Search query input */}
+                                  {showSalaryFilter("search") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Search Employee</label>
                                     <div className="relative">
@@ -1952,20 +1552,23 @@ export default function ModuleContent() {
                                         type="text"
                                         value={salarySearchQuery}
                                         onChange={(e) => setSalarySearchQuery(e.target.value)}
+                                        disabled={lockSalaryFilter("search")}
                                         placeholder="Search code or name..."
-                                        className="w-full pl-8 pr-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-[#f57416]"
+                                        className="w-full pl-8 pr-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs text-slate-800 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                       />
                                       <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
                                     </div>
                                   </div>
-          
-                                  {/* Location Filter */}
+                                  )}
+
+                                  {showSalaryFilter("location") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Branch/Work Location</label>
                                     <select id="salary-location-filter" name="salaryLocationFilter"
                                       value={salaryLocationFilter}
                                       onChange={(e) => setSalaryLocationFilter(e.target.value)}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      disabled={lockSalaryFilter("location")}
+                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                     >
                                       <option value="All">All Locations</option>
                                       {salaryUniqueLocations.map((loc) => (
@@ -1973,8 +1576,9 @@ export default function ModuleContent() {
                                       ))}
                                     </select>
                                   </div>
-          
-                                  {/* PF Joining Date Range */}
+                                  )}
+
+                                  {showSalaryFilter("joinDate") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">PF Joining Date Range</label>
                                     <div className="grid grid-cols-2 gap-1 items-center">
@@ -1988,12 +1592,14 @@ export default function ModuleContent() {
                                         type="date"
                                         value={salaryJoinEndFilter}
                                         onChange={(e) => setSalaryJoinEndFilter(e.target.value)}
-                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                        disabled={lockSalaryFilter("joinDate")}
+                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                       />
                                     </div>
                                   </div>
-          
-                                  {/* Exit Date Range */}
+                                  )}
+
+                                  {showSalaryFilter("exitDate") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Exit/Leaving Date Range</label>
                                     <div className="grid grid-cols-2 gap-1 items-center">
@@ -2007,12 +1613,14 @@ export default function ModuleContent() {
                                         type="date"
                                         value={salaryExitEndFilter}
                                         onChange={(e) => setSalaryExitEndFilter(e.target.value)}
-                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                        disabled={lockSalaryFilter("exitDate")}
+                                        className="px-2 py-1 border border-slate-250 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                       />
                                     </div>
                                   </div>
-          
-                                  {/* Monthly Gross Salary Range */}
+                                  )}
+
+                                  {showSalaryFilter("grossSalary") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Monthly Gross Salary (Rs.)</label>
                                     <div className="grid grid-cols-2 gap-1 items-center">
@@ -2034,8 +1642,9 @@ export default function ModuleContent() {
                                       />
                                     </div>
                                   </div>
+                                  )}
 
-                                  {/* Daily Wage Range */}
+                                  {showSalaryFilter("dailyWage") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Daily Wage (Rs.)</label>
                                     <div className="grid grid-cols-2 gap-1 items-center">
@@ -2057,14 +1666,16 @@ export default function ModuleContent() {
                                       />
                                     </div>
                                   </div>
-          
-                                  {/* Gender Filter */}
+                                  )}
+
+                                  {showSalaryFilter("gender") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gender</label>
                                     <select id="salary-gender-filter" name="salaryGenderFilter"
                                       value={salaryGenderFilter}
                                       onChange={(e) => setSalaryGenderFilter(e.target.value)}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      disabled={lockSalaryFilter("gender")}
+                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                     >
                                       <option value="All">All Genders</option>
                                       <option value="Male">Male</option>
@@ -2072,14 +1683,16 @@ export default function ModuleContent() {
                                       <option value="Other">Other</option>
                                     </select>
                                   </div>
-          
-                                  {/* Marital Status Filter */}
+                                  )}
+
+                                  {showSalaryFilter("marital") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Marital Status</label>
                                     <select id="salary-marital-filter" name="salaryMaritalFilter"
                                       value={salaryMaritalFilter}
                                       onChange={(e) => setSalaryMaritalFilter(e.target.value)}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      disabled={lockSalaryFilter("marital")}
+                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                     >
                                       <option value="All">All Statuses</option>
                                       <option value="Single">Single</option>
@@ -2088,22 +1701,25 @@ export default function ModuleContent() {
                                       <option value="Widowed">Widowed</option>
                                     </select>
                                   </div>
-          
-                                  {/* ESIC Coverage Filter */}
+                                  )}
+
+                                  {showSalaryFilter("esic") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">ESIC Insured Status</label>
                                     <select id="salary-esic-filter" name="salaryEsicFilter"
                                       value={salaryEsicFilter}
                                       onChange={(e) => setSalaryEsicFilter(e.target.value)}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      disabled={lockSalaryFilter("esic")}
+                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                     >
                                       <option value="All">All Coverage</option>
                                       <option value="Yes">Yes (Insured)</option>
                                       <option value="No">No (Exempt/Excluded)</option>
                                     </select>
                                   </div>
-          
-                                  {/* Skill Category Filter */}
+                                  )}
+
+                                  {showSalaryFilter("skills") && (
                                   <div className="space-y-1.5 relative" id="salary-skill-multiselect-container">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Skill Category</label>
                                     <div className="relative">
@@ -2160,8 +1776,9 @@ export default function ModuleContent() {
                                       )}
                                     </div>
                                   </div>
-          
-                                  {/* Job Role Filter */}
+                                  )}
+
+                                  {showSalaryFilter("roles") && (
                                   <div className="space-y-1.5 relative" id="salary-role-multiselect-container">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Job Role</label>
                                     <div className="relative">
@@ -2218,14 +1835,16 @@ export default function ModuleContent() {
                                       )}
                                     </div>
                                   </div>
-          
-                                  {/* Payment Status Filter */}
+                                  )}
+
+                                  {showSalaryFilter("paymentStatus") && (
                                   <div className="space-y-1.5">
                                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Payment Status</label>
                                     <select id="salary-payment-status-filter" name="salaryPaymentStatusFilter"
                                       value={salaryPaymentStatusFilter}
                                       onChange={(e) => setSalaryPaymentStatusFilter(e.target.value as "All" | "Unpaid" | "Paid" | "Hold")}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416]"
+                                      disabled={lockSalaryFilter("paymentStatus")}
+                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
                                     >
                                       <option value="All">All Statuses</option>
                                       <option value="Unpaid">Unpaid</option>
@@ -2233,7 +1852,8 @@ export default function ModuleContent() {
                                       <option value="Hold">Hold</option>
                                     </select>
                                   </div>
-          
+                                  )}
+
                                   {/* Action Result / Matched Employees Box */}
                                   <div className="col-span-1 sm:col-span-2 md:col-span-4 flex justify-between items-center bg-[#f57416]/10 border border-[#f57416]/20 rounded-xl p-3 mt-1">
                                     <div className="flex items-center gap-2">
@@ -2328,30 +1948,31 @@ export default function ModuleContent() {
           
                                         <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200/60 pl-3">
                                           <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Bulk Status:</span>
+                                          {canEditSalary && (
+                                          <>
                                           <button
                                             type="button"
                                             onClick={() => handleBulkUpdatePaymentStatus("Paid")}
-                                            disabled={!userPermissions.salary?.edit}
-                                            className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
+                                            className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
                                           >
                                             Mark Paid
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => handleBulkUpdatePaymentStatus("Hold")}
-                                            disabled={!userPermissions.salary?.edit}
-                                            className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
+                                            className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
                                           >
                                             Hold Salary
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => handleBulkUpdatePaymentStatus("Unpaid")}
-                                            disabled={!userPermissions.salary?.edit}
-                                            className="px-2 py-0.5 bg-slate-550 hover:bg-slate-600 disabled:opacity-40 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
+                                            className="px-2 py-0.5 bg-slate-550 hover:bg-slate-600 text-white font-bold text-[9px] rounded-md shadow-2xs transition cursor-pointer"
                                           >
                                             Mark Unpaid
                                           </button>
+                                          </>
+                                          )}
                                         </div>
                                       </div>
                                     )}
@@ -2506,7 +2127,8 @@ export default function ModuleContent() {
                                     >
                                       <FileText size={13} className="stroke-[2.5]" /> Export PDF {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}
                                     </button>
-          
+
+                                    {canEditSalary && (
                                     <button
                                       type="button"
                                       disabled={filteredSalaryEmployees.length === 0 || isExportingBulkPay}
@@ -2525,6 +2147,7 @@ export default function ModuleContent() {
                                         <><IndianRupee size={13} className="stroke-[2.5]" /> Bulk Pay {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}</>
                                       )}
                                     </button>
+                                    )}
                                   </div>
                                 </div>
           
@@ -2573,7 +2196,7 @@ export default function ModuleContent() {
                                   </div>
                                 )}
           
-                                {/* Calculation Columns & Templates Configuration Panel */}
+                                {!salaryColumnPickerLocked && canEditSalary && (
                                 <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-4 text-left animate-fade-in">
                                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/60 pb-3">
                                     <div>
@@ -2757,7 +2380,8 @@ export default function ModuleContent() {
                                     })}
                                   </div>
                                 </div>
-          
+                                )}
+
                                 {/* Responsive Scrollable Table Container */}
                                 <div className="overflow-x-auto border border-slate-200 rounded-lg max-h-[480px] overflow-y-auto shadow-sm" id="salary-sheet-scroller">
                                   <table className="w-full text-xs text-left border-collapse bg-white table-fixed">
@@ -3180,9 +2804,9 @@ export default function ModuleContent() {
                                               )}
                                               {selectedSalaryColumns.includes("Payment Status") && (
                                                 <td className={`px-2 py-1.5 border-l border-r border-slate-150 text-center align-middle bg-violet-50 ${isSelected ? "!bg-orange-50" : ""}`}>
+                                                  {canEditSalary ? (
                                                   <select id={`payment-status-${emp.id}`} name={`paymentStatus_${emp.id}`}
                                                     value={ledger?.paymentStatus || "Unpaid"}
-                                                    disabled={!userPermissions.salary?.edit}
                                                     onChange={(e) => handleUpdatePaymentStatus(emp.id, e.target.value as "Unpaid" | "Paid" | "Hold")}
                                                     className={`px-2 py-1 rounded text-xs font-bold focus:outline-none transition border cursor-pointer ${
                                                       (ledger?.paymentStatus || "Unpaid") === "Paid"
@@ -3196,6 +2820,11 @@ export default function ModuleContent() {
                                                     <option value="Paid">Paid</option>
                                                     <option value="Hold">Hold</option>
                                                   </select>
+                                                  ) : (
+                                                    <span className={paymentStatusBadgeClass(ledger?.paymentStatus || "Unpaid")}>
+                                                      {ledger?.paymentStatus || "Unpaid"}
+                                                    </span>
+                                                  )}
                                                 </td>
                                               )}
                                             </tr>
@@ -3460,6 +3089,7 @@ export default function ModuleContent() {
                                 </div>
                               </div>
                               {/* 3. Grid split: 2/5 Interactive Search & Checklist and 3/5 Ledger Entry rows */}
+                              {canEditLedger && (
                               <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                                 {/* Left Column: Interactive Employee checklist with search */}
                                 <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
@@ -3916,8 +3546,7 @@ export default function ModuleContent() {
                                       <div className="pt-3 border-t border-slate-100 flex gap-2">
                                         <button
                                           type="submit"
-                                          disabled={!userPermissions.ledger?.edit}
-                                          className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md transition active:scale-98 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md transition active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
                                         >
                                           💾 Save Monthly Ledger Rows ({selectedMonth})
                                         </button>
@@ -3926,7 +3555,8 @@ export default function ModuleContent() {
                                   )}
                                 </div>
                               </div>
-      
+                              )}
+
                               {/* 4. Bottom Section: Statement Overview Table for the Selected Month */}
                               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col space-y-4">
                                 <div className="text-left">
@@ -3967,7 +3597,7 @@ export default function ModuleContent() {
                                             key={emp.id}
                                             emp={emp}
                                             monthLedger={monthLedger}
-                                            canEdit={!!userPermissions.ledger?.edit}
+                                            canEdit={canEditLedger}
                                             onDeleteItem={async (itemId) => {
                                               const item = monthLedger.ledgerItems.find((i) => i.id === itemId);
                                               if (!item) return;
@@ -4201,6 +3831,7 @@ export default function ModuleContent() {
                                   </div>
           
                                   {/* Quick Onboarding Form for new Helplines */}
+                                  {canEditDirectory && (
                                   <form onSubmit={handleAddHelpline} className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3 text-left">
                                     <p className="directory-field-label !mb-0">Help Desk Registry</p>
                                     <div className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -4274,7 +3905,8 @@ export default function ModuleContent() {
                                       </div>
                                     </div>
                                   </form>
-          
+                                  )}
+
                                   {/* Helplines phone directory */}
                                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                                     {(() => {
@@ -4328,6 +3960,7 @@ export default function ModuleContent() {
                                             badge={contact.category}
                                             badgeTone={badgeTone}
                                             headerAction={
+                                              canEditDirectory ? (
                                               <button
                                                 type="button"
                                                 onClick={() => handleDeleteHelpline(contact.name)}
@@ -4336,6 +3969,7 @@ export default function ModuleContent() {
                                               >
                                                 <Trash2 size={14} />
                                               </button>
+                                              ) : undefined
                                             }
                                             onCall={(entry) =>
                                               handleCallInitiate(entry.name, entry.phone, contact.category)
@@ -4352,7 +3986,7 @@ export default function ModuleContent() {
                           ) : activeSidebarTab === "Attendance" ? (
                             /* --- ENTERPRISE ATTENDANCE WORKSPACE ("TIME" MODULE) --- */
                             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 animate-fade-in" id="attendance-workspace-panel">
-                              {attendanceSubView === "wizard" ? (
+                              {attendanceSubView === "wizard" && canEditAttendance ? (
                                 /* --- NEW SCREEN: INTERACTIVE WIZARD VIEW --- */
                                 <div className="space-y-6">
                                   <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -4928,6 +4562,7 @@ export default function ModuleContent() {
                                       <p className="text-xs text-slate-400 mt-0.5">Track daily staff rosters, assign status codes, and execute bulk presence stamping.</p>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
+                                      {canEditAttendance && (
                                       <button
                                         onClick={() => {
                                           setAttendanceSubView("wizard");
@@ -4937,6 +4572,7 @@ export default function ModuleContent() {
                                       >
                                         <Clock size={13} className="stroke-[2.5]" /> Bulk Mark Attendance
                                       </button>
+                                      )}
                                       <button
                                         onClick={downloadAttendanceExcel}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer shadow-xs"
@@ -5233,38 +4869,43 @@ export default function ModuleContent() {
                                                         —
                                                       </span>
                                                     ) : isWeeklyOff && currentStatus !== "P" ? (
+                                                      canEditAttendance ? (
                                                       <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
                                                         value="WO"
                                                         onChange={(e) => {
                                                           const val = e.target.value;
                                                           if (val === "P") handleCellAttendanceChange(emp.id, dayNum, "P");
                                                         }}
-                                                        disabled={!userPermissions.attendance?.edit}
                                                         title="Weekly Off — change to Present if employee worked"
                                                         className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-violet-100 text-violet-800"
                                                       >
                                                         <option value="WO">WO</option>
                                                         <option value="P">P</option>
                                                       </select>
+                                                      ) : (
+                                                        <span className={attendanceBadgeClass("WO")}>WO</span>
+                                                      )
                                                     ) : isWeeklyOff && currentStatus === "P" ? (
+                                                      canEditAttendance ? (
                                                       <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
                                                         value="P"
                                                         onChange={(e) => {
                                                           const val = e.target.value;
                                                           handleCellAttendanceChange(emp.id, dayNum, val === "WO" ? "" : val);
                                                         }}
-                                                        disabled={!userPermissions.attendance?.edit}
                                                         title="Present on weekly off — change back to WO if needed"
                                                         className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-emerald-100 text-emerald-800"
                                                       >
                                                         <option value="WO">WO</option>
                                                         <option value="P">P</option>
                                                       </select>
-                                                    ) : (
+                                                      ) : (
+                                                        <span className={attendanceBadgeClass("P")}>P</span>
+                                                      )
+                                                    ) : canEditAttendance ? (
                                                       <select id={`attendance-${emp.id}-day-${dayNum}`} name={`attendance_${emp.id}_day_${dayNum}`}
                                                         value={currentStatus}
                                                         onChange={(e) => handleCellAttendanceChange(emp.id, dayNum, e.target.value)}
-                                                        disabled={!userPermissions.attendance?.edit}
                                                         className={`text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer ${
                                                           effectiveStatus === "P" ? "bg-emerald-100 text-emerald-800" :
                                                           effectiveStatus === "A" ? "bg-rose-100 text-rose-800" :
@@ -5279,6 +4920,10 @@ export default function ModuleContent() {
                                                         <option value="L">L</option>
                                                         <option value="H">H</option>
                                                       </select>
+                                                    ) : (
+                                                      <span className={attendanceBadgeClass(effectiveStatus || currentStatus || "—")}>
+                                                        {effectiveStatus || currentStatus || "—"}
+                                                      </span>
                                                     )}
                                                   </td>
                                                 );

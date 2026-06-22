@@ -240,7 +240,7 @@ export default function SchoolSupervisorsTable({
                 <th className="text-left px-3 py-2 font-bold">Assigned Blocks</th>
                 <th className="text-left px-3 py-2 font-bold">Schools Covered</th>
                 <th className="text-left px-3 py-2 font-bold">Login</th>
-                <th className="text-right px-3 py-2 font-bold">Actions</th>
+                <th className="text-right px-3 py-2 font-bold">{readOnly ? "View" : "Actions"}</th>
               </tr>
             </thead>
             <tbody>

@@ -1,5 +1,6 @@
-import { resolveProfilePhotoSrc } from "../lib/media-url";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { resolveProfilePhotoSrc } from "../lib/media-url";
 import {
   X,
   Users,

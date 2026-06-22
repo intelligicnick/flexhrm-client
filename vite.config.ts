@@ -65,6 +65,7 @@ export default defineConfig(({ mode }) => {
               registerType: 'autoUpdate',
               injectRegister: false,
               minify: false,
+              scope: '/supervisor/',
               includeAssets: ['favicon.svg', 'pwa/icon.svg', 'pwa/icon-192.png', 'pwa/icon-512.png'],
               manifest: {
                 name: 'Flex HRM Field Team',

@@ -355,7 +355,7 @@ export default function CommitmentDiaryPanel({
       const aTime = new Date(a.fromDate + "T12:00:00").getTime();
       const bTime = new Date(b.fromDate + "T12:00:00").getTime();
       if (aTime !== bTime) return bTime - aTime;
-      return a.supervisorName.localeCompare(b.supervisorName);
+      return (a.supervisorName || "").localeCompare(b.supervisorName || "");
     });
   }, [enriched, blockFilter, supervisorFilter, statusFilter]);
 

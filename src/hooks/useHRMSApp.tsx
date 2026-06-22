@@ -153,6 +153,15 @@ import {
   type ExitEligibleEmployee,
 } from "../lib/exit-eligibility-helpers";
 import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import {
+  applySalaryUiRestrictions,
+  createEmptyRoleUiRestrictions,
+  getModuleUiRestrictions,
+  OBSERVER_SALARY_PRESET,
+  SALARY_COLUMNS,
+  SALARY_FILTER_DEFINITIONS,
+  type RoleUiRestrictions,
+} from "../lib/role-ui-restrictions";
 import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
 import { useAuth } from "./useAuth";
@@ -298,6 +307,8 @@ export function useHRMSApp() {
     setSessionLocations,
     sessionPermissions,
     setSessionPermissions,
+    sessionUiRestrictions,
+    setSessionUiRestrictions,
     applySessionFromAuthMe,
     usernameInput,
     setUsernameInput,
@@ -351,6 +362,10 @@ export function useHRMSApp() {
   const [editAdminRole, setEditAdminRole] = useState<string>("");
   const [editAdminLocations, setEditAdminLocations] = useState<string[]>([]);
   const [editAdminDisabled, setEditAdminDisabled] = useState<boolean>(false);
+  const [editAdminNewPassword, setEditAdminNewPassword] = useState("");
+  const [editAdminPasswordError, setEditAdminPasswordError] = useState<string | null>(null);
+  const [editAdminPasswordSuccess, setEditAdminPasswordSuccess] = useState<string | null>(null);
+  const [isResettingAdminPassword, setIsResettingAdminPassword] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [isFetchingAdmins, setIsFetchingAdmins] = useState(false);
@@ -361,6 +376,7 @@ export function useHRMSApp() {
   const [rolePermsInput, setRolePermsInput] = useState<Record<string, { view: boolean; edit: boolean }>>(
     () => ({ ...DEFAULT_NEW_ROLE_PERMISSIONS }),
   );
+  const [roleUiInput, setRoleUiInput] = useState<RoleUiRestrictions>(() => createEmptyRoleUiRestrictions());
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
@@ -387,6 +403,35 @@ export function useHRMSApp() {
     });
     return result;
   }, [sessionRole, sessionUser, rolesList, sessionPermissions]);
+
+  const userUiRestrictions = useMemo(() => {
+    const isSuperAdmin =
+      String(sessionRole || "").toLowerCase() === "admin" ||
+      String(sessionUser || "").toLowerCase() === "admin";
+    if (isSuperAdmin) return {} as RoleUiRestrictions;
+
+    if (sessionUiRestrictions) return sessionUiRestrictions;
+
+    const matchedRole = rolesList.find(
+      (r) => String(r.name || "").toLowerCase() === String(sessionRole || "").toLowerCase(),
+    );
+    return (matchedRole?.uiRestrictions as RoleUiRestrictions) ?? {};
+  }, [sessionRole, sessionUser, rolesList, sessionUiRestrictions]);
+
+  const salaryUiRestrictions = useMemo(
+    () => getModuleUiRestrictions(userUiRestrictions, "salary"),
+    [userUiRestrictions],
+  );
+
+  const canFetchAttendanceData = useMemo(
+    () =>
+      !!(
+        userPermissions.attendance?.view ||
+        userPermissions.salary?.view ||
+        userPermissions.ledger?.view
+      ),
+    [userPermissions],
+  );
 
   // Fetch Roles list
   const fetchRoles = async () => {
@@ -1620,7 +1665,7 @@ export function useHRMSApp() {
   }, [closeConfirmDialog]);
 
   const fetchAttendanceForMonth = useCallback(async (monthKey: string) => {
-    if (!monthKey) return;
+    if (!monthKey || !canFetchAttendanceData) return;
     setIsFetchingAttendance(true);
     try {
       const res = await fetch(`/api/attendance?monthKey=${encodeURIComponent(monthKey)}`);
@@ -1628,11 +1673,11 @@ export function useHRMSApp() {
       const data = await res.json();
       setAttendanceDb((prev) => ({ ...prev, [monthKey]: data || {} }));
     } catch (err: any) {
-      setErrorMessage(err.message || "Could not load attendance records.");
+      console.error("Attendance fetch failed:", err.message);
     } finally {
       setIsFetchingAttendance(false);
     }
-  }, []);
+  }, [canFetchAttendanceData]);
 
   const fetchExitEligibility = useCallback(
     async (referenceMonth?: string, showModalIfEligible = false) => {
@@ -1687,14 +1732,14 @@ export function useHRMSApp() {
       localStorage.setItem("hrms_selected_month", selectedMonth);
       setBulkSelMonths([selectedMonth]);
       setBulkCalendarMonth(selectedMonth);
-      if (isLoggedIn) {
+      if (isLoggedIn && canFetchAttendanceData) {
         fetchAttendanceForMonth(selectedMonth);
         if (shouldTrackExitEligibility) {
           scheduleFetchExitEligibility(selectedMonth, false);
         }
       }
     }
-  }, [selectedMonth, isLoggedIn, shouldTrackExitEligibility, fetchAttendanceForMonth, scheduleFetchExitEligibility]);
+  }, [selectedMonth, isLoggedIn, canFetchAttendanceData, shouldTrackExitEligibility, fetchAttendanceForMonth, scheduleFetchExitEligibility]);
 
   useEffect(() => {
     if (!MONTHS_LIST.length) return;
@@ -2162,6 +2207,30 @@ export function useHRMSApp() {
     "Payment Status"
   ];
   const [selectedSalaryColumns, setSelectedSalaryColumns] = useState<string[]>([...SALARY_HEADERS]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !salaryUiRestrictions) return;
+    applySalaryUiRestrictions(salaryUiRestrictions, {
+      setSelectedSalaryColumns,
+      setSalaryLocationFilter,
+      setSalarySearchQuery,
+      setSalaryFilterType,
+      setSalaryJoinStartFilter,
+      setSalaryJoinEndFilter,
+      setSalaryExitStartFilter,
+      setSalaryExitEndFilter,
+      setSalaryMinSalaryFilter,
+      setSalaryMaxSalaryFilter,
+      setSalaryMinDailyWageFilter,
+      setSalaryMaxDailyWageFilter,
+      setSalaryGenderFilter,
+      setSalaryMaritalFilter,
+      setSalaryEsicFilter,
+      setSalarySkillFilters,
+      setSalaryRoleFilters,
+      setSalaryPaymentStatusFilter,
+    });
+  }, [isLoggedIn, sessionRole, salaryUiRestrictions]);
 
   const [savedReportTemplates, setSavedReportTemplates] = useState<any[]>([]);
   const [savedSalaryTemplates, setSavedSalaryTemplates] = useState<any[]>([]);
@@ -4683,6 +4752,54 @@ export function useHRMSApp() {
     }
   };
 
+  const resetEditAdminPasswordFields = () => {
+    setEditAdminNewPassword("");
+    setEditAdminPasswordError(null);
+    setEditAdminPasswordSuccess(null);
+  };
+
+  const handleResetAdminPasswordSubmit = async (username: string) => {
+    setEditAdminPasswordError(null);
+    setEditAdminPasswordSuccess(null);
+
+    const newP = editAdminNewPassword.trim();
+
+    if (!newP) {
+      setEditAdminPasswordError("Please enter a new password.");
+      return;
+    }
+
+    if (newP.length < 8) {
+      setEditAdminPasswordError("Password must be at least 8 characters long.");
+      return;
+    }
+
+    setIsResettingAdminPassword(true);
+    try {
+      const res = await fetch("/api/admins/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          newPassword: newP,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to reset administrator password.");
+      }
+
+      resetEditAdminPasswordFields();
+      setEditAdminPasswordSuccess(`Password reset for "${username}". Their active sessions were signed out.`);
+      triggerSuccess(`Password reset for "${username}".`);
+    } catch (err: any) {
+      setEditAdminPasswordError(err.message);
+    } finally {
+      setIsResettingAdminPassword(false);
+    }
+  };
+
   // Handler to update an existing admin profile (role, status toggle, locations)
   const handleUpdateAdminSubmit = async (username: string) => {
     try {
@@ -4743,7 +4860,8 @@ export function useHRMSApp() {
         body: JSON.stringify({
           name,
           description: roleDescInput,
-          permissions: rolePermsInput
+          permissions: rolePermsInput,
+          uiRestrictions: roleUiInput,
         })
       });
       if (!res.ok) {
@@ -4753,6 +4871,7 @@ export function useHRMSApp() {
       setRoleNameInput("");
       setRoleDescInput("");
       setRolePermsInput({ ...DEFAULT_NEW_ROLE_PERMISSIONS });
+      setRoleUiInput(createEmptyRoleUiRestrictions());
       await fetchRoles();
       triggerSuccess(`Successfully saved custom role "${name}".`);
       setRoleSuccess(`Custom role "${name}" has been created/updated!`);
@@ -7107,12 +7226,17 @@ export function useHRMSApp() {
     editAdminRole,
     editAdminLocations,
     editAdminDisabled,
+    editAdminNewPassword,
+    editAdminPasswordError,
+    editAdminPasswordSuccess,
+    isResettingAdminPassword,
     inviteError,
     inviteSuccess,
     isFetchingAdmins,
     roleNameInput,
     roleDescInput,
     rolePermsInput,
+    roleUiInput,
     roleError,
     roleSuccess,
     activePimSubTab,
@@ -7364,6 +7488,8 @@ export function useHRMSApp() {
     backToSignIn,
     handleInviteAdminSubmit,
     handleUpdateAdminSubmit,
+    handleResetAdminPasswordSubmit,
+    resetEditAdminPasswordFields,
     handleLogout,
     handleSaveRoleSubmit,
     handleDeleteRole,
@@ -7542,6 +7668,8 @@ export function useHRMSApp() {
     isModuleAccessDenied,
     SALARY_HEADERS,
     userPermissions,
+    userUiRestrictions,
+    salaryUiRestrictions,
     employees,
     customLocations,
     bulkPayArchiveYears,
@@ -7596,12 +7724,16 @@ export function useHRMSApp() {
     setEditAdminRole,
     setEditAdminLocations,
     setEditAdminDisabled,
+    setEditAdminNewPassword,
+    setEditAdminPasswordError,
+    setEditAdminPasswordSuccess,
     setInviteError,
     setInviteSuccess,
     setIsFetchingAdmins,
     setRoleNameInput,
     setRoleDescInput,
     setRolePermsInput,
+    setRoleUiInput,
     setRoleError,
     setRoleSuccess,
     setActivePimSubTab,

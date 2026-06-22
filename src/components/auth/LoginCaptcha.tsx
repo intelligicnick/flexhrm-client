@@ -26,10 +26,21 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
     try {
       const res = await fetch(apiUrl("/api/auth/captcha"), { credentials: "include" });
       if (!res.ok) {
-        const message =
-          res.status === 404
-            ? "Captcha API is unavailable. Restart the backend server and try again."
-            : "Unable to load captcha.";
+        let message = "Unable to load captcha.";
+        if (res.status === 404) {
+          message = "Captcha API is unavailable. Restart the backend server and try again.";
+        } else if (res.status === 502 || res.status === 503) {
+          message =
+            "Backend API is unavailable. Start it with: cd backend && npm run start:dev";
+        } else {
+          try {
+            const body = (await res.json()) as { error?: string; message?: string };
+            const detail = body.message || body.error;
+            if (detail) message = detail;
+          } catch {
+            // Keep generic message when response is not JSON.
+          }
+        }
         throw new Error(message);
       }
       const data = (await res.json()) as { id: string; svg: string };
@@ -50,23 +61,23 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
   }, [loadCaptcha]);
 
   return (
-    <div className="space-y-2">
-      <label htmlFor="login-captcha-field" className="text-xs font-bold text-slate-600 block">
+    <div className="space-y-2.5">
+      <label htmlFor="login-captcha-field" className="text-xs sm:text-sm font-bold text-slate-600 block">
         Security Check
       </label>
-      <div className="flex items-center gap-2">
-        <div className="flex-1 min-h-[56px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+      <div className="flex items-stretch gap-2 min-w-0">
+        <div className="flex-1 min-w-0 min-h-[56px] rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
           {loading ? (
-            <span className="text-[10px] text-slate-400 font-semibold">Loading captcha…</span>
+            <span className="text-xs text-slate-400 font-semibold px-2 text-center">Loading captcha…</span>
           ) : svg ? (
             <img
               src={svg}
               alt="Captcha challenge"
-              className="h-[56px] w-full object-contain select-none"
+              className="h-[56px] w-full max-w-full object-contain select-none"
               draggable={false}
             />
           ) : (
-            <span className="text-[10px] text-rose-500 font-semibold px-2 text-center">
+            <span className="text-xs text-rose-500 font-semibold px-2 text-center leading-snug">
               {loadError || "Captcha unavailable"}
             </span>
           )}
@@ -75,11 +86,11 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
           type="button"
           onClick={() => void loadCaptcha()}
           disabled={disabled || loading}
-          className="shrink-0 p-2.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#ff791a] hover:border-orange-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          className="shrink-0 min-w-[48px] min-h-[48px] p-3 rounded-xl border border-slate-200 text-slate-500 hover:text-[#ff791a] hover:border-orange-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center touch-manipulation"
           title="Refresh captcha"
           aria-label="Refresh captcha"
         >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
       <input
@@ -92,7 +103,7 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
         onChange={(e) => onChange({ ...value, answer: e.target.value.toUpperCase() })}
         placeholder="Enter characters shown above"
         disabled={disabled || !value.id}
-        className="w-full px-3 py-2 border border-slate-250 rounded-lg focus:border-[#ff791a] focus:outline-none text-xs text-slate-800 transition uppercase tracking-widest font-mono"
+        className="w-full px-3.5 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base text-slate-800 transition uppercase tracking-widest font-mono bg-slate-50/50 touch-manipulation"
       />
     </div>
   );

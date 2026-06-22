@@ -1,21 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl, parseApiError } from "../api";
+import { PERMISSION_MODULES } from "../lib/permissions";
+import type { RoleUiRestrictions } from "../lib/role-ui-restrictions";
 import { DEFAULT_PATH, LOGIN_PATH } from "../routes";
-
-const PERMISSION_MODULES = [
-  "employees",
-  "schoolWork",
-  "bids",
-  "renewals",
-  "salary",
-  "ledger",
-  "attendance",
-  "leave",
-  "birthdays",
-  "directory",
-  "admin",
-] as const;
 
 export function useAuth() {
   const navigate = useNavigate();
@@ -28,6 +16,7 @@ export function useAuth() {
     string,
     { view: boolean; edit: boolean }
   > | null>(null);
+  const [sessionUiRestrictions, setSessionUiRestrictions] = useState<RoleUiRestrictions | null>(null);
 
   const [usernameInput, setUsernameInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
@@ -54,6 +43,7 @@ export function useAuth() {
       role?: string;
       locations?: string[];
       permissions?: Record<string, { view?: boolean; edit?: boolean }>;
+      uiRestrictions?: RoleUiRestrictions;
     }) => {
       if (data.username) {
         setSessionUser(data.username);
@@ -75,6 +65,9 @@ export function useAuth() {
         });
         setSessionPermissions(normalized);
       }
+      if (data.uiRestrictions) {
+        setSessionUiRestrictions(data.uiRestrictions);
+      }
     },
     [],
   );
@@ -88,6 +81,7 @@ export function useAuth() {
     setSessionRole("admin");
     setSessionLocations([]);
     setSessionPermissions(null);
+    setSessionUiRestrictions(null);
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -194,6 +188,8 @@ export function useAuth() {
     setSessionLocations,
     sessionPermissions,
     setSessionPermissions,
+    sessionUiRestrictions,
+    setSessionUiRestrictions,
     userPermissions,
     applySessionFromAuthMe,
     clearLocalSession,
