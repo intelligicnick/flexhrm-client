@@ -139,6 +139,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
+            if (id.includes('SupervisorMapPanel')) return 'supervisor-map';
             if (!id.includes('node_modules')) return;
             if (id.includes('exceljs')) return 'excel';
             if (id.includes('xlsx')) return 'xlsx';

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import {
   Users,
   IndianRupee,
@@ -37,7 +37,7 @@ import { getDaysInMonthStatic, parseFlexibleDateMs } from "../lib/date-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { expiryBand } from "../lib/renewal-helpers";
 import { Tender } from "../types";
-import SupervisorMapPanel from "../components/SupervisorMapPanel";
+const SupervisorMapPanel = lazy(() => import("../components/SupervisorMapPanel"));
 import DashboardDraggableSection from "../components/DashboardDraggableSection";
 import {
   loadDashboardWidgetOrder,
@@ -767,12 +767,20 @@ export default function AdminDashboardPage() {
       case "map":
         return (
           <section>
-            <SupervisorMapPanel
-              supervisors={rawSchoolSupervisors}
-              visits={rawSchoolVisits}
-              onOpenFieldTeam={() => goToFieldTeam("supervisors")}
-              layoutRevision={widgetOrder.join("-")}
-            />
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-64 rounded-xl border border-slate-200 bg-slate-50">
+                  <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+                </div>
+              }
+            >
+              <SupervisorMapPanel
+                supervisors={rawSchoolSupervisors}
+                visits={rawSchoolVisits}
+                onOpenFieldTeam={() => goToFieldTeam("supervisors")}
+                layoutRevision={widgetOrder.join("-")}
+              />
+            </Suspense>
           </section>
         );
 

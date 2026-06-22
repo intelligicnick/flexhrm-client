@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, Loader2, X } from "lucide-react";
-import { viewPdfUrl, type PdfActionStatus } from "./observer-share";
+import { ArrowLeft, ExternalLink, Loader2, X } from "lucide-react";
+import { viewPdfUrl, openExternalUrl, canOpenPdfExternally, type PdfActionStatus } from "./observer-share";
 
 export function ObserverPdfViewer({
   url,
@@ -37,6 +37,12 @@ export function ObserverPdfViewer({
     };
   }, [url]);
 
+  const showExternal = canOpenPdfExternally(url);
+
+  const openExternal = () => {
+    void openExternalUrl(url);
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-slate-900/95 max-w-lg mx-auto w-full">
       <div className="flex items-center gap-2 px-3 py-2.5 safe-area-top bg-[#0C1E4A] shrink-0">
@@ -49,6 +55,17 @@ export function ObserverPdfViewer({
           <ArrowLeft size={20} />
         </button>
         <p className="text-sm font-bold text-white truncate flex-1">{title}</p>
+        {showExternal && (
+          <button
+            type="button"
+            onClick={openExternal}
+            className="p-2 rounded-xl text-white/70 hover:bg-white/10 cursor-pointer shrink-0"
+            aria-label="Open in browser"
+            title="Open in browser"
+          >
+            <ExternalLink size={18} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -67,15 +84,28 @@ export function ObserverPdfViewer({
           </div>
         )}
         {objectUrl && (
-          <iframe
-            src={objectUrl}
+          <object
+            data={objectUrl}
+            type="application/pdf"
             title={title}
             className="w-full h-full border-0 bg-white"
-          />
+          >
+            <embed src={objectUrl} type="application/pdf" className="w-full h-full border-0 bg-white" />
+          </object>
         )}
         {status === "error" && !objectUrl && (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
             <p className="text-sm font-semibold text-white/80">{message}</p>
+            {showExternal && (
+              <button
+                type="button"
+                onClick={openExternal}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#ff791a] text-white text-sm font-bold cursor-pointer"
+              >
+                <ExternalLink size={16} />
+                Open in browser
+              </button>
+            )}
           </div>
         )}
       </div>

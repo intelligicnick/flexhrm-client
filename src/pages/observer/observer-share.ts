@@ -1,4 +1,13 @@
+import { apiUrl } from "../../api";
+import { isObserverNativeClient } from "../../lib/observer-session";
+
 export type PdfActionStatus = "loading" | "ready" | "error";
+
+const PROXY_HOSTS = [
+  "bidplus.gem.gov.in",
+  "fulfilment.gem.gov.in",
+  "ik.imagekit.io",
+];
 
 function resolveAbsoluteUrl(url: string): string {
   const trimmed = url.trim();
@@ -15,16 +24,29 @@ function sanitizeFilename(title: string): string {
   return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
 }
 
-function resolveFetchUrl(url: string): string {
-  const absolute = resolveAbsoluteUrl(url);
-  if (/^https?:\/\/(bidplus\.gem\.gov\.in|fulfilment\.gem\.gov\.in)/i.test(absolute)) {
-    return `/api/proxy/pdf?url=${encodeURIComponent(absolute)}`;
+function shouldProxyPdfUrl(absolute: string): boolean {
+  try {
+    const { hostname } = new URL(absolute);
+    return PROXY_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a PDF URL for fetch/open — routes cross-origin docs through the API proxy. */
+export function resolvePdfFetchUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return trimmed;
+  if (trimmed.startsWith("/api/")) return apiUrl(trimmed);
+  const absolute = resolveAbsoluteUrl(trimmed);
+  if (shouldProxyPdfUrl(absolute)) {
+    return apiUrl(`/api/proxy/pdf?url=${encodeURIComponent(absolute)}`);
   }
   return absolute;
 }
 
 async function fetchPdfBlob(url: string): Promise<Blob> {
-  const fetchUrl = resolveFetchUrl(url);
+  const fetchUrl = resolvePdfFetchUrl(url);
   const response = await fetch(fetchUrl, {
     credentials: "include",
     mode: "cors",
@@ -45,6 +67,21 @@ export async function fetchPdfFile(url: string, title: string): Promise<File> {
   return new File([blob], sanitizeFilename(title), { type: "application/pdf" });
 }
 
+function openPdfExternally(url: string): void {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("/api/")) return;
+  const absolute = resolveAbsoluteUrl(trimmed);
+  if (absolute.includes("/api/")) return;
+  window.open(absolute, "_blank", "noopener,noreferrer");
+}
+
+export function canOpenPdfExternally(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("/api/")) return false;
+  const absolute = resolveAbsoluteUrl(trimmed);
+  return !absolute.includes("/api/") && /^https?:\/\//i.test(absolute);
+}
+
 export async function viewPdfUrl(
   url: string,
   onStatus?: (status: PdfActionStatus, message?: string) => void,
@@ -58,10 +95,41 @@ export async function viewPdfUrl(
     return objectUrl;
   } catch {
     onStatus?.("error", "Could not load PDF in app");
-    const absoluteUrl = resolveAbsoluteUrl(url);
-    window.open(absoluteUrl, "_blank", "noopener,noreferrer");
+    openPdfExternally(url);
     return null;
   }
+}
+
+async function sharePdfFile(file: File, title: string): Promise<boolean> {
+  if (typeof navigator === "undefined") return false;
+
+  if (navigator.canShare?.({ files: [file] })) {
+    await navigator.share({ title, files: [file] });
+    return true;
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, files: [file] });
+      return true;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return true;
+    }
+  }
+
+  return false;
+}
+
+async function downloadPdfFile(file: File): Promise<void> {
+  const objectUrl = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = file.name;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export async function sharePdfUrl(
@@ -74,39 +142,34 @@ export async function sharePdfUrl(
 
   try {
     const file = await fetchPdfFile(url, title);
-    onStatus?.("ready");
 
-    if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ title, files: [file] });
+    const shared = await sharePdfFile(file, title);
+    if (shared) {
+      onStatus?.("ready");
       return;
     }
 
-    if (typeof navigator !== "undefined" && navigator.share) {
+    if (isObserverNativeClient()) {
       try {
-        await navigator.share({ title, files: [file] });
-        return;
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
+        await downloadPdfFile(file);
+        onStatus?.("ready", "PDF saved — share from your downloads folder.");
+      } catch {
+        onStatus?.("error", "Could not share PDF on this device.");
       }
+      return;
     }
 
-    const objectUrl = URL.createObjectURL(file);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    await downloadPdfFile(file);
     onStatus?.("ready", "PDF saved — share from your downloads folder.");
   } catch {
     onStatus?.("error", "Could not fetch PDF to share.");
+    openPdfExternally(url);
   }
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
   if (!url?.trim()) return;
-  window.open(resolveAbsoluteUrl(url), "_blank", "noopener,noreferrer");
+  openPdfExternally(url);
 }
 
 export async function shareUrl(
