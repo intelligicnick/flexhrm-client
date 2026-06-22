@@ -3,7 +3,6 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { setupFetchInterceptor } from './api';
 import './index.css';
-import 'leaflet/dist/leaflet.css';
 
 /** Field Team PWA service workers must not control admin routes (/field-team, etc.). */
 async function cleanupNonSupervisorServiceWorkers(): Promise<void> {

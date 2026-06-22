@@ -135,13 +135,25 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
-          manualChunks: {
-            excel: ['exceljs'],
-            pdf: ['jspdf', 'jspdf-autotable'],
-            leaflet: ['leaflet'],
-            vendor: ['react', 'react-dom', 'react-router-dom'],
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('exceljs')) return 'excel';
+            if (id.includes('xlsx')) return 'xlsx';
+            if (id.includes('pdfjs-dist')) return 'pdfjs';
+            if (id.includes('jspdf')) return 'pdf';
+            if (id.includes('html2canvas')) return 'html2canvas';
+            if (id.includes('leaflet')) return 'leaflet';
+            if (id.includes('qrcode')) return 'qrcode';
+            if (
+              id.includes('react-dom') ||
+              id.includes('react-router') ||
+              /\/react\//.test(id)
+            ) {
+              return 'vendor';
+            }
           },
         },
       },

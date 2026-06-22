@@ -1,5 +1,5 @@
 import React from "react";
-import { LucideIcon } from "lucide-react";
+import { LucideIcon, Calendar } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export function ObserverStatGrid({ children }: { children: React.ReactNode }) {
@@ -89,6 +89,7 @@ export function ObserverSection({
 export function ObserverListRow({
   title,
   subtitle,
+  dateLabel,
   value,
   valueTone,
   badge,
@@ -97,6 +98,7 @@ export function ObserverListRow({
 }: {
   title: string;
   subtitle?: string;
+  dateLabel?: string;
   value?: string;
   valueTone?: "slate" | "green" | "amber" | "red" | "blue";
   badge?: string;
@@ -122,7 +124,13 @@ export function ObserverListRow({
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-slate-800 truncate">{title}</p>
-        {subtitle && <p className="text-xs text-slate-500 truncate mt-0.5">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{subtitle}</p>}
+        {dateLabel && (
+          <p className="text-[11px] font-bold text-[#0C1E4A] mt-1 inline-flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-lg">
+            <Calendar size={11} className="text-[#ff791a] shrink-0" />
+            {dateLabel}
+          </p>
+        )}
       </div>
       {badge && (
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${badgeColors[badgeTone]}`}>

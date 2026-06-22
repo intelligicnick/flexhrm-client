@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { Search, X, Calendar } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import {
@@ -64,7 +63,6 @@ export default function ObserverUniversalSearch({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const navigate = useNavigate();
   const stats = useObserverStats();
   const {
     employees,
@@ -188,8 +186,6 @@ export default function ObserverUniversalSearch({
   const handleSelect = async (result: UniversalSearchResult) => {
     const built = await buildDetail(result);
     setDetail(built);
-    onOpenChange(false);
-    navigate(result.to);
   };
 
   const closeSearch = () => {
@@ -279,7 +275,10 @@ export default function ObserverUniversalSearch({
           title={detail.title}
           fields={detail.fields}
           documents={detail.documents}
-          onClose={() => setDetail(null)}
+          onClose={() => {
+            setDetail(null);
+            if (!open) onOpenChange(true);
+          }}
         />
       )}
     </>

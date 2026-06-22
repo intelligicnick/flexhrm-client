@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Home, Map, LayoutGrid, LogOut, Eye, Bell, Search } from "lucide-react";
+import { Home, Map, LayoutGrid, LogOut, Eye, Bell, Search, ArrowLeft } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import ObserverMonthPicker from "./ObserverMonthPicker";
@@ -35,6 +35,8 @@ function formatGreetingName(sessionUser?: string | null, profile?: { name?: stri
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
+const ROOT_PATHS = new Set(["/observer", "/observer/", "/observer/map", "/observer/menu", "/observer/notifications"]);
+
 function ObserverLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,6 +48,15 @@ function ObserverLayoutInner() {
   const isMapPage = location.pathname.startsWith("/observer/map");
   const showNav = !location.pathname.includes("/login");
   const greetingName = formatGreetingName(sessionUser, adminProfileInfo);
+  const showBack = showNav && !ROOT_PATHS.has(location.pathname);
+
+  const goBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/observer/menu");
+  };
 
   const logout = async () => {
     try {
@@ -80,61 +91,65 @@ function ObserverLayoutInner() {
     <div className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
       <header className="sticky top-0 z-30 safe-area-top">
         <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-3 shadow-lg">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            {showBack && (
+              <button
+                type="button"
+                onClick={goBack}
+                className="p-2 -ml-1 text-white/90 hover:bg-white/10 rounded-xl cursor-pointer shrink-0"
+                aria-label="Go back"
+              >
+                <ArrowLeft size={20} />
+              </button>
+            )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <Eye size={12} className="text-orange-300/80" />
-                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300/80">
+                <Eye size={12} className="text-orange-300/80 shrink-0" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-300/80 truncate">
                   Observer Admin
                 </p>
               </div>
-              <p className="text-lg font-black text-white mt-1 truncate">
-                Hi, {greetingName}
-              </p>
-              <p className="text-[11px] font-semibold text-slate-300 mt-0.5 truncate">{pageTitle}</p>
+              <p className="text-lg font-black text-white mt-0.5 truncate">Hi, {greetingName}</p>
+              <p className="text-[11px] font-semibold text-slate-300 truncate">{pageTitle}</p>
             </div>
-
-            <div className="flex flex-col items-end gap-2 shrink-0">
-              {!isMapPage && (
-                <div className="w-[148px]">
-                  <ObserverMonthPicker compact />
-                </div>
-              )}
-              <div className="flex items-center gap-0.5">
-                {!isMapPage && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchOpen(true)}
-                    className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
-                    title="Search"
-                    aria-label="Open search"
-                  >
-                    <Search size={20} />
-                  </button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                title="Search"
+                aria-label="Open search"
+              >
+                <Search size={20} />
+              </button>
+              <Link
+                to="/observer/notifications"
+                className="relative p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {adminNotificationUnreadCount > 0 && (
+                  <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                    {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
+                  </span>
                 )}
-                <Link
-                  to="/observer/notifications"
-                  className="relative p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
-                  title="Notifications"
-                >
-                  <Bell size={20} />
-                  {adminNotificationUnreadCount > 0 && (
-                    <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
-                      {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
-                    </span>
-                  )}
-                </Link>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
-                  title="Logout"
-                >
-                  <LogOut size={20} />
-                </button>
-              </div>
+              </Link>
+              <button
+                type="button"
+                onClick={logout}
+                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                title="Logout"
+              >
+                <LogOut size={20} />
+              </button>
             </div>
           </div>
+
+          {!isMapPage && (
+            <div className="mt-2.5">
+              <ObserverMonthPicker compact />
+            </div>
+          )}
         </div>
       </header>
 

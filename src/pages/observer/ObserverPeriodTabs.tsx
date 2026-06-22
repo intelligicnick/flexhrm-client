@@ -17,16 +17,16 @@ export function ObserverPeriodTabs({
   onPeriodChange: (period: ObserverPeriod) => void;
 }) {
   return (
-    <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-0.5 w-full">
+    <div className="flex rounded-2xl bg-[#0C1E4A]/5 border border-slate-200 p-1 w-full gap-1">
       {PERIOD_OPTIONS.map((option) => (
         <button
           key={option.key}
           type="button"
           onClick={() => onPeriodChange(option.key)}
-          className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+          className={`flex-1 px-2 py-2 rounded-xl text-[11px] font-bold transition cursor-pointer ${
             period === option.key
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-700"
+              ? "bg-[#0C1E4A] text-white shadow-md"
+              : "text-slate-600 hover:bg-white hover:text-slate-800"
           }`}
         >
           {option.label}
@@ -49,7 +49,7 @@ export function ObserverSupervisorSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full text-[11px] font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-100 cursor-pointer"
+      className="w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-100 cursor-pointer"
       aria-label="Filter by supervisor"
     >
       <option value="all">All supervisors</option>

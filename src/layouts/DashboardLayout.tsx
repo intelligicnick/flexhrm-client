@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { 
   Users, 
@@ -109,12 +109,13 @@ import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 import { useHRMS } from "../context/HRMSContext";
-import ModuleContent from "../pages/ModuleContent";
 import NotificationsBell from "../components/NotificationsBell";
 import {
   ExtensionIntegrationModal,
   ExtensionProfileMenuItem,
 } from "../components/ExtensionIntegration";
+
+const ModuleContent = lazy(() => import("../pages/ModuleContent"));
 
 export default function DashboardLayout() {
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState(false);
@@ -1125,7 +1126,15 @@ export default function DashboardLayout() {
                     )}
         
                     {/* 4. MAIN INNER SCROLLABLE VIEWPORT CONTENT */}
-          <ModuleContent />
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center text-sm text-slate-400">
+                Loading module…
+              </div>
+            }
+          >
+            <ModuleContent />
+          </Suspense>
     
                     {/* Small informative details footer */}
                     <footer className="mt-auto px-6 py-4 bg-white border-t border-slate-200 text-center text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0 select-none" id="applet-footer">

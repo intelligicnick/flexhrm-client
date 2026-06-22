@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { MapPin, ChevronRight, Route, User, Maximize2, Minimize2 } from "lucide-react";
 import type { SchoolSupervisor, SchoolVisit } from "../types";
 import {
@@ -140,6 +141,7 @@ export default function SupervisorMapPanel({
   isFullscreen = false,
   onToggleFullscreen,
 }: SupervisorMapPanelProps) {
+  const embedded = variant === "embedded";
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const pathsLayerRef = useRef<L.LayerGroup | null>(null);
@@ -338,7 +340,6 @@ export default function SupervisorMapPanel({
     }
   }, [visiblePaths, showPaths]);
 
-  const embedded = variant === "embedded";
   const resolvedMapHeight =
     mapHeightClass || (embedded ? "h-[calc(100dvh-11rem)]" : "h-80 md:h-[28rem]");
 

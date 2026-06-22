@@ -38,27 +38,29 @@ export type ObserverDocumentLink = {
 function formatDate(d: string): string {
   if (!d?.trim()) return "—";
   const ts = parseFlexibleDateMs(d);
-  if (ts === null) return d;
+  if (ts === null) return d.trim();
   return new Date(ts).toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Kolkata",
   });
 }
 
 function formatDateTime(d?: string | null): string {
   if (!d?.trim()) return "—";
-  try {
-    return new Date(d).toLocaleString("en-IN", {
+  const ts = parseFlexibleDateMs(d);
+  if (ts !== null) {
+    return new Date(ts).toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Asia/Kolkata",
     });
-  } catch {
-    return d;
   }
+  return d.trim();
 }
 
 function contractWorksite(contract: Contract): string {

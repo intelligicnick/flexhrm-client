@@ -86,8 +86,13 @@ function renewalBadge(r: Renewal): { label: string; tone: "red" | "amber" | "gre
 function formatDate(d: string): string {
   if (!d?.trim()) return "—";
   const ts = parseFlexibleDateMs(d);
-  if (ts === null) return d;
-  return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  if (ts === null) return d.trim();
+  return new Date(ts).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
 }
 
 function ModuleSearch({
@@ -619,7 +624,8 @@ export default function ObserverModulePage() {
                 <ObserverListRow
                   key={t.id}
                   title={t.bidNo || "Tender"}
-                  subtitle={`Pre-bid ${formatDateTime(t.preBidAt)} · End ${formatDate(t.endDate || "")}`}
+                  subtitle={[t.department, t.officerName].filter(Boolean).join(" · ") || undefined}
+                  dateLabel={`Pre-bid ${formatDateTime(t.preBidAt)} · End ${formatDate(t.endDate || "")}`}
                   value={t.quantity ? String(t.quantity) : undefined}
                   valueTone="green"
                   badge={typeBadge.label}
@@ -657,7 +663,8 @@ export default function ObserverModulePage() {
               <ObserverListRow
                 key={c.id}
                 title={resolveGemContractNoLabel(c) || c.contractNo || "Contract"}
-                subtitle={`${contractWorksite(c)} · ${formatDate(c.fromDate || "")} – ${formatDate(c.toDate || "")}`}
+                subtitle={contractWorksite(c)}
+                dateLabel={`${formatDate(c.fromDate || "")} – ${formatDate(c.toDate || "")}`}
                 badge={c.status || "—"}
                 badgeTone="slate"
                 onClick={() =>
