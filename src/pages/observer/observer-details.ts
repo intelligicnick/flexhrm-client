@@ -1,6 +1,9 @@
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { expiryBand } from "../../lib/renewal-helpers";
 import { parseFlexibleDateMs } from "../../lib/date-helpers";
+import { resolveGemBidPdfUrl, resolveGemContractPdfUrl, resolveGemContractNoLabel } from "../../lib/gem-helpers";
+import { resolvePhotoSrc } from "../../lib/media-url";
+import { buildAllExpenseRecords, type ExpenseRecordRow } from "../../lib/school-work-helpers";
 import type {
   CommitmentDiary,
   Contract,
@@ -12,9 +15,25 @@ import type {
   SchoolWork,
   Tender,
 } from "../../types";
-import { formatInr } from "./ObserverUI";
+import { formatInr, formatMonthLabel } from "./ObserverUI";
 
-export type DetailField = { label: string; value: string };
+export type DetailField = {
+  label: string;
+  value: string;
+  href?: string;
+  shareUrl?: string;
+  shareTitle?: string;
+  imageSrc?: string;
+  tone?: "green" | "amber" | "red" | "blue" | "slate";
+  hideLabel?: boolean;
+};
+
+export type ObserverDocumentLink = {
+  id: string;
+  label: string;
+  url: string;
+  mimeType?: string;
+};
 
 function formatDate(d: string): string {
   if (!d?.trim()) return "—";
@@ -42,6 +61,20 @@ function formatDateTime(d?: string | null): string {
   }
 }
 
+function contractWorksite(contract: Contract): string {
+  return contract.linkedLocations?.filter(Boolean).join(", ") || contract.officeName || contract.correspondingOffice || "—";
+}
+
+function salaryPaymentStatus(emp: Employee, selectedMonth: string): "Paid" | "Unpaid" | "Hold" {
+  return emp.monthlyLedger?.[selectedMonth]?.paymentStatus || "Unpaid";
+}
+
+function paymentTone(status: string): DetailField["tone"] {
+  if (status === "Paid") return "green";
+  if (status === "Hold") return "amber";
+  return "red";
+}
+
 export function buildEmployeeDetails(
   emp: Employee,
   selectedMonth: string,
@@ -62,16 +95,19 @@ export function buildEmployeeDetails(
         locationPtEnabled,
       ),
     ) || 0;
+  const payStatus = salaryPaymentStatus(emp, selectedMonth);
 
   return [
     { label: "Name", value: emp.nameAsPerAadhar || "—" },
     { label: "Employee Code", value: emp.employeeCode || "—" },
     { label: "Role", value: emp.role || "—" },
     { label: "Location", value: emp.location || "—" },
+    { label: "Payment Status", value: payStatus, tone: paymentTone(payStatus) },
+    { label: "Net Payable", value: formatInr(net) },
+    { label: "Month", value: formatMonthLabel(selectedMonth) },
     { label: "Skill Category", value: emp.skillCategory || "—" },
     { label: "Mobile", value: emp.employeeMobile || "—" },
     { label: "Gross Salary", value: formatInr(Number(emp.grossSalary) || 0) },
-    { label: "Net Payable", value: formatInr(net) },
     { label: "Working Days", value: emp.workingDaysType || "—" },
     { label: "PF Joining", value: formatDate(emp.pfJoiningDate) },
     { label: "Exit Date", value: formatDate(emp.exitDate || "") },
@@ -106,7 +142,7 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
       ? visit.materialsGiven.map((m) => `${m.item} × ${m.qty}`).join(", ")
       : "—";
 
-  return [
+  const fields: DetailField[] = [
     { label: "School", value: visit.schoolName || "—" },
     { label: "Supervisor", value: visit.supervisorName || "—" },
     { label: "Visit Date", value: formatDate(visit.visitDate) },
@@ -123,8 +159,24 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
           `${visit.gpsLocation.lat.toFixed(5)}, ${visit.gpsLocation.lng.toFixed(5)}`
         : "—",
     },
-    { label: "Photos", value: String(visit.photoCount ?? visit.photos?.length ?? 0) },
   ];
+
+  const photos = visit.photos || [];
+  photos.forEach((photo, index) => {
+    const src = resolvePhotoSrc(photo);
+    if (!src) return;
+    fields.push({
+      label: photos.length > 1 ? `Stamped Photo ${index + 1}` : "Stamped Photo",
+      value: photo.caption || formatDate(visit.visitDate),
+      imageSrc: src,
+    });
+  });
+
+  if (photos.length === 0) {
+    fields.push({ label: "Photos", value: String(visit.photoCount ?? 0) });
+  }
+
+  return fields;
 }
 
 export function buildCommitmentDetails(commitment: CommitmentDiary): DetailField[] {
@@ -143,34 +195,53 @@ export function buildCommitmentDetails(commitment: CommitmentDiary): DetailField
 }
 
 export function buildTenderDetails(tender: Tender): DetailField[] {
-  return [
+  const pdfUrl = resolveGemBidPdfUrl(tender);
+  const typeLabel = tender.tenderType === "travel" ? "Car" : "Manpower";
+
+  const fields: DetailField[] = [
     { label: "Bid No", value: tender.bidNo || "—" },
+    { label: "Type", value: typeLabel, tone: tender.tenderType === "travel" ? "amber" : "green" },
+    { label: "End Date", value: formatDate(tender.endDate) },
+    { label: "Pre-Bid Date & Time", value: formatDateTime(tender.preBidAt) },
+    { label: "Pre-Bid Venue", value: tender.preBidVenue || "—" },
+    { label: "Quantity", value: String(tender.quantity ?? "—"), tone: "green", hideLabel: false },
     { label: "Department", value: tender.department || "—" },
-    { label: "Category", value: tender.category || "—" },
     { label: "Officer", value: tender.officerName || "—" },
     { label: "Status", value: tender.status || "—" },
-    { label: "End Date", value: formatDate(tender.endDate) },
     { label: "Filed Date", value: formatDate(tender.filedDate) },
-    { label: "Pre-Bid At", value: formatDate(tender.preBidAt) },
-    { label: "Pre-Bid Venue", value: tender.preBidVenue || "—" },
-    { label: "Quantity", value: String(tender.quantity ?? "—") },
     { label: "Rate", value: tender.rate || "—" },
     { label: "Outcome", value: tender.outcome || "—" },
     { label: "Description", value: tender.description || "—" },
     { label: "Notes", value: tender.notes || "—" },
     { label: "Address", value: tender.address || "—" },
   ];
+
+  if (pdfUrl) {
+    fields.push({
+      label: "Bid PDF",
+      value: "View bid document",
+      href: pdfUrl,
+      shareUrl: pdfUrl,
+      shareTitle: `Tender ${tender.bidNo || "PDF"}`,
+    });
+  }
+
+  return fields;
 }
 
 export function buildContractDetails(contract: Contract): DetailField[] {
-  return [
-    { label: "Contract No", value: contract.contractNo || "—" },
+  const pdfUrl = resolveGemContractPdfUrl(contract);
+  const contractLabel = resolveGemContractNoLabel(contract);
+
+  const fields: DetailField[] = [
+    { label: "Contract No", value: contractLabel || contract.contractNo || "—" },
+    { label: "Worksite Location", value: contractWorksite(contract) },
+    { label: "Start Date", value: formatDate(contract.fromDate) },
+    { label: "End Date", value: formatDate(contract.toDate) },
     { label: "Company", value: contract.companyName || "—" },
     { label: "Office", value: contract.officeName || "—" },
     { label: "Officer", value: contract.officerName || "—" },
     { label: "Status", value: contract.status || "—" },
-    { label: "From Date", value: formatDate(contract.fromDate) },
-    { label: "To Date", value: formatDate(contract.toDate) },
     { label: "Extension End", value: formatDate(contract.extensionEndDate) },
     { label: "Contract Value", value: contract.contractValue || "—" },
     { label: "Category", value: contract.category || "—" },
@@ -179,6 +250,18 @@ export function buildContractDetails(contract: Contract): DetailField[] {
     { label: "BG Amount", value: contract.bgAmount || "—" },
     { label: "Notes", value: contract.notes || "—" },
   ];
+
+  if (pdfUrl) {
+    fields.push({
+      label: "Contract PDF",
+      value: "View contract document",
+      href: pdfUrl,
+      shareUrl: pdfUrl,
+      shareTitle: `Contract ${contractLabel || contract.contractNo || "PDF"}`,
+    });
+  }
+
+  return fields;
 }
 
 export function buildRenewalDetails(renewal: Renewal): DetailField[] {
@@ -203,21 +286,60 @@ export function buildExpenseDetails(
   school: SchoolWork,
   selectedMonth: string,
 ): DetailField[] {
-  const entry = school.monthlyExpenseLedger?.[selectedMonth];
-  const material = Number(entry?.material) || 0;
-  const trek = Number(entry?.trek) || 0;
-  const misc = Number(entry?.miscellaneous) || 0;
+  const records = buildAllExpenseRecords([school]).filter((row) => row.monthKey === selectedMonth);
+  const monthTotal = records.reduce((sum, row) => sum + row.amount, 0);
 
-  return [
+  if (records.length === 0) {
+    const entry = school.monthlyExpenseLedger?.[selectedMonth];
+    const material = Number(entry?.material) || 0;
+    const trek = Number(entry?.trek) || 0;
+    const misc = Number(entry?.miscellaneous) || 0;
+    const total = material + trek + misc;
+    return [
+      { label: "Date", value: "—" },
+      { label: "Total Expenses", value: formatInr(total) },
+      { label: "Expense Type", value: "Combined" },
+      { label: "District", value: school.district || "—" },
+      { label: "Block", value: school.block || "—" },
+      { label: "Month", value: formatMonthLabel(selectedMonth) },
+      { label: "Amount", value: formatInr(total) },
+      { label: "Remark", value: school.remarks || "—" },
+    ];
+  }
+
+  const fields: DetailField[] = [
     { label: "School", value: school.schoolName || "—" },
-    { label: "Block", value: school.block || "—" },
-    { label: "District", value: school.district || "—" },
-    { label: "UDISE", value: school.udise || "—" },
-    { label: "Month", value: selectedMonth },
-    { label: "Material", value: formatInr(material) },
-    { label: "Trek", value: formatInr(trek) },
-    { label: "Miscellaneous", value: formatInr(misc) },
-    { label: "Total", value: formatInr(material + trek + misc) },
+    { label: "Total Expenses", value: formatInr(monthTotal) },
+    { label: "Month", value: formatMonthLabel(selectedMonth) },
+  ];
+
+  records.forEach((row, index) => {
+    fields.push(
+      { label: `Entry ${index + 1} — Date`, value: row.date ? formatDate(row.date) : "—" },
+      { label: `Entry ${index + 1} — Type`, value: row.type },
+      { label: `Entry ${index + 1} — District`, value: row.district || school.district || "—" },
+      { label: `Entry ${index + 1} — Block`, value: row.block || school.block || "—" },
+      { label: `Entry ${index + 1} — Amount`, value: formatInr(row.amount) },
+      { label: `Entry ${index + 1} — Remark`, value: row.remarks || "—" },
+    );
+  });
+
+  return fields;
+}
+
+export function buildExpenseRecordDetails(
+  row: ExpenseRecordRow,
+  monthTotal: number,
+): DetailField[] {
+  return [
+    { label: "Date", value: row.date ? formatDate(row.date) : "—" },
+    { label: "Total Expenses", value: formatInr(monthTotal) },
+    { label: "Expense Type", value: row.type },
+    { label: "District", value: row.district || "—" },
+    { label: "Block", value: row.block || "—" },
+    { label: "Month", value: formatMonthLabel(row.monthKey) },
+    { label: "Amount", value: formatInr(row.amount) },
+    { label: "Remark", value: row.remarks || "—" },
   ];
 }
 
@@ -225,14 +347,14 @@ export function buildPartnerDetails(partner: SchoolPartner, selectedMonth: strin
   const status = partner.monthlyPayLedger?.[selectedMonth]?.paymentStatus || "Unpaid";
 
   return [
-    { label: "Partner Name", value: partner.partnerName || "—" },
-    { label: "School", value: partner.schoolName || "—" },
-    { label: "Monthly Pay", value: formatInr(Number(partner.monthlyPay) || 0) },
-    { label: "Payment Status", value: status },
+    { label: "Name", value: partner.partnerName || "—" },
+    { label: "School Name", value: partner.schoolName || "—" },
+    { label: "Status", value: status, tone: paymentTone(status) },
+    { label: "Amount", value: formatInr(Number(partner.monthlyPay) || 0) },
+    { label: "Month", value: formatMonthLabel(selectedMonth) },
     { label: "Account Holder", value: partner.accountHolderName || "—" },
     { label: "Account Number", value: partner.accountNumber || "—" },
     { label: "IFSC", value: partner.ifscCode || "—" },
-    { label: "Month", value: selectedMonth },
   ];
 }
 
@@ -241,3 +363,14 @@ export function matchesSearch(query: string, ...parts: (string | number | undefi
   if (!q) return true;
   return parts.some((part) => String(part ?? "").toLowerCase().includes(q));
 }
+
+export function getSalaryStatusTone(status: string): "green" | "amber" | "red" {
+  return paymentTone(status) || "red";
+}
+
+export function getTenderTypeBadge(tender: Tender): { label: string; tone: "green" | "amber" } {
+  if (tender.tenderType === "travel") return { label: "Car", tone: "amber" };
+  return { label: "Manpower", tone: "green" };
+}
+
+export { contractWorksite, salaryPaymentStatus, formatDate, formatDateTime };

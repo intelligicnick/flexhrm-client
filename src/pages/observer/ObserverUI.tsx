@@ -90,6 +90,7 @@ export function ObserverListRow({
   title,
   subtitle,
   value,
+  valueTone,
   badge,
   badgeTone = "slate",
   onClick,
@@ -97,6 +98,7 @@ export function ObserverListRow({
   title: string;
   subtitle?: string;
   value?: string;
+  valueTone?: "slate" | "green" | "amber" | "red" | "blue";
   badge?: string;
   badgeTone?: "slate" | "red" | "amber" | "green" | "blue";
   onClick?: () => void;
@@ -127,7 +129,23 @@ export function ObserverListRow({
           {badge}
         </span>
       )}
-      {value && <span className="text-sm font-black text-slate-700 shrink-0">{value}</span>}
+      {value && (
+        <span
+          className={`text-sm font-black shrink-0 ${
+            valueTone === "green"
+              ? "text-emerald-600"
+              : valueTone === "amber"
+                ? "text-amber-600"
+                : valueTone === "red"
+                  ? "text-red-600"
+                  : valueTone === "blue"
+                    ? "text-blue-600"
+                    : "text-slate-700"
+          }`}
+        >
+          {value}
+        </span>
+      )}
     </Tag>
   );
 }

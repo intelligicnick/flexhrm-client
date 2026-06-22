@@ -28,21 +28,33 @@ import {
 import { expiryBand } from "../../lib/renewal-helpers";
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { parseFlexibleDateMs } from "../../lib/date-helpers";
+import { getDateRangeForPeriod } from "../../lib/supervisor-dates";
+import { buildAllExpenseRecords, formatExpenseDate } from "../../lib/school-work-helpers";
+import { resolveGemContractNoLabel } from "../../lib/gem-helpers";
+import { fetchRenewalDocuments, getRenewalDocumentUrl } from "../../lib/renewals";
 import type { Renewal } from "../../types";
 import ObserverSearchInput from "./ObserverSearchInput";
 import { ObserverDetailSheet } from "./ObserverDetailSheet";
+import { ObserverPeriodTabs, type ObserverPeriod } from "./ObserverPeriodTabs";
+import { ObserverSupervisorSelect } from "./ObserverPeriodTabs";
 import {
   buildCommitmentDetails,
   buildContractDetails,
   buildEmployeeDetails,
-  buildExpenseDetails,
+  buildExpenseRecordDetails,
   buildPartnerDetails,
   buildRenewalDetails,
   buildSupervisorDetails,
   buildTenderDetails,
   buildVisitDetails,
+  contractWorksite,
+  formatDateTime,
+  getSalaryStatusTone,
+  getTenderTypeBadge,
   matchesSearch,
+  salaryPaymentStatus,
   type DetailField,
+  type ObserverDocumentLink,
 } from "./observer-details";
 
 const MODULE_CONFIG: Record<
@@ -78,13 +90,40 @@ function formatDate(d: string): string {
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function ModuleSearch({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ModuleSearch({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   return (
     <div className="mb-3">
-      <ObserverSearchInput value={value} onChange={onChange} />
+      <ObserverSearchInput value={value} onChange={onChange} placeholder={placeholder} />
     </div>
   );
 }
+
+function filterByPeriod<T extends { visitDate?: string; fromDate?: string }>(
+  items: T[],
+  period: ObserverPeriod,
+  dateField: "visitDate" | "fromDate",
+): T[] {
+  const range = getDateRangeForPeriod(period);
+  return items.filter((item) => {
+    const date = item[dateField]?.trim();
+    if (!date) return false;
+    return date >= range.fromDate && date <= range.toDate;
+  });
+}
+
+type DetailState = {
+  title: string;
+  fields: DetailField[];
+  documents?: ObserverDocumentLink[];
+};
 
 export default function ObserverModulePage() {
   const { moduleId = "" } = useParams<{ moduleId: string }>();
@@ -112,11 +151,18 @@ export default function ObserverModulePage() {
     partnerPayStats,
     rawSchoolPartners,
     rawSchoolWorks,
+    rawSchoolSupervisors,
+    rawSchoolVisits,
+    rawCommitmentDiary,
     supervisorStats,
   } = stats;
 
   const [moduleSearch, setModuleSearch] = useState("");
-  const [detail, setDetail] = useState<{ title: string; fields: DetailField[] } | null>(null);
+  const [detail, setDetail] = useState<DetailState | null>(null);
+  const [visitPeriod, setVisitPeriod] = useState<ObserverPeriod>("month");
+  const [visitSupervisorId, setVisitSupervisorId] = useState("all");
+  const [commitmentPeriod, setCommitmentPeriod] = useState<ObserverPeriod>("month");
+  const [commitmentSupervisorId, setCommitmentSupervisorId] = useState("all");
 
   const monthLabel = formatMonthLabel(selectedMonth);
 
@@ -127,6 +173,7 @@ export default function ObserverModulePage() {
         id: emp.id,
         name: emp.nameAsPerAadhar || emp.employeeCode,
         role: emp.role || "—",
+        status: salaryPaymentStatus(emp, selectedMonth),
         net:
           Number(
             getSalaryColumnValue(
@@ -140,7 +187,16 @@ export default function ObserverModulePage() {
             ),
           ) || 0,
       }))
-      .filter((row) => matchesSearch(moduleSearch, row.name, row.role, row.emp.employeeCode, row.emp.location))
+      .filter((row) =>
+        matchesSearch(
+          moduleSearch,
+          row.name,
+          row.role,
+          row.emp.employeeCode,
+          row.emp.location,
+          row.status,
+        ),
+      )
       .sort((a, b) => b.net - a.net);
   }, [
     filteredSalaryEmployees,
@@ -205,28 +261,27 @@ export default function ObserverModulePage() {
   }, [rawRenewals, config?.renewalCategory, moduleSearch]);
 
   const expenseRows = useMemo(() => {
-    return rawSchoolWorks
-      .map((school) => {
-        const entry = school.monthlyExpenseLedger?.[selectedMonth];
-        if (!entry) return null;
-        const total =
-          (Number(entry.material) || 0) +
-          (Number(entry.trek) || 0) +
-          (Number(entry.miscellaneous) || 0);
-        if (total <= 0) return null;
-        return { school, id: school.id, name: school.schoolName, block: school.block, total };
-      })
-      .filter(Boolean)
-      .filter((row) =>
-        matchesSearch(moduleSearch, row?.name, row?.block, row?.school.district, row?.school.udise),
-      )
-      .sort((a, b) => (b?.total || 0) - (a?.total || 0)) as {
-      school: (typeof rawSchoolWorks)[0];
-      id: string;
-      name: string;
-      block: string;
-      total: number;
-    }[];
+    const monthRecords = buildAllExpenseRecords(rawSchoolWorks).filter(
+      (row) => row.monthKey === selectedMonth,
+    );
+    const monthTotal = monthRecords.reduce((sum, row) => sum + row.amount, 0);
+    return monthRecords
+      .map((row, index) => ({
+        row,
+        id: `${row.monthKey}-${row.block}-${row.type}-${index}`,
+        monthTotal,
+      }))
+      .filter(({ row }) =>
+        matchesSearch(
+          moduleSearch,
+          row.type,
+          row.block,
+          row.district,
+          row.remarks,
+          row.date,
+          formatMonthLabel(selectedMonth),
+        ),
+      );
   }, [rawSchoolWorks, selectedMonth, moduleSearch]);
 
   const partnerRows = useMemo(() => {
@@ -246,21 +301,29 @@ export default function ObserverModulePage() {
       });
   }, [rawSchoolPartners, selectedMonth, moduleSearch]);
 
-  const filteredVisits = useMemo(
-    () =>
-      visitStats.recent.filter((v) =>
+  const filteredVisits = useMemo(() => {
+    let items = filterByPeriod(rawSchoolVisits, visitPeriod, "visitDate");
+    if (visitSupervisorId !== "all") {
+      items = items.filter((v) => v.supervisorId === visitSupervisorId);
+    }
+    return items
+      .filter((v) =>
         matchesSearch(moduleSearch, v.schoolName, v.supervisorName, v.block, v.udise, v.status),
-      ),
-    [visitStats.recent, moduleSearch],
-  );
+      )
+      .sort((a, b) => (b.visitDate || "").localeCompare(a.visitDate || ""));
+  }, [rawSchoolVisits, visitPeriod, visitSupervisorId, moduleSearch]);
 
-  const filteredCommitments = useMemo(
-    () =>
-      commitmentStats.items.filter((c) =>
+  const filteredCommitments = useMemo(() => {
+    let items = filterByPeriod(rawCommitmentDiary, commitmentPeriod, "fromDate");
+    if (commitmentSupervisorId !== "all") {
+      items = items.filter((c) => c.supervisorId === commitmentSupervisorId);
+    }
+    return items
+      .filter((c) =>
         matchesSearch(moduleSearch, c.schoolName, c.supervisorName, c.block, c.status, c.notes),
-      ),
-    [commitmentStats.items, moduleSearch],
-  );
+      )
+      .sort((a, b) => (b.fromDate || "").localeCompare(a.fromDate || ""));
+  }, [rawCommitmentDiary, commitmentPeriod, commitmentSupervisorId, moduleSearch]);
 
   const filteredTenders = useMemo(
     () =>
@@ -278,6 +341,27 @@ export default function ObserverModulePage() {
     [rawContracts, moduleSearch],
   );
 
+  const openDetail = (title: string, fields: DetailField[], documents?: ObserverDocumentLink[]) =>
+    setDetail({ title, fields, documents });
+
+  const openRenewalDetail = async (title: string, renewal: Renewal) => {
+    try {
+      const docs = await fetchRenewalDocuments(renewal.id);
+      openDetail(
+        title,
+        buildRenewalDetails(renewal),
+        docs.map((doc) => ({
+          id: doc.id,
+          label: doc.label || doc.filename,
+          url: getRenewalDocumentUrl(renewal.id, doc),
+          mimeType: doc.mimeType,
+        })),
+      );
+    } catch {
+      openDetail(title, buildRenewalDetails(renewal));
+    }
+  };
+
   if (!config) {
     return <ObserverEmptyState icon={ClipboardList} title="Module not found" />;
   }
@@ -291,8 +375,6 @@ export default function ObserverModulePage() {
       />
     );
   }
-
-  const openDetail = (title: string, fields: DetailField[]) => setDetail({ title, fields });
 
   if (moduleId === "supervisors") {
     return (
@@ -319,7 +401,12 @@ export default function ObserverModulePage() {
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -359,7 +446,12 @@ export default function ObserverModulePage() {
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -381,8 +473,9 @@ export default function ObserverModulePage() {
               <ObserverListRow
                 key={row.id}
                 title={row.name}
-                subtitle={row.role}
-                value={formatInr(row.net)}
+                subtitle={`${row.role} · ${formatInr(row.net)}`}
+                badge={row.status}
+                badgeTone={getSalaryStatusTone(row.status)}
                 onClick={() =>
                   openDetail(
                     row.name,
@@ -401,7 +494,12 @@ export default function ObserverModulePage() {
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -415,7 +513,15 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={ClipboardList} label="Pending" value={visitStats.pending} accent="amber" alert={visitStats.pending > 0} />
           <ObserverStatCard icon={ClipboardList} label="Approved" value={visitStats.approved} accent="emerald" />
         </ObserverStatGrid>
-        <ObserverSection title="All Visits">
+        <ObserverSection title="Visits">
+          <div className="space-y-2 mb-3">
+            <ObserverPeriodTabs period={visitPeriod} onPeriodChange={setVisitPeriod} />
+            <ObserverSupervisorSelect
+              supervisors={rawSchoolSupervisors}
+              value={visitSupervisorId}
+              onChange={setVisitSupervisorId}
+            />
+          </div>
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor…" />
           {filteredVisits.length === 0 ? (
             <ObserverEmptyState icon={ClipboardList} title="No visits found" />
@@ -433,7 +539,12 @@ export default function ObserverModulePage() {
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -447,7 +558,15 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={BookOpen} label="Overdue" value={commitmentStats.overdue} accent="rose" alert={commitmentStats.overdue > 0} />
           <ObserverStatCard icon={BookOpen} label="Upcoming" value={commitmentStats.upcoming} accent="emerald" />
         </ObserverStatGrid>
-        <ObserverSection title="All Commitments">
+        <ObserverSection title="Commitment Diary">
+          <div className="space-y-2 mb-3">
+            <ObserverPeriodTabs period={commitmentPeriod} onPeriodChange={setCommitmentPeriod} />
+            <ObserverSupervisorSelect
+              supervisors={rawSchoolSupervisors}
+              value={commitmentSupervisorId}
+              onChange={setCommitmentSupervisorId}
+            />
+          </div>
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
           {filteredCommitments.length === 0 ? (
             <ObserverEmptyState icon={BookOpen} title="No commitments found" />
@@ -471,7 +590,12 @@ export default function ObserverModulePage() {
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -489,20 +613,30 @@ export default function ObserverModulePage() {
           {filteredTenders.length === 0 ? (
             <ObserverEmptyState icon={Gavel} title="No tenders found" />
           ) : (
-            filteredTenders.map((t) => (
-              <ObserverListRow
-                key={t.id}
-                title={t.bidNo || t.department || "Tender"}
-                subtitle={`${t.department || "—"} · Due ${formatDate(t.endDate || "")}`}
-                badge={t.status || "—"}
-                badgeTone="blue"
-                onClick={() => openDetail(t.bidNo || "Tender", buildTenderDetails(t))}
-              />
-            ))
+            filteredTenders.map((t) => {
+              const typeBadge = getTenderTypeBadge(t);
+              return (
+                <ObserverListRow
+                  key={t.id}
+                  title={t.bidNo || "Tender"}
+                  subtitle={`Pre-bid ${formatDateTime(t.preBidAt)} · End ${formatDate(t.endDate || "")}`}
+                  value={t.quantity ? String(t.quantity) : undefined}
+                  valueTone="green"
+                  badge={typeBadge.label}
+                  badgeTone={typeBadge.tone}
+                  onClick={() => openDetail(t.bidNo || "Tender", buildTenderDetails(t))}
+                />
+              );
+            })
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -522,17 +656,24 @@ export default function ObserverModulePage() {
             filteredContracts.map((c) => (
               <ObserverListRow
                 key={c.id}
-                title={c.contractNo || c.companyName || "Contract"}
-                subtitle={`${c.officeName || "—"} · Until ${formatDate(c.toDate || "")}`}
+                title={resolveGemContractNoLabel(c) || c.contractNo || "Contract"}
+                subtitle={`${contractWorksite(c)} · ${formatDate(c.fromDate || "")} – ${formatDate(c.toDate || "")}`}
                 badge={c.status || "—"}
                 badgeTone="slate"
-                onClick={() => openDetail(c.contractNo || "Contract", buildContractDetails(c))}
+                onClick={() =>
+                  openDetail(resolveGemContractNoLabel(c) || c.contractNo || "Contract", buildContractDetails(c))
+                }
               />
             ))
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -567,14 +708,19 @@ export default function ObserverModulePage() {
                   subtitle={`${r.clientName || r.ownerType || "—"} · Exp ${formatDate(r.expiresOn || r.expiryDate || "")}`}
                   badge={badge.label}
                   badgeTone={badge.tone}
-                  onClick={() => openDetail(r.title || r.subType || "Item", buildRenewalDetails(r))}
+                  onClick={() => openRenewalDetail(r.title || r.subType || "Item", r)}
                 />
               );
             })
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -589,24 +735,34 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={Receipt} label="Trek" value={formatInr(expenseStats.trek)} accent="emerald" />
           <ObserverStatCard icon={Receipt} label="Misc" value={formatInr(expenseStats.miscellaneous)} accent="slate" />
         </ObserverStatGrid>
-        <ObserverSection title={`School Expenses · ${monthLabel}`}>
+        <ObserverSection title={`Expenses · ${monthLabel}`}>
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
           {expenseRows.length === 0 ? (
             <ObserverEmptyState icon={Receipt} title="No expenses this month" />
           ) : (
-            expenseRows.map((row) => (
+            expenseRows.map(({ row, id, monthTotal }) => (
               <ObserverListRow
-                key={row.id}
-                title={row.name}
-                subtitle={row.block}
-                value={formatInr(row.total)}
-                onClick={() => openDetail(row.name, buildExpenseDetails(row.school, selectedMonth))}
+                key={id}
+                title={row.date ? formatExpenseDate(row.date) : row.type}
+                subtitle={`${row.type} · ${row.district || "—"} · ${row.block}`}
+                value={formatInr(row.amount)}
+                onClick={() =>
+                  openDetail(
+                    `${row.type} · ${row.block}`,
+                    buildExpenseRecordDetails(row, monthTotal),
+                  )
+                }
               />
             ))
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );
@@ -631,16 +787,21 @@ export default function ObserverModulePage() {
                 key={row.id}
                 title={row.name}
                 subtitle={row.school}
-                value={formatInr(row.pay)}
                 badge={row.status}
                 badgeTone={row.status === "Paid" ? "green" : row.status === "Hold" ? "amber" : "red"}
+                value={formatInr(row.pay)}
                 onClick={() => openDetail(row.name, buildPartnerDetails(row.partner, selectedMonth))}
               />
             ))
           )}
         </ObserverSection>
         {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+          <ObserverDetailSheet
+            title={detail.title}
+            fields={detail.fields}
+            documents={detail.documents}
+            onClose={() => setDetail(null)}
+          />
         )}
       </div>
     );

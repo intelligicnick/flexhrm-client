@@ -33,7 +33,7 @@ export default function ObserverMapPage() {
         layoutRevision={`observer-mobile-${isFullscreen ? "fs" : "std"}`}
         variant="embedded"
         mapHeightClass={
-          isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-16rem)] min-h-[320px]"
+          isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-14rem)] min-h-[340px]"
         }
         isFullscreen={isFullscreen}
         onToggleFullscreen={() => setIsFullscreen((v) => !v)}
@@ -49,5 +49,11 @@ export default function ObserverMapPage() {
     );
   }
 
-  return <div className="pb-2">{mapPanel}</div>;
+  return (
+    <div className="pb-2 px-1">
+      <div className="rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-sm">
+        {mapPanel}
+      </div>
+    </div>
+  );
 }

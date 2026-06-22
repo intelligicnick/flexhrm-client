@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Home, Map, LayoutGrid, LogOut, Eye, Bell } from "lucide-react";
+import { Home, Map, LayoutGrid, LogOut, Eye, Bell, Search } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import ObserverMonthPicker from "./ObserverMonthPicker";
@@ -26,15 +26,26 @@ function getPageTitle(pathname: string): string {
   return "Observer Admin";
 }
 
+function formatGreetingName(sessionUser?: string | null, profile?: { name?: string; fullName?: string } | null): string {
+  const fromProfile = profile?.name?.trim() || profile?.fullName?.trim();
+  if (fromProfile) return fromProfile;
+  const raw = sessionUser?.trim();
+  if (!raw) return "Admin";
+  if (raw.toLowerCase() === "admin") return "Admin";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
 function ObserverLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isLoggedIn, authBootstrapping, sessionUser, handleLogout } = useHRMS();
+  const { isLoggedIn, authBootstrapping, sessionUser, adminProfileInfo, handleLogout } = useHRMS();
   const { alertCount, adminNotificationUnreadCount } = useObserverStats();
+  const [searchOpen, setSearchOpen] = React.useState(false);
 
   const pageTitle = useMemo(() => getPageTitle(location.pathname), [location.pathname]);
   const isMapPage = location.pathname.startsWith("/observer/map");
   const showNav = !location.pathname.includes("/login");
+  const greetingName = formatGreetingName(sessionUser, adminProfileInfo);
 
   const logout = async () => {
     try {
@@ -68,8 +79,8 @@ function ObserverLayoutInner() {
   return (
     <div className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
       <header className="sticky top-0 z-30 safe-area-top">
-        <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-4 shadow-lg">
-          <div className="flex items-center justify-between">
+        <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-3 shadow-lg">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <Eye size={12} className="text-orange-300/80" />
@@ -77,40 +88,57 @@ function ObserverLayoutInner() {
                   Observer Admin
                 </p>
               </div>
-              <h1 className="text-base font-black text-white truncate">{pageTitle}</h1>
-              <p className="text-[11px] text-slate-300 mt-0.5 truncate">{sessionUser || "Admin"}</p>
-              {!isMapPage && <ObserverMonthPicker />}
+              <p className="text-lg font-black text-white mt-1 truncate">
+                Hi, {greetingName}
+              </p>
+              <p className="text-[11px] font-semibold text-slate-300 mt-0.5 truncate">{pageTitle}</p>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <Link
-                to="/observer/notifications"
-                className="relative p-2 text-white/80 hover:text-white cursor-pointer"
-                title="Notifications"
-              >
-                <Bell size={20} />
-                {adminNotificationUnreadCount > 0 && (
-                  <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
-                    {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
-                  </span>
+
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              {!isMapPage && (
+                <div className="w-[148px]">
+                  <ObserverMonthPicker compact />
+                </div>
+              )}
+              <div className="flex items-center gap-0.5">
+                {!isMapPage && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchOpen(true)}
+                    className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                    title="Search"
+                    aria-label="Open search"
+                  >
+                    <Search size={20} />
+                  </button>
                 )}
-              </Link>
-              <button
-                type="button"
-                onClick={logout}
-                className="p-2 text-white/80 hover:text-white cursor-pointer"
-                title="Logout"
-              >
-                <LogOut size={20} />
-              </button>
+                <Link
+                  to="/observer/notifications"
+                  className="relative p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                  title="Notifications"
+                >
+                  <Bell size={20} />
+                  {adminNotificationUnreadCount > 0 && (
+                    <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                      {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
+                    </span>
+                  )}
+                </Link>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                  title="Logout"
+                >
+                  <LogOut size={20} />
+                </button>
+              </div>
             </div>
           </div>
-          {!isMapPage && (
-            <div className="mt-3">
-              <ObserverUniversalSearch />
-            </div>
-          )}
         </div>
       </header>
+
+      <ObserverUniversalSearch open={searchOpen} onOpenChange={setSearchOpen} />
 
       <main className={`flex-1 ${isMapPage ? "px-0 pt-0" : "px-4 pt-4"} ${showNav ? "pb-24" : "pb-4"}`}>
         <Outlet />

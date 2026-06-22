@@ -209,10 +209,18 @@ export default function SupervisorMapPanel({
       scrollWheelZoom: false,
     });
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
-    }).addTo(map);
+    L.tileLayer(
+      embedded
+        ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        attribution: embedded
+          ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+        subdomains: embedded ? "abcd" : "abc",
+      },
+    ).addTo(map);
 
     pathsLayerRef.current = L.layerGroup().addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
@@ -249,7 +257,7 @@ export default function SupervisorMapPanel({
       pathsLayerRef.current = null;
       markersLayerRef.current = null;
     };
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -481,18 +489,29 @@ export default function SupervisorMapPanel({
       )}
 
       <div className={`relative ${embedded ? "px-1" : ""}`}>
+        {embedded && (
+          <div className="pointer-events-none absolute inset-x-2 top-2 z-[401] flex justify-center">
+            <span className="rounded-full bg-gradient-to-r from-[#0C1E4A] to-[#1a3568] px-3 py-1 text-[10px] font-bold text-white shadow-lg border border-white/10">
+              Live Supervisor Map
+            </span>
+          </div>
+        )}
         <div
           ref={mapContainerRef}
           className={`${resolvedMapHeight} w-full rounded-xl overflow-hidden border z-0 transition ${
-            mapWheelActive
-              ? "border-[#ff791a]/50 ring-2 ring-[#ff791a]/20"
-              : "border-slate-200"
+            embedded
+              ? mapWheelActive
+                ? "border-[#ff791a] ring-2 ring-[#ff791a]/30 shadow-lg shadow-orange-200/40"
+                : "border-slate-300 shadow-md"
+              : mapWheelActive
+                ? "border-[#ff791a]/50 ring-2 ring-[#ff791a]/20"
+                : "border-slate-200"
           }`}
           aria-label="Supervisor traversed paths map"
         />
         {!mapWheelActive && (
-          <p className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/75 px-3 py-1 text-[10px] font-semibold text-white shadow-sm">
-            Click map to zoom with scroll wheel
+          <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/80 px-3 py-1.5 text-[10px] font-semibold text-white shadow-lg backdrop-blur-sm">
+            Tap map to pan & zoom
           </p>
         )}
       </div>
