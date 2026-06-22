@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.core.content.ContextCompat;
@@ -26,6 +27,26 @@ public final class NativeGpsHelper {
   }
 
   private NativeGpsHelper() {}
+
+  public static boolean isLocationServicesEnabled(Context context) {
+    LocationManager manager = locationManager(context);
+    if (manager == null) {
+      return false;
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      return manager.isLocationEnabled();
+    }
+    try {
+      return manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+          || manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+    } catch (Exception ignored) {
+      return false;
+    }
+  }
+
+  public static boolean isLocationReady(Context context) {
+    return hasLocationPermission(context) && isLocationServicesEnabled(context);
+  }
 
   @SuppressLint("MissingPermission")
   public static void warmup(Context context) {

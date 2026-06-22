@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -56,7 +57,8 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmSupervisor";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.5.9";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.6.0";
+  private static final long SECURITY_RECHECK_MS = 5 * 60 * 1000L;
   private static final String BUNDLED_LOGIN_URL =
       "https://appassets.androidplatform.net/supervisor/login";
   private static final String BUNDLED_PORTAL_URL =
@@ -68,7 +70,9 @@ public class MainActivity extends AppCompatActivity {
   private ProgressBar progressBar;
   private LinearLayout errorPanel;
   private LinearLayout securityCheckPanel;
+  private LinearLayout locationGatePanel;
   private TextView errorMessage;
+  private TextView locationGateMessage;
   private WebViewAssetLoader assetLoader;
   private ValueCallback<Uri[]> filePathCallback;
   private PermissionRequest pendingWebPermissionRequest;
@@ -77,6 +81,8 @@ public class MainActivity extends AppCompatActivity {
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
   private boolean useBundledFallback;
+  private boolean securityCheckPassed;
+  private long lastSecurityPassAt;
   private boolean pendingNativeCameraAfterPermission;
   private File pendingCaptureFile;
   private Uri pendingCaptureUri;
@@ -128,10 +134,16 @@ public class MainActivity extends AppCompatActivity {
     progressBar = findViewById(R.id.progressBar);
     errorPanel = findViewById(R.id.errorPanel);
     securityCheckPanel = findViewById(R.id.securityCheckPanel);
+    locationGatePanel = findViewById(R.id.locationGatePanel);
     errorMessage = findViewById(R.id.errorMessage);
+    locationGateMessage = findViewById(R.id.locationGateMessage);
     Button retryButton = findViewById(R.id.retryButton);
+    Button locationEnableButton = findViewById(R.id.locationEnableButton);
+    Button locationRetryButton = findViewById(R.id.locationRetryButton);
 
     retryButton.setOnClickListener(v -> runSecurityCheck());
+    locationEnableButton.setOnClickListener(v -> onLocationGateAction());
+    locationRetryButton.setOnClickListener(v -> ensureLocationReady());
     webView.setVisibility(View.GONE);
 
     assetLoader =
@@ -141,6 +153,7 @@ public class MainActivity extends AppCompatActivity {
             .build();
 
     configureWebView();
+    preloadBundledPortal();
     requestStartupPermissions();
 
     getOnBackPressedDispatcher()
@@ -163,10 +176,22 @@ public class MainActivity extends AppCompatActivity {
   @Override
   protected void onResume() {
     super.onResume();
+    if (securityCheckPassed && locationGatePanel.getVisibility() == View.VISIBLE) {
+      ensureLocationReady();
+      return;
+    }
+    if (securityCheckPassed
+        && portalLoaded
+        && System.currentTimeMillis() - lastSecurityPassAt < SECURITY_RECHECK_MS) {
+      openPortal();
+      return;
+    }
     runSecurityCheck();
   }
 
   private void runSecurityCheck() {
+    securityCheckPassed = false;
+    hideLocationGate();
     if (!isOnline()) {
       List<String> cachedPolicy = BlockedAppsPolicyCache.load(this);
       if (cachedPolicy.isEmpty()) {
@@ -228,7 +253,9 @@ public class MainActivity extends AppCompatActivity {
         () -> {
           securityCheckPanel.setVisibility(View.GONE);
           if (detected.isEmpty()) {
-            openPortal();
+            securityCheckPassed = true;
+            lastSecurityPassAt = System.currentTimeMillis();
+            ensureLocationReady();
           } else {
             portalLoaded = false;
             webView.setVisibility(View.GONE);
@@ -306,7 +333,101 @@ public class MainActivity extends AppCompatActivity {
     return Math.round(value * getResources().getDisplayMetrics().density);
   }
 
+  private void ensureLocationReady() {
+    if (!securityCheckPassed) {
+      return;
+    }
+
+    if (NativeGpsHelper.isLocationReady(this)) {
+      hideLocationGate();
+      NativeGpsHelper.warmup(this);
+      openPortal();
+      return;
+    }
+
+    if (!hasLocationPermission()) {
+      showLocationGate(getString(R.string.location_permission_required));
+      return;
+    }
+
+    showLocationGate(getString(R.string.location_services_required));
+  }
+
+  private void showLocationGate(@NonNull String message) {
+    securityCheckPanel.setVisibility(View.GONE);
+    errorPanel.setVisibility(View.GONE);
+    webView.setVisibility(View.GONE);
+    locationGateMessage.setText(message);
+    locationGatePanel.setVisibility(View.VISIBLE);
+  }
+
+  private void hideLocationGate() {
+    if (locationGatePanel != null) {
+      locationGatePanel.setVisibility(View.GONE);
+    }
+  }
+
+  private void onLocationGateAction() {
+    if (!hasLocationPermission()) {
+      if (shouldShowLocationPermissionSettings()) {
+        openAppSettings();
+      } else {
+        requestStartupPermissions();
+      }
+      return;
+    }
+
+    startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+  }
+
+  private boolean shouldShowLocationPermissionSettings() {
+    if (hasLocationPermission()) {
+      return false;
+    }
+    boolean fineDenied =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED;
+    boolean coarseDenied =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED;
+    if (!fineDenied && !coarseDenied) {
+      return false;
+    }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+      return false;
+    }
+    boolean fineRationale =
+        shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION);
+    boolean coarseRationale =
+        shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION);
+    return !fineRationale && !coarseRationale;
+  }
+
+  private void openAppSettings() {
+    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+    intent.setData(Uri.parse("package:" + getPackageName()));
+    startActivity(intent);
+  }
+
+  private void preloadBundledPortal() {
+    if (portalLoaded || webView == null) {
+      return;
+    }
+    portalLoaded = true;
+    String sessionJson = SupervisorSessionCache.loadJson(this);
+    if (sessionJson != null && !sessionJson.isEmpty()) {
+      webView.loadUrl(BUNDLED_PORTAL_URL);
+    } else {
+      webView.loadUrl(BUNDLED_LOGIN_URL);
+    }
+  }
+
   private void openPortal() {
+    if (!NativeGpsHelper.isLocationReady(this)) {
+      ensureLocationReady();
+      return;
+    }
+
     securityCheckPanel.setVisibility(View.GONE);
     if (portalLoaded) {
       webView.setVisibility(View.VISIBLE);
@@ -519,8 +640,8 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void onStartupPermissionsResult() {
-    Log.d(TAG, "Startup permissions granted");
-    NativeGpsHelper.warmup(this);
+    Log.d(TAG, "Startup permissions result");
+    ensureLocationReady();
   }
 
   private void requestStartupPermissions() {
@@ -533,8 +654,6 @@ public class MainActivity extends AppCompatActivity {
     }
     if (!needed.isEmpty()) {
       startupPermissionLauncher.launch(needed.toArray(new String[0]));
-    } else {
-      NativeGpsHelper.warmup(this);
     }
   }
 
@@ -688,11 +807,11 @@ public class MainActivity extends AppCompatActivity {
   }
 
   private void loadPortal() {
-    if (!isOnline()) {
-      showError(getString(R.string.error_no_internet));
+    errorPanel.setVisibility(View.GONE);
+    if (portalLoaded) {
       return;
     }
-    errorPanel.setVisibility(View.GONE);
+    portalLoaded = true;
     String sessionJson = SupervisorSessionCache.loadJson(this);
     if (sessionJson != null && !sessionJson.isEmpty()) {
       webView.loadUrl(BUNDLED_PORTAL_URL);
@@ -715,6 +834,7 @@ public class MainActivity extends AppCompatActivity {
   private void showError(@NonNull String message) {
     progressBar.setVisibility(View.GONE);
     securityCheckPanel.setVisibility(View.GONE);
+    hideLocationGate();
     webView.setVisibility(View.GONE);
     errorMessage.setText(message);
     errorPanel.setVisibility(View.VISIBLE);

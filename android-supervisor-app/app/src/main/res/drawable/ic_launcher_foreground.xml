@@ -4,10 +4,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,24c-16.5,0 -30,13.5 -30,30s13.5,30 30,30 30,-13.5 30,-30 -13.5,-30 -30,-30z" />
+    <!-- FlexHRM "FH" mark — matches web favicon branding -->
     <path
         android:fillColor="#FF791A"
-        android:pathData="M54,34 L68,52 L60,52 L60,74 L48,74 L48,52 L40,52 Z" />
+        android:pathData="M30,34 L30,74 L34,74 L34,56 L48,56 L48,52 L34,52 L34,38 L52,38 L52,34 Z" />
+    <path
+        android:fillColor="#FF791A"
+        android:pathData="M56,34 L56,74 L60,74 L60,56 L74,56 L74,74 L78,74 L78,34 L74,34 L74,52 L60,52 L60,34 Z" />
 </vector>

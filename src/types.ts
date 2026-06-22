@@ -124,6 +124,12 @@ export interface PendingEmployeeDocument {
   fileBase64?: string;
 }
 
+export interface PendingEmployeePhoto {
+  employeeId: string;
+  photoBase64?: string;
+  hasPhoto?: boolean;
+}
+
 export interface EmployeeChangeRequest {
   id: string;
   submittedBy: string;
@@ -137,6 +143,7 @@ export interface EmployeeChangeRequest {
   fieldChangeCount: number;
   source?: "admin_bulk" | "employee_self_service";
   pendingDocuments?: PendingEmployeeDocument[];
+  pendingPhoto?: PendingEmployeePhoto;
   createdAt?: string;
   updatedAt?: string;
 }

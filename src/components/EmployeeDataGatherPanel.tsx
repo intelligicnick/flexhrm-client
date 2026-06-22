@@ -18,7 +18,7 @@ import {
   type DataGatherLink,
   type DataGatherSummary,
 } from "../lib/employee-data-gather";
-import { EMPLOYEE_FIELD_LABELS } from "../lib/employee-data-gather-fields";
+import { EMPLOYEE_FIELD_LABELS, PASSPORT_PHOTO_LABEL } from "../lib/employee-data-gather-fields";
 
 interface EmployeeDataGatherPanelProps {
   employeeId: string;
@@ -143,10 +143,10 @@ export default function EmployeeDataGatherPanel({
           </p>
         ) : !summary.hasWork ? (
           <p className="mt-2 text-sm text-emerald-700">
-            All tracked profile fields and standard documents are complete.
+            All tracked profile fields, standard documents, and ID photo are complete.
           </p>
         ) : (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-white bg-white p-3 shadow-xs">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Blank Fields
@@ -178,6 +178,17 @@ export default function EmployeeDataGatherPanel({
                 ))}
               </ul>
             </div>
+            <div className="rounded-lg border border-white bg-white p-3 shadow-xs">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                ID Card Photo
+              </p>
+              <p className="mt-1 text-2xl font-extrabold text-slate-800">
+                {summary.missingPhoto ? 1 : 0}
+              </p>
+              <p className="mt-2 text-[11px] text-slate-600">
+                {summary.missingPhoto ? PASSPORT_PHOTO_LABEL : "Photo on file"}
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -189,9 +200,9 @@ export default function EmployeeDataGatherPanel({
               <h3 className="text-sm font-bold text-slate-900">Temporary Collection Link</h3>
               <p className="mt-1 max-w-xl text-xs text-slate-600">
                 Generate a secure one-time link and password for the employee to fill only blank
-                fields and upload missing documents. The link expires after 2 days if unused, and
-                becomes permanently inactive once the employee submits. Submitted data is posted
-                after administrator approval.
+                fields, upload missing documents, and add a passport photo for their ID card. The link
+                expires after 2 days if unused, and becomes permanently inactive once the employee
+                submits. Submitted data is posted after administrator approval.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

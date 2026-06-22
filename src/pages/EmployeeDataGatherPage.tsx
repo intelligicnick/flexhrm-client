@@ -3,9 +3,11 @@ import { useParams } from "react-router-dom";
 import {
   CheckCircle2,
   FileUp,
+  ImageIcon,
   KeyRound,
   Link2Off,
   Loader2,
+  Lock,
   ShieldCheck,
   Upload,
 } from "lucide-react";
@@ -13,6 +15,7 @@ import {
   clearGatherSession,
   fetchDataGatherForm,
   fetchDataGatherLinkStatus,
+  getDataGatherPhotoApiPath,
   loadGatherSession,
   saveGatherSession,
   submitDataGatherForm,
@@ -30,6 +33,7 @@ import {
   readPdfAsDataUrl,
 } from "../lib/image-compress";
 import { compressPdfDataUrl } from "../lib/pdf-process";
+import { CARD_PHOTO, prepareCardPhoto } from "../components/id-card";
 
 type Step = "loading" | "otp" | "form" | "success" | "dead";
 
@@ -102,6 +106,9 @@ export default function EmployeeDataGatherPage() {
   const [form, setForm] = useState<DataGatherForm | null>(null);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [docFiles, setDocFiles] = useState<Record<string, File | null>>({});
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
@@ -126,6 +133,8 @@ export default function EmployeeDataGatherPage() {
         setDocFiles(
           Object.fromEntries(payload.missingDocuments.map((label) => [label, null])),
         );
+        setPhotoPreview(null);
+        setExistingPhotoUrl(null);
         setStep("form");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load form.";
@@ -196,6 +205,62 @@ export default function EmployeeDataGatherPage() {
     };
   }, [token, loadForm, markLinkDead]);
 
+  useEffect(() => {
+    if (!form?.photo?.hasPhoto || !sessionToken || !token) {
+      setExistingPhotoUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setPhotoLoading(true);
+
+    void (async () => {
+      try {
+        const res = await fetch(getDataGatherPhotoApiPath(token), {
+          headers: { "X-Gather-Session": sessionToken },
+        });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setExistingPhotoUrl(objectUrl);
+      } catch {
+        if (!cancelled) setExistingPhotoUrl(null);
+      } finally {
+        if (!cancelled) setPhotoLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [form?.photo?.hasPhoto, sessionToken, token]);
+
+  const handlePhotoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!isImageFile(file)) {
+      setError("Please upload a portrait image (JPEG or PNG).");
+      return;
+    }
+    if (file.size > CARD_PHOTO.maxFileSizeMb * 1024 * 1024) {
+      setError(`Photo must be smaller than ${CARD_PHOTO.maxFileSizeMb} MB.`);
+      return;
+    }
+
+    try {
+      const dataUrl = await prepareCardPhoto(file);
+      setPhotoPreview(dataUrl);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to read the selected photo.");
+    }
+  };
+
   const handleVerifyOtp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!otp.trim()) return;
@@ -234,6 +299,9 @@ export default function EmployeeDataGatherPage() {
     [docFiles],
   );
 
+  const hasPhotoSubmission = Boolean(photoPreview);
+  const showPhotoSection = Boolean(form?.photo?.hasPhoto || form?.photo?.canUpload);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!sessionToken || !form) return;
@@ -259,6 +327,7 @@ export default function EmployeeDataGatherPage() {
         sessionToken,
         fieldUpdates,
         documents,
+        photoPreview || undefined,
       );
       clearGatherSession(token);
       setSuccessMessage(result.message);
@@ -368,6 +437,78 @@ export default function EmployeeDataGatherPage() {
                 </p>
               </div>
 
+              {showPhotoSection && form.photo && (
+                <section className="space-y-3">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                    ID Card Photo
+                  </h2>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-3">
+                    <p className="text-sm font-semibold text-slate-800">{form.photo.label}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Passport-size portrait for your employee ID card
+                    </p>
+
+                    {form.photo.hasPhoto ? (
+                      <div className="mt-3 flex items-start gap-3">
+                        <div className="relative h-28 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xs">
+                          {photoLoading ? (
+                            <div className="flex h-full items-center justify-center text-slate-400">
+                              <Loader2 size={18} className="animate-spin" />
+                            </div>
+                          ) : existingPhotoUrl ? (
+                            <img
+                              src={existingPhotoUrl}
+                              alt="Current ID card photo"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-slate-300">
+                              <ImageIcon size={24} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-[11px] font-medium text-emerald-800">
+                          <Lock size={12} />
+                          Photo already on file — cannot be changed via this link
+                        </div>
+                      </div>
+                    ) : form.photo.canUpload ? (
+                      <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 transition hover:border-[#ff791a]/40 hover:bg-orange-50/30">
+                        <div className="flex items-center gap-3">
+                          {photoPreview ? (
+                            <img
+                              src={photoPreview}
+                              alt="Selected passport photo preview"
+                              className="h-16 w-14 rounded-lg border border-slate-200 object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-16 w-14 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-400">
+                              <ImageIcon size={20} />
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-[11px] text-slate-500">
+                              {photoPreview
+                                ? "Photo selected — tap to change"
+                                : `Tap to upload portrait photo (min ${CARD_PHOTO.minWidth}×${CARD_PHOTO.minHeight} px, up to ${CARD_PHOTO.maxFileSizeMb} MB)`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#ff791a] shadow-xs">
+                          {photoPreview ? <FileUp size={16} /> : <Upload size={16} />}
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => void handlePhotoChange(e)}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                </section>
+              )}
+
               {form.fields.length > 0 && (
                 <section className="space-y-3">
                   <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -457,7 +598,10 @@ export default function EmployeeDataGatherPage() {
 
               <button
                 type="submit"
-                disabled={loading || (filledFieldCount === 0 && uploadedDocCount === 0)}
+                disabled={
+                  loading ||
+                  (filledFieldCount === 0 && uploadedDocCount === 0 && !hasPhotoSubmission)
+                }
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#ff791a] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#e56a12] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}

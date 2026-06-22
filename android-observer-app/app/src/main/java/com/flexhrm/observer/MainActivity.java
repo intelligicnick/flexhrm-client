@@ -111,6 +111,9 @@ public class MainActivity extends AppCompatActivity {
       settings.setSafeBrowsingEnabled(true);
     }
 
+    webView.addJavascriptInterface(
+        new FlexHrmAndroidBridge(this, webView), "FlexHrmAndroid");
+
     CookieManager cookieManager = CookieManager.getInstance();
     cookieManager.setAcceptCookie(true);
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

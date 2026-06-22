@@ -4,12 +4,10 @@
  */
 
 import React, { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
 import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
 import "./index.css";
 import NotFoundPage from "./pages/NotFoundPage";
-import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
-import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 
@@ -17,6 +15,8 @@ const AdminPortal = lazy(() => import("./AdminPortal"));
 const EmployeeVerifyPage = lazy(() => import("./pages/EmployeeVerifyPage"));
 const EmployeeDataGatherPage = lazy(() => import("./pages/EmployeeDataGatherPage"));
 const ObserverApp = lazy(() => import("./pages/observer/ObserverApp"));
+const SupervisorLoginPage = lazy(() => import("./pages/supervisor/SupervisorLoginPage"));
+const SupervisorLayout = lazy(() => import("./pages/supervisor/SupervisorLayout"));
 const SupervisorHomePage = lazy(() => import("./pages/supervisor/SupervisorHomePage"));
 const SupervisorVisitPage = lazy(() => import("./pages/supervisor/SupervisorVisitPage"));
 const SupervisorCalendarPage = lazy(() => import("./pages/supervisor/SupervisorCalendarPage"));
@@ -72,8 +72,20 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <BrowserRouter>
-        <GlobalHorizontalScroll />
-        <Routes>
+        <AppRoutes />
+      </BrowserRouter>
+    </AppErrorBoundary>
+  );
+}
+
+function AppRoutes() {
+  const location = useLocation();
+  const isSupervisor = location.pathname.startsWith("/supervisor");
+
+  return (
+    <>
+      {!isSupervisor && <GlobalHorizontalScroll />}
+      <Routes>
         <Route
           path="/verify/:idNo/:verifyToken"
           element={
@@ -107,7 +119,14 @@ export default function App() {
             </Suspense>
           }
         />
-        <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
+        <Route
+          path="/supervisor/login"
+          element={
+            <Suspense fallback={<SupervisorRouteFallback />}>
+              <SupervisorLoginPage />
+            </Suspense>
+          }
+        />
         <Route
           path="/observer/*"
           element={
@@ -116,7 +135,14 @@ export default function App() {
             </Suspense>
           }
         />
-        <Route path="/supervisor" element={<SupervisorLayout />}>
+        <Route
+          path="/supervisor"
+          element={
+            <Suspense fallback={<SupervisorRouteFallback />}>
+              <SupervisorLayout />
+            </Suspense>
+          }
+        >
           <Route
             index
             element={
@@ -177,7 +203,6 @@ export default function App() {
           }
         />
         </Routes>
-      </BrowserRouter>
-    </AppErrorBoundary>
+    </>
   );
 }

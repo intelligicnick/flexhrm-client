@@ -1,6 +1,7 @@
 export interface DataGatherSummary {
   blankFields: string[];
   missingDocuments: string[];
+  missingPhoto: boolean;
   hasWork: boolean;
 }
 
@@ -27,12 +28,19 @@ export interface DataGatherFormField {
   options?: string[];
 }
 
+export interface DataGatherPhotoField {
+  label: string;
+  hasPhoto: boolean;
+  canUpload: boolean;
+}
+
 export interface DataGatherForm {
   employeeName: string;
   employeeCode: string;
   expiresAt: string;
   fields: DataGatherFormField[];
   missingDocuments: string[];
+  photo?: DataGatherPhotoField;
   sessionExpiresAt?: string;
 }
 
@@ -185,6 +193,10 @@ export async function fetchDataGatherForm(
   return res.json();
 }
 
+export function getDataGatherPhotoApiPath(token: string): string {
+  return `/api/employees/data-gather/${encodeURIComponent(token)}/photo`;
+}
+
 export interface SubmitDataGatherDocumentPayload {
   label: string;
   fileBase64: string;
@@ -199,6 +211,7 @@ export async function submitDataGatherForm(
   sessionToken: string,
   fieldUpdates: Record<string, string>,
   documents: SubmitDataGatherDocumentPayload[],
+  photo?: string,
 ): Promise<{ changeRequestId: string; message: string }> {
   const res = await fetch(
     `/api/employees/data-gather/${encodeURIComponent(token)}/submit`,
@@ -208,7 +221,7 @@ export async function submitDataGatherForm(
         "Content-Type": "application/json",
         [SESSION_HEADER]: sessionToken,
       },
-      body: JSON.stringify({ fieldUpdates, documents }),
+      body: JSON.stringify({ fieldUpdates, documents, photo }),
     },
   );
   if (!res.ok) {

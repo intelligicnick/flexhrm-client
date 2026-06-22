@@ -104,8 +104,8 @@ export async function ensureSupervisorSessionReady(): Promise<boolean> {
   const bridge = getNativeBridge();
   if (!bridge?.getSupervisorSession) return false;
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 16));
     if (restoreSupervisorSessionFromNative()) return true;
   }
   return false;

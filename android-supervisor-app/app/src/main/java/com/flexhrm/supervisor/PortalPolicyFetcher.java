@@ -51,7 +51,7 @@ public final class PortalPolicyFetcher {
     connection.setRequestProperty("Accept", "application/json");
     connection.setRequestProperty(
         "User-Agent",
-        "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 FlexHrmSupervisor/1.4");
+        "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 FlexHrmSupervisor/1.6");
 
     int code = connection.getResponseCode();
     InputStream stream =

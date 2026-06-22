@@ -1,5 +1,10 @@
 import { apiUrl } from "../../api";
-import { isObserverNativeClient } from "../../lib/observer-session";
+import { getObserverToken, isObserverNativeClient } from "../../lib/observer-session";
+import {
+  canUseObserverNativePdf,
+  openPdfViaNative,
+  sharePdfViaNative,
+} from "../../lib/observer-native-bridge";
 
 export type PdfActionStatus = "loading" | "ready" | "error";
 
@@ -47,9 +52,14 @@ export function resolvePdfFetchUrl(url: string): string {
 
 async function fetchPdfBlob(url: string): Promise<Blob> {
   const fetchUrl = resolvePdfFetchUrl(url);
+  const headers = new Headers({ Accept: "application/pdf,*/*" });
+  const token = getObserverToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
   const response = await fetch(fetchUrl, {
     credentials: "include",
     mode: "cors",
+    headers,
   });
   if (!response.ok) {
     throw new Error(`Could not load PDF (${response.status})`);
@@ -60,6 +70,11 @@ async function fetchPdfBlob(url: string): Promise<Blob> {
   }
   const type = blob.type?.includes("pdf") ? blob.type : "application/pdf";
   return blob.type === type ? blob : new Blob([blob], { type });
+}
+
+export async function fetchPdfArrayBuffer(url: string): Promise<ArrayBuffer> {
+  const blob = await fetchPdfBlob(url);
+  return blob.arrayBuffer();
 }
 
 export async function fetchPdfFile(url: string, title: string): Promise<File> {
@@ -85,15 +100,23 @@ export function canOpenPdfExternally(url: string): boolean {
 export async function viewPdfUrl(
   url: string,
   onStatus?: (status: PdfActionStatus, message?: string) => void,
-): Promise<string | null> {
+): Promise<ArrayBuffer | null> {
   if (!url?.trim()) return null;
   onStatus?.("loading", "Loading PDF…");
   try {
-    const blob = await fetchPdfBlob(url);
-    const objectUrl = URL.createObjectURL(blob);
+    const data = await fetchPdfArrayBuffer(url);
     onStatus?.("ready");
-    return objectUrl;
+    return data;
   } catch {
+    if (canUseObserverNativePdf()) {
+      try {
+        await openPdfViaNative(resolvePdfFetchUrl(url), sanitizeFilename(url));
+        onStatus?.("ready", "PDF opened in viewer app.");
+        return null;
+      } catch {
+        // fall through
+      }
+    }
     onStatus?.("error", "Could not load PDF in app");
     openPdfExternally(url);
     return null;
@@ -140,9 +163,23 @@ export async function sharePdfUrl(
   if (!url?.trim()) return;
   onStatus?.("loading", "Preparing PDF…");
 
+  const filename = sanitizeFilename(title);
+  const resolvedUrl = resolvePdfFetchUrl(url);
+
+  if (canUseObserverNativePdf()) {
+    try {
+      await sharePdfViaNative(resolvedUrl, title, filename);
+      onStatus?.("ready");
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not share PDF.";
+      onStatus?.("error", message);
+      return;
+    }
+  }
+
   try {
     const file = await fetchPdfFile(url, title);
-
     const shared = await sharePdfFile(file, title);
     if (shared) {
       onStatus?.("ready");

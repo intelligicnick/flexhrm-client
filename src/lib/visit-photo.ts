@@ -96,7 +96,7 @@ async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string
       headers: {
         Accept: "application/json",
         "Accept-Language": "en",
-        "User-Agent": "FlexHRM-Supervisor/1.5",
+        "User-Agent": "FlexHRM-Supervisor/1.6",
       },
     });
     if (!res.ok) return "";

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useOutletContext } from "react-router-dom";
-import { ArrowLeft, Camera, CheckCircle2, Loader2, MapPin, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, ImagePlus, Loader2, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SchoolWork, SCHOOL_MATERIAL_ITEMS, SchoolVisit } from "../../types";
 import { parseApiError } from "../../api";
 import {
@@ -23,7 +23,12 @@ import {
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
+import { resolvePhotoSrc } from "../../lib/media-url";
 import { SupervisorLoadingScreen } from "./SupervisorUI";
+
+function photoSrc(photo: StampedVisitPhoto) {
+  return resolvePhotoSrc(photo);
+}
 
 export default function SupervisorVisitPage() {
   const { schoolId } = useParams<{ schoolId: string }>();
@@ -156,6 +161,11 @@ export default function SupervisorVisitPage() {
     });
   };
 
+  const removePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setLightboxIndex(null);
+  };
+
   const handleLiveCapture = async () => {
     if (visitBlocked || !gpsReady) return;
     setCapturingPhoto(true);
@@ -249,7 +259,7 @@ export default function SupervisorVisitPage() {
     <div className="space-y-4 pb-28">
       {lightboxIndex !== null && photos[lightboxIndex] && (
         <SupervisorPhotoLightbox
-          src={visitPhotoSrc(photos[lightboxIndex])}
+          src={photoSrc(photos[lightboxIndex])}
           alt={photos[lightboxIndex].caption}
           caption={photos[lightboxIndex].locationLabel}
           onClose={() => setLightboxIndex(null)}
@@ -399,66 +409,101 @@ export default function SupervisorVisitPage() {
           )}
         </section>
 
-        <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
-          <h2 className="text-sm font-bold text-slate-800">{t("fieldPhotos")}</h2>
-          <p className="text-xs text-slate-500">{t("photoStampHint")}</p>
-
-          {photos.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">
-              {photos.map((photo, i) => (
-                <button
-                  key={`${photo.takenAt}-${i}`}
-                  type="button"
-                  onClick={() => setLightboxIndex(i)}
-                  className="relative rounded-xl overflow-hidden border border-slate-200 cursor-pointer text-left"
-                >
-                  <img
-                    src={visitPhotoSrc(photo)}
-                    alt={photo.caption}
-                    className="w-full aspect-[4/3] object-cover"
-                  />
-                  <span className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white">
-                    <Camera size={16} />
-                  </span>
-                  <p className="text-[10px] text-slate-600 px-2 py-1.5 line-clamp-2 bg-white">
-                    {photo.locationLabel}
-                  </p>
-                </button>
-              ))}
+        <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-orange-50 to-white px-4 py-3">
+            <div>
+              <h2 className="text-sm font-black text-slate-800">{t("fieldPhotos")}</h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">{t("photoStampHint")}</p>
             </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleLiveCapture}
-            disabled={capturingPhoto || visitBlocked || !gpsReady}
-            className="flex items-center justify-center gap-2 w-full py-3.5 border-2 border-dashed border-[#ff791a] rounded-xl bg-orange-50 text-[#ff791a] font-bold text-sm cursor-pointer disabled:opacity-50"
-          >
-            {capturingPhoto ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                {t("stampingPhoto")}
-              </>
-            ) : (
-              <>
-                <Camera size={20} />
-                {photos.length > 0 ? t("addAnotherPhoto") : t("takePhoto")}
-              </>
+            {photos.length > 0 && (
+              <span className="shrink-0 rounded-full bg-[#ff791a] px-2.5 py-1 text-[10px] font-black text-white">
+                {photos.length}
+              </span>
             )}
-          </button>
+          </div>
 
-          {!gpsReady && (
-            <p className="text-xs text-amber-700 font-medium">{t("gpsRequiredForPhoto")}</p>
-          )}
+          <div className="space-y-3 p-4">
+            {photos.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2.5">
+                {photos.map((photo, i) => (
+                  <div
+                    key={`${photo.takenAt}-${i}`}
+                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setLightboxIndex(i)}
+                      className="block w-full cursor-pointer text-left"
+                    >
+                      <img
+                        src={photoSrc(photo)}
+                        alt={photo.caption}
+                        className="w-full aspect-[4/3] object-cover"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8">
+                        <p className="text-[10px] font-semibold text-white line-clamp-2">{photo.caption}</p>
+                        <p className="text-[9px] text-orange-200 mt-0.5 line-clamp-1">{photo.locationLabel}</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(i)}
+                      className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-red-500 shadow-md cursor-pointer"
+                      aria-label={t("removePhoto")}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/80 px-4 py-8 text-center">
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-[#ff791a]">
+                  <Camera size={28} />
+                </div>
+                <p className="text-sm font-bold text-slate-700">{t("takePhoto")}</p>
+                <p className="mt-1 text-xs text-slate-500">{t("photoStampHint")}</p>
+              </div>
+            )}
 
-          {photos.length === 0 && (
-            <p className="text-xs text-red-600 font-medium">{t("addPhotoRequired")}</p>
-          )}
+            <button
+              type="button"
+              onClick={handleLiveCapture}
+              disabled={capturingPhoto || visitBlocked || !gpsReady}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#ff791a] to-[#ff981a] py-4 text-sm font-black text-white shadow-lg shadow-orange-200/60 cursor-pointer disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
+            >
+              {capturingPhoto ? (
+                <>
+                  <Loader2 size={20} className="animate-spin" />
+                  {t("stampingPhoto")}
+                </>
+              ) : (
+                <>
+                  {photos.length > 0 ? <ImagePlus size={20} /> : <Camera size={20} />}
+                  {photos.length > 0 ? t("addAnotherPhoto") : t("takePhoto")}
+                </>
+              )}
+            </button>
+
+            {!gpsReady && (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <MapPin size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                <p className="text-xs font-medium text-amber-800">{t("gpsRequiredForPhoto")}</p>
+              </div>
+            )}
+
+            {photos.length === 0 && gpsReady && (
+              <p className="text-center text-xs font-semibold text-red-600">{t("addPhotoRequired")}</p>
+            )}
+          </div>
         </section>
 
         {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-            {error}
+          <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 text-xs font-black">
+              !
+            </span>
+            <p className="flex-1">{error}</p>
           </div>
         )}
       </form>

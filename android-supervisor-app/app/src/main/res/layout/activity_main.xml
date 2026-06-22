@@ -46,6 +46,54 @@
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/locationGatePanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/surface_light"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/location_gate_title"
+            android:textColor="#0F172A"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/locationGateMessage"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:text="@string/location_gate_message"
+            android:textColor="#64748B"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/locationEnableButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:backgroundTint="@color/brand_orange"
+            android:text="@string/location_enable_action"
+            android:textColor="@color/white" />
+
+        <Button
+            android:id="@+id/locationRetryButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@android:color/transparent"
+            android:text="@string/location_check_again"
+            android:textColor="@color/brand_orange" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/errorPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"

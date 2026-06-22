@@ -32,7 +32,7 @@ function LoginForm() {
   const [deviceOtp, setDeviceOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [restoringSession, setRestoringSession] = useState(true);
+  const [restoringSession, setRestoringSession] = useState(false);
   const [needsDeviceOtp, setNeedsDeviceOtp] = useState(
     () => searchParams.get("reason") === "device_mismatch",
   );
@@ -58,10 +58,9 @@ function LoginForm() {
       restoreSupervisorSessionFromNative();
       await ensureSupervisorSessionReady();
       const token = getSupervisorToken();
-      if (!token) {
-        if (!cancelled) setRestoringSession(false);
-        return;
-      }
+      if (!token) return;
+
+      if (!cancelled) setRestoringSession(true);
       try {
         const res = await supervisorFetch("/api/auth/supervisor/me");
         if (cancelled) return;

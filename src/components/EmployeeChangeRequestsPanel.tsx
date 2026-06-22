@@ -16,6 +16,7 @@ import {
   Eye,
   Loader2,
   FileText,
+  ImageIcon,
 } from "lucide-react";
 import { EmployeeChangeRequest, PendingEmployeeDocument } from "../types";
 import { compressionPercent, formatFileSize } from "../lib/image-compress";
@@ -96,6 +97,85 @@ async function fetchPendingDocumentPreview(
     throw new Error(message);
   }
   return res.json();
+}
+
+async function fetchPendingPhotoPreview(
+  requestId: string,
+): Promise<{ photoBase64: string }> {
+  const res = await fetch(
+    `/api/employees/change-requests/${encodeURIComponent(requestId)}/pending-photo`,
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const message =
+      typeof err?.message === "string"
+        ? err.message
+        : Array.isArray(err?.message)
+          ? err.message.join(", ")
+          : "Failed to load photo preview.";
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+function PendingPhotoPreview({
+  requestId,
+}: {
+  requestId: string;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const data = await fetchPendingPhotoPreview(requestId);
+        if (cancelled || !data.photoBase64?.trim()) return;
+        objectUrl = base64ToBlobUrl(data.photoBase64, "image/jpeg");
+        setPreviewUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load photo.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [requestId]);
+
+  return (
+    <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2 text-[11px] text-blue-900">
+      <p className="font-semibold">Passport photo awaiting upload on approval</p>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="h-20 w-16 overflow-hidden rounded-md border border-blue-100 bg-white">
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-blue-400">
+              <Loader2 size={16} className="animate-spin" />
+            </div>
+          ) : previewUrl ? (
+            <img src={previewUrl} alt="Pending passport photo" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full items-center justify-center text-slate-300">
+              <ImageIcon size={18} />
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-600">Passport Photo (ID Card)</p>
+      </div>
+      {error && <p className="mt-2 text-[10px] font-medium text-rose-600">{error}</p>}
+    </div>
+  );
 }
 
 function PendingDocumentPreviewModal({
@@ -411,6 +491,7 @@ export default function EmployeeChangeRequestsPanel({
                     {req.employeeCount} employee(s) · {req.fieldChangeCount} changes
                     {(req.pendingDocuments?.length ?? 0) > 0 &&
                       ` · ${req.pendingDocuments!.length} document(s)`}
+                    {req.pendingPhoto?.hasPhoto && " · 1 photo"}
                   </span>
                   <span className="flex items-center gap-1 text-xs text-slate-500">
                     <User size={12} /> {req.submittedBy}
@@ -438,6 +519,9 @@ export default function EmployeeChangeRequestsPanel({
                         requestId={req.id}
                         documents={req.pendingDocuments!}
                       />
+                    )}
+                    {req.pendingPhoto?.hasPhoto && (
+                      <PendingPhotoPreview requestId={req.id} />
                     )}
                   </div>
                   {canReview && (

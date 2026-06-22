@@ -37,11 +37,17 @@ function saveCachedBlockedApps(apps: string[]): void {
 
 export default function SupervisorBlockedAppsGate({ children }: { children: React.ReactNode }) {
   const { t } = useSupervisorI18n();
-  const [phase, setPhase] = useState<GatePhase>("scanning");
-  const [detected, setDetected] = useState<DetectedBlockedApp[]>([]);
   const nativeApp = isFlexHrmNativeApp();
+  const [phase, setPhase] = useState<GatePhase>(nativeApp ? "clear" : "scanning");
+  const [detected, setDetected] = useState<DetectedBlockedApp[]>([]);
 
   const runScan = useCallback(async () => {
+    if (nativeApp) {
+      setDetected([]);
+      setPhase("clear");
+      return;
+    }
+
     setPhase("scanning");
     try {
       let blocked: string[] = [];
@@ -94,10 +100,11 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
   }, [nativeApp]);
 
   useEffect(() => {
-    void runScan();
-  }, [runScan]);
+    if (!nativeApp) void runScan();
+  }, [nativeApp, runScan]);
 
   useEffect(() => {
+    if (nativeApp) return;
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
         void runScan();
@@ -105,7 +112,7 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [runScan]);
+  }, [nativeApp, runScan]);
 
   if (phase === "scanning") {
     return (

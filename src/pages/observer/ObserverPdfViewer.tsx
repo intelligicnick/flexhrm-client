@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ArrowLeft, ExternalLink, Loader2, X } from "lucide-react";
 import { viewPdfUrl, openExternalUrl, canOpenPdfExternally, type PdfActionStatus } from "./observer-share";
+import { ObserverPdfCanvas } from "./ObserverPdfCanvas";
 
 export function ObserverPdfViewer({
   url,
@@ -11,13 +12,12 @@ export function ObserverPdfViewer({
   title: string;
   onClose: () => void;
 }) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [status, setStatus] = useState<PdfActionStatus>("loading");
   const [message, setMessage] = useState("Loading PDF…");
 
   useEffect(() => {
     let active = true;
-    let blobUrl: string | null = null;
 
     viewPdfUrl(url, (nextStatus, nextMessage) => {
       if (!active) return;
@@ -25,15 +25,11 @@ export function ObserverPdfViewer({
       if (nextMessage) setMessage(nextMessage);
     }).then((resolved) => {
       if (!active) return;
-      if (resolved) {
-        blobUrl = resolved;
-        setObjectUrl(resolved);
-      }
+      if (resolved) setPdfData(resolved);
     });
 
     return () => {
       active = false;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [url]);
 
@@ -83,17 +79,8 @@ export function ObserverPdfViewer({
             <p className="text-sm font-semibold">{message}</p>
           </div>
         )}
-        {objectUrl && (
-          <object
-            data={objectUrl}
-            type="application/pdf"
-            title={title}
-            className="w-full h-full border-0 bg-white"
-          >
-            <embed src={objectUrl} type="application/pdf" className="w-full h-full border-0 bg-white" />
-          </object>
-        )}
-        {status === "error" && !objectUrl && (
+        {pdfData && <ObserverPdfCanvas data={pdfData} />}
+        {status === "error" && !pdfData && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
             <p className="text-sm font-semibold text-white/80">{message}</p>
             {showExternal && (
@@ -106,6 +93,11 @@ export function ObserverPdfViewer({
                 Open in browser
               </button>
             )}
+          </div>
+        )}
+        {status === "ready" && !pdfData && message !== "Loading PDF…" && (
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+            <p className="text-sm font-semibold text-white/80">{message}</p>
           </div>
         )}
       </div>

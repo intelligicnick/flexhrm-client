@@ -275,6 +275,7 @@ const translations = {
     visitCooldownHint: "This school was visited recently. You can log the next visit in {days} day(s).",
     retryGps: "Retry GPS",
     addAnotherPhoto: "Add another photo",
+    removePhoto: "Remove photo",
     commitmentsThisMonth: "commitments this month",
   },
   hi: {
@@ -549,6 +550,7 @@ const translations = {
     visitCooldownHint: "इस स्कूल की हाल ही में विज़िट हुई है। अगली विज़िट {days} दिन में कर सकते हैं।",
     retryGps: "GPS पुनः प्रयास करें",
     addAnotherPhoto: "एक और फोटो जोड़ें",
+    removePhoto: "फोटो हटाएं",
     commitmentsThisMonth: "इस महीने की कमिटमेंट",
   },
 } as const;

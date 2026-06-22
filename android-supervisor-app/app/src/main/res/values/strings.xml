@@ -13,4 +13,10 @@
     <string name="blocked_apps_message_single">%1$s is installed on your device. Please remove it to proceed.</string>
     <string name="blocked_apps_uninstall">Uninstall now</string>
     <string name="blocked_apps_check_again">Check again</string>
+    <string name="location_gate_title">Turn on location</string>
+    <string name="location_gate_message">Flex HRM Field Team needs location turned on before you can use the app. Visit photos are stamped with GPS coordinates.</string>
+    <string name="location_permission_required">Allow location access for Flex HRM Field Team, then turn on device location.</string>
+    <string name="location_services_required">Turn on location (GPS) in your device settings to continue.</string>
+    <string name="location_enable_action">Enable location</string>
+    <string name="location_check_again">Check again</string>
 </resources>

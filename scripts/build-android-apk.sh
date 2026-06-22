@@ -27,7 +27,7 @@ fi
 ./gradlew assembleDebug
 
 APK_PATH="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"
-STAMPED_APK="${ROOT}/FlexHRM-FieldTeam-v1.5.apk"
+STAMPED_APK="${ROOT}/FlexHRM-FieldTeam-v1.6.apk"
 cp "$APK_PATH" "$STAMPED_APK"
 
 echo ""

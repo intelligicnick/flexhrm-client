@@ -83,3 +83,5 @@ export const REQUIRED_DOCUMENT_LABELS = [
   "Bank Statement",
   "Address Proof",
 ] as const;
+
+export const PASSPORT_PHOTO_LABEL = "Passport Photo (ID Card)";
