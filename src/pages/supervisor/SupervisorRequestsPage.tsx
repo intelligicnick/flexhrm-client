@@ -17,6 +17,7 @@ import { captureLivePhotoDataUrl } from "../../lib/live-camera";
 import {
   isBrowserPushEnabled,
   isNotificationSoundEnabled,
+  playNotificationSound,
   requestBrowserNotificationPermission,
   setBrowserPushEnabled,
   setNotificationSoundEnabled,
@@ -746,6 +747,7 @@ export default function SupervisorRequestsPage() {
                 const next = !soundOn;
                 setSoundOn(next);
                 setNotificationSoundEnabled(next);
+                if (next) playNotificationSound();
               }}
               className={`text-[10px] font-bold cursor-pointer ${soundOn ? "text-[#ff791a]" : "text-slate-400"}`}
             >

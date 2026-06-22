@@ -4833,10 +4833,10 @@ export function useHRMSApp() {
   };
 
   // Logout handler
-  const handleLogout = async () => {
+  const handleLogout = async (redirectTo?: string) => {
     setIsProfileOpen(false);
     setIsMobileProfileOpen(false);
-    await authHandleLogout();
+    await authHandleLogout(redirectTo);
   };
 
   // Save / Update a custom role

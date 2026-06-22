@@ -1,4 +1,5 @@
 import { getApiBase } from "./env";
+import { getObserverToken, isObserverNativeClient } from "./lib/observer-session";
 
 export function apiUrl(endpoint: string): string {
   const base = getApiBase();
@@ -18,6 +19,7 @@ function resolveFetchUrl(input: RequestInfo | URL): string {
 function isPublicAuthUrl(urlStr: string): boolean {
   return (
     urlStr.includes("/api/auth/login") ||
+    urlStr.includes("/api/auth/logout") ||
     urlStr.includes("/api/auth/captcha") ||
     urlStr.includes("/api/auth/me") ||
     urlStr.includes("/api/auth/quick-login") ||
@@ -95,6 +97,15 @@ export function setupFetchInterceptor(): void {
       credentials: isApiCall ? (init?.credentials ?? "include") : init?.credentials,
     };
 
+    if (isApiCall) {
+      const headers = new Headers(resolvedInit.headers || {});
+      const observerToken = getObserverToken();
+      if (observerToken && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${observerToken}`);
+      }
+      resolvedInit.headers = headers;
+    }
+
     let response: Response;
     try {
       response = await originalFetch(resolvedInput, resolvedInit);
@@ -109,7 +120,12 @@ export function setupFetchInterceptor(): void {
         localStorage.removeItem("hrms_username");
         localStorage.removeItem("hrms_role");
         localStorage.removeItem("hrms_locations");
-        window.location.reload();
+        localStorage.removeItem("hrms_observer_token");
+        if (isObserverNativeClient()) {
+          window.location.replace("/observer/login");
+        } else {
+          window.location.reload();
+        }
       }
     }
 

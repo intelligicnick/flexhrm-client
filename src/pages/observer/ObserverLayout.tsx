@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Home, Map, LayoutGrid, LogOut, Eye } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
@@ -22,6 +22,7 @@ function getPageTitle(pathname: string): string {
 }
 
 function ObserverLayoutInner() {
+  const navigate = useNavigate();
   const location = useLocation();
   const { isLoggedIn, authBootstrapping, sessionUser, handleLogout } = useHRMS();
   const { alertCount } = useObserverStats();
@@ -30,8 +31,11 @@ function ObserverLayoutInner() {
   const showNav = !location.pathname.includes("/login");
 
   const logout = async () => {
-    await handleLogout();
-    window.location.href = "/observer/login";
+    try {
+      await handleLogout("/observer/login");
+    } catch {
+      navigate("/observer/login", { replace: true });
+    }
   };
 
   if (authBootstrapping) {

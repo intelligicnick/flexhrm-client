@@ -4,6 +4,7 @@ import { SupervisorLang } from "../lib/supervisor-i18n";
 import {
   POLL_INTERVAL_MS,
   alertForNewNotifications,
+  primeNotificationAudio,
   requestBrowserNotificationPermission,
 } from "../lib/notification-alerts";
 
@@ -34,6 +35,17 @@ export function useNotificationPoller({
       return;
     }
     void requestBrowserNotificationPermission();
+    const prime = () => {
+      primeNotificationAudio();
+      window.removeEventListener("click", prime);
+      window.removeEventListener("touchstart", prime);
+    };
+    window.addEventListener("click", prime, { passive: true });
+    window.addEventListener("touchstart", prime, { passive: true });
+    return () => {
+      window.removeEventListener("click", prime);
+      window.removeEventListener("touchstart", prime);
+    };
   }, [enabled]);
 
   useEffect(() => {

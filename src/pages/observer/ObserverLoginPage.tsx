@@ -4,6 +4,7 @@ import PasswordInput from "../../components/PasswordInput";
 import LoginCaptcha from "../../components/auth/LoginCaptcha";
 import { useHRMS } from "../../context/HRMSContext";
 import { apiUrl, parseApiError } from "../../api";
+import { persistObserverToken } from "../../lib/observer-session";
 import { Eye } from "lucide-react";
 
 const inputClassName =
@@ -57,7 +58,10 @@ export default function ObserverLoginPage() {
       const res = await fetch(apiUrl("/api/auth/login"), {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-FlexHrm-Client": "observer",
+        },
         body: JSON.stringify({
           username: cleanUser,
           password: passwordInput,
@@ -69,6 +73,9 @@ export default function ObserverLoginPage() {
         throw await parseApiError(res, "Incorrect username or password.");
       }
       const data = await res.json();
+      if (data.token) {
+        persistObserverToken(data.token);
+      }
       localStorage.setItem("hrms_logged_in", "true");
       applySessionFromAuthMe(data);
       setIsLoggedIn(true);
@@ -118,7 +125,7 @@ export default function ObserverLoginPage() {
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Password</label>
             <PasswordInput
               value={passwordInput}
-              onChange={setPasswordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
               className={`${inputClassName} font-mono pr-12`}
               autoComplete="current-password"
               required

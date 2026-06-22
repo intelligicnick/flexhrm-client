@@ -4,6 +4,7 @@ import { AppNotification } from "../types";
 import {
   isBrowserPushEnabled,
   isNotificationSoundEnabled,
+  playNotificationSound,
   requestBrowserNotificationPermission,
   setBrowserPushEnabled,
   setNotificationSoundEnabled,
@@ -170,6 +171,7 @@ export default function NotificationsBell({
                 const next = !soundOn;
                 setSoundOn(next);
                 setNotificationSoundEnabled(next);
+                if (next) playNotificationSound();
               }}
               className={`text-[10px] font-bold flex items-center gap-1 cursor-pointer ${
                 soundOn ? "text-[#ff791a]" : "text-slate-400"

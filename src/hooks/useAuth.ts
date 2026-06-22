@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiUrl, parseApiError } from "../api";
 import { PERMISSION_MODULES } from "../lib/permissions";
 import type { RoleUiRestrictions } from "../lib/role-ui-restrictions";
+import { clearObserverToken } from "../lib/observer-session";
 import { DEFAULT_PATH, LOGIN_PATH } from "../routes";
 
 export function useAuth() {
@@ -77,6 +78,7 @@ export function useAuth() {
     localStorage.removeItem("hrms_username");
     localStorage.removeItem("hrms_role");
     localStorage.removeItem("hrms_locations");
+    clearObserverToken();
     setIsLoggedIn(false);
     setSessionRole("admin");
     setSessionLocations([]);
@@ -84,7 +86,7 @@ export function useAuth() {
     setSessionUiRestrictions(null);
   }, []);
 
-  const handleLogout = useCallback(async () => {
+  const handleLogout = useCallback(async (redirectTo?: string) => {
     try {
       await fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
@@ -96,7 +98,7 @@ export function useAuth() {
     clearLocalSession();
     setUsernameInput("");
     setPasswordInput("");
-    navigate(LOGIN_PATH);
+    navigate(redirectTo ?? LOGIN_PATH);
   }, [clearLocalSession, navigate]);
 
   useEffect(() => {

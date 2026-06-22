@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -29,7 +30,7 @@ import androidx.webkit.WebViewAssetLoader;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmObserver";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmObserver/1.0.0";
+  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmObserver/1.0.1";
   private static final String BUNDLED_LOGIN_URL =
       "https://appassets.androidplatform.net/observer/login";
   private static final String BUNDLED_HOME_URL =
@@ -108,6 +109,12 @@ public class MainActivity extends AppCompatActivity {
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       settings.setSafeBrowsingEnabled(true);
+    }
+
+    CookieManager cookieManager = CookieManager.getInstance();
+    cookieManager.setAcceptCookie(true);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      cookieManager.setAcceptThirdPartyCookies(webView, true);
     }
 
     webView.setWebViewClient(

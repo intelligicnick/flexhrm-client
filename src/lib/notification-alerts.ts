@@ -7,6 +7,7 @@ const SOUND_ENABLED_KEY = "hrms_notification_sound";
 const PUSH_ENABLED_KEY = "hrms_notification_push";
 
 let audioContext: AudioContext | null = null;
+let audioPrimed = false;
 
 export function isNotificationSoundEnabled(): boolean {
   return localStorage.getItem(SOUND_ENABLED_KEY) !== "false";
@@ -38,25 +39,79 @@ export async function requestBrowserNotificationPermission(): Promise<Notificati
   }
 }
 
-export function playNotificationSound(): void {
-  if (!isNotificationSoundEnabled()) return;
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
   try {
     if (!audioContext) {
-      audioContext = new AudioContext();
+      const AudioCtx =
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return null;
+      audioContext = new AudioCtx();
     }
-    const ctx = audioContext;
-    const oscillator = ctx.createOscillator();
-    const gain = ctx.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
-    oscillator.connect(gain);
-    gain.connect(ctx.destination);
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.26);
+    void audioContext.resume();
+    return audioContext;
+  } catch {
+    return null;
+  }
+}
+
+/** Resume audio after first user gesture — required on mobile browsers and Android WebView. */
+export function primeNotificationAudio(): void {
+  if (audioPrimed) return;
+  const ctx = getAudioContext();
+  if (ctx) audioPrimed = true;
+}
+
+function scheduleChime(
+  ctx: AudioContext,
+  startTime: number,
+  frequency: number,
+  durationSec: number,
+  volume = 0.82,
+): void {
+  const tone = ctx.createOscillator();
+  const toneGain = ctx.createGain();
+  tone.type = "sine";
+  tone.frequency.setValueAtTime(frequency, startTime);
+
+  const sparkle = ctx.createOscillator();
+  const sparkleGain = ctx.createGain();
+  sparkle.type = "triangle";
+  sparkle.frequency.setValueAtTime(frequency * 2, startTime);
+
+  toneGain.gain.setValueAtTime(0.0001, startTime);
+  toneGain.gain.exponentialRampToValueAtTime(volume, startTime + 0.01);
+  toneGain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec);
+
+  sparkleGain.gain.setValueAtTime(0.0001, startTime);
+  sparkleGain.gain.exponentialRampToValueAtTime(volume * 0.22, startTime + 0.01);
+  sparkleGain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSec * 0.65);
+
+  tone.connect(toneGain);
+  sparkle.connect(sparkleGain);
+  toneGain.connect(ctx.destination);
+  sparkleGain.connect(ctx.destination);
+  tone.start(startTime);
+  sparkle.start(startTime);
+  tone.stop(startTime + durationSec);
+  sparkle.stop(startTime + durationSec);
+}
+
+export function playNotificationSound(): void {
+  if (!isNotificationSoundEnabled()) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const t = ctx.currentTime;
+    // Sweet ascending chime (C major) — warm bell tone, still loud and clear.
+    scheduleChime(ctx, t, 523.25, 0.52, 0.84);
+    scheduleChime(ctx, t + 0.16, 659.25, 0.52, 0.84);
+    scheduleChime(ctx, t + 0.32, 783.99, 0.78, 0.9);
+
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate([140, 70, 140]);
+    }
   } catch {
     /* ignore audio failures */
   }
