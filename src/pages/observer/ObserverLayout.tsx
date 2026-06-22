@@ -1,13 +1,18 @@
 import React, { useMemo } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Home, Map, LayoutGrid, LogOut, Eye } from "lucide-react";
+import { Home, Map, LayoutGrid, LogOut, Eye, Bell } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
+import ObserverMonthPicker from "./ObserverMonthPicker";
+import ObserverUniversalSearch from "./ObserverUniversalSearch";
 
 function getPageTitle(pathname: string): string {
   if (pathname === "/observer" || pathname === "/observer/") return "Dashboard";
+  if (pathname.startsWith("/observer/notifications")) return "Notifications";
   if (pathname.startsWith("/observer/map")) return "Supervisors Map";
   if (pathname.startsWith("/observer/menu")) return "All Modules";
+  if (pathname.startsWith("/observer/supervisors")) return "Supervisors";
+  if (pathname.startsWith("/observer/employees")) return "Employees & Guards";
   if (pathname.startsWith("/observer/salary")) return "Salary";
   if (pathname.startsWith("/observer/visits")) return "Visits";
   if (pathname.startsWith("/observer/commitments")) return "Commitment Diary";
@@ -25,9 +30,10 @@ function ObserverLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isLoggedIn, authBootstrapping, sessionUser, handleLogout } = useHRMS();
-  const { alertCount } = useObserverStats();
+  const { alertCount, adminNotificationUnreadCount } = useObserverStats();
 
   const pageTitle = useMemo(() => getPageTitle(location.pathname), [location.pathname]);
+  const isMapPage = location.pathname.startsWith("/observer/map");
   const showNav = !location.pathname.includes("/login");
 
   const logout = async () => {
@@ -73,20 +79,40 @@ function ObserverLayoutInner() {
               </div>
               <h1 className="text-base font-black text-white truncate">{pageTitle}</h1>
               <p className="text-[11px] text-slate-300 mt-0.5 truncate">{sessionUser || "Admin"}</p>
+              {!isMapPage && <ObserverMonthPicker />}
             </div>
-            <button
-              type="button"
-              onClick={logout}
-              className="p-2 text-white/80 hover:text-white cursor-pointer"
-              title="Logout"
-            >
-              <LogOut size={20} />
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              <Link
+                to="/observer/notifications"
+                className="relative p-2 text-white/80 hover:text-white cursor-pointer"
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {adminNotificationUnreadCount > 0 && (
+                  <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                    {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
+                  </span>
+                )}
+              </Link>
+              <button
+                type="button"
+                onClick={logout}
+                className="p-2 text-white/80 hover:text-white cursor-pointer"
+                title="Logout"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
           </div>
+          {!isMapPage && (
+            <div className="mt-3">
+              <ObserverUniversalSearch />
+            </div>
+          )}
         </div>
       </header>
 
-      <main className={`flex-1 px-4 pt-4 ${showNav ? "pb-24" : "pb-4"}`}>
+      <main className={`flex-1 ${isMapPage ? "px-0 pt-0" : "px-4 pt-4"} ${showNav ? "pb-24" : "pb-4"}`}>
         <Outlet />
       </main>
 

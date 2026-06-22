@@ -203,7 +203,12 @@ export function formatInr(amount: number): string {
 }
 
 export function formatMonthLabel(monthKey: string): string {
+  if (!monthKey) return "";
+  if (monthKey.includes(" ")) return monthKey;
   const [y, m] = monthKey.split("-");
-  const date = new Date(Number(y), Number(m) - 1, 1);
-  return date.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  if (y && m) {
+    const date = new Date(Number(y), Number(m) - 1, 1);
+    return date.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  }
+  return monthKey;
 }

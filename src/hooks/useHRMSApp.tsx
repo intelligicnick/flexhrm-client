@@ -4484,6 +4484,28 @@ export function useHRMSApp() {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (!isLoggedIn || !location.pathname.startsWith("/observer")) return;
+    fetchSchoolWorks();
+    fetchSchoolVisits();
+    fetchSchoolSupervisors();
+    fetchCommitmentDiary();
+    fetchTenders();
+    fetchContracts();
+    fetchRenewals();
+    fetchSchoolPartners();
+    fetchPendingSupervisorRequestCount();
+    fetchAdminNotifications();
+  }, [isLoggedIn, location.pathname]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !location.pathname.startsWith("/observer/map")) return;
+    const timer = window.setInterval(() => {
+      void fetchSchoolSupervisors();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, location.pathname]);
+
+  useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Directory") {
       fetchHelplines();
     }

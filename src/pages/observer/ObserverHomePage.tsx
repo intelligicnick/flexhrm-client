@@ -147,7 +147,7 @@ export default function ObserverHomePage() {
               value={supervisorStats.total}
               sub={`${supervisorStats.online} online now`}
               accent="blue"
-              to="/observer/map"
+              to="/observer/supervisors"
             />
           )}
           {canView("Field Team") && (
@@ -250,13 +250,17 @@ export default function ObserverHomePage() {
 
       {adminNotificationUnreadCount > 0 && (
         <ObserverSection title="Notifications">
-          <div className="flex items-center gap-3">
+          <Link
+            to="/observer/notifications"
+            className="flex items-center gap-3 p-3 rounded-xl bg-orange-50 border border-orange-100 active:scale-[0.99] transition"
+          >
             <Bell size={20} className="text-[#ff791a]" />
-            <div>
+            <div className="flex-1">
               <p className="text-sm font-bold text-slate-800">{adminNotificationUnreadCount} unread</p>
-              <p className="text-xs text-slate-500">Open full web app for details</p>
+              <p className="text-xs text-slate-500">Tap to view all notifications</p>
             </div>
-          </div>
+            <span className="text-lg font-black text-[#ff791a]">{adminNotificationUnreadCount}</span>
+          </Link>
         </ObserverSection>
       )}
     </div>

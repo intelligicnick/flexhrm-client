@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   IndianRupee,
@@ -11,7 +11,10 @@ import {
   BadgeCheck,
   Receipt,
   HandCoins,
+  MapPin,
+  Users,
 } from "lucide-react";
+import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import {
   ObserverEmptyState,
@@ -26,12 +29,29 @@ import { expiryBand } from "../../lib/renewal-helpers";
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { parseFlexibleDateMs } from "../../lib/date-helpers";
 import type { Renewal } from "../../types";
+import ObserverSearchInput from "./ObserverSearchInput";
+import { ObserverDetailSheet } from "./ObserverDetailSheet";
+import {
+  buildCommitmentDetails,
+  buildContractDetails,
+  buildEmployeeDetails,
+  buildExpenseDetails,
+  buildPartnerDetails,
+  buildRenewalDetails,
+  buildSupervisorDetails,
+  buildTenderDetails,
+  buildVisitDetails,
+  matchesSearch,
+  type DetailField,
+} from "./observer-details";
 
 const MODULE_CONFIG: Record<
   string,
   { title: string; icon: typeof IndianRupee; permission: string; renewalCategory?: string }
 > = {
   salary: { title: "Salary", icon: IndianRupee, permission: "Salary" },
+  employees: { title: "Employees & Guards", icon: Users, permission: "Employees" },
+  supervisors: { title: "Supervisors", icon: MapPin, permission: "Field Team" },
   visits: { title: "Visits", icon: ClipboardList, permission: "Field Team" },
   commitments: { title: "Commitment Diary", icon: BookOpen, permission: "Field Team" },
   tenders: { title: "Tenders", icon: Gavel, permission: "Tenders" },
@@ -58,19 +78,30 @@ function formatDate(d: string): string {
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function ModuleSearch({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="mb-3">
+      <ObserverSearchInput value={value} onChange={onChange} />
+    </div>
+  );
+}
+
 export default function ObserverModulePage() {
   const { moduleId = "" } = useParams<{ moduleId: string }>();
   const config = MODULE_CONFIG[moduleId];
   const stats = useObserverStats();
   const {
-    canView,
-    selectedMonth,
-    payrollNet,
-    filteredSalaryEmployees,
     esicEligibilityLimit,
     attendanceDb,
     locationCompliance,
     locationPtEnabled,
+    employees,
+  } = useHRMS();
+  const {
+    canView,
+    selectedMonth,
+    payrollNet,
+    filteredSalaryEmployees,
     visitStats,
     commitmentStats,
     tenderStats,
@@ -81,15 +112,20 @@ export default function ObserverModulePage() {
     partnerPayStats,
     rawSchoolPartners,
     rawSchoolWorks,
+    supervisorStats,
   } = stats;
+
+  const [moduleSearch, setModuleSearch] = useState("");
+  const [detail, setDetail] = useState<{ title: string; fields: DetailField[] } | null>(null);
 
   const monthLabel = formatMonthLabel(selectedMonth);
 
   const salaryRows = useMemo(() => {
     return filteredSalaryEmployees
       .map((emp) => ({
+        emp,
         id: emp.id,
-        name: emp.name,
+        name: emp.nameAsPerAadhar || emp.employeeCode,
         role: emp.role || "—",
         net:
           Number(
@@ -104,8 +140,8 @@ export default function ObserverModulePage() {
             ),
           ) || 0,
       }))
-      .sort((a, b) => b.net - a.net)
-      .slice(0, 50);
+      .filter((row) => matchesSearch(moduleSearch, row.name, row.role, row.emp.employeeCode, row.emp.location))
+      .sort((a, b) => b.net - a.net);
   }, [
     filteredSalaryEmployees,
     selectedMonth,
@@ -113,19 +149,60 @@ export default function ObserverModulePage() {
     attendanceDb,
     locationCompliance,
     locationPtEnabled,
+    moduleSearch,
   ]);
+
+  const employeeRows = useMemo(() => {
+    return employees
+      .filter((emp) => !emp.exitDate?.trim())
+      .map((emp) => ({
+        emp,
+        id: emp.id,
+        name: emp.nameAsPerAadhar || emp.employeeCode,
+        role: emp.role || "Staff",
+        location: emp.location || "—",
+      }))
+      .filter((row) =>
+        matchesSearch(moduleSearch, row.name, row.role, row.emp.employeeCode, row.location, row.emp.skillCategory),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [employees, moduleSearch]);
+
+  const supervisorRows = useMemo(() => {
+    return rawSchoolSupervisors
+      .map((sup) => ({
+        sup,
+        id: sup.id,
+        name: sup.name,
+        subtitle: `${sup.designation || "Supervisor"} · ${sup.phone || "—"}`,
+        online: sup.isOnline,
+      }))
+      .filter((row) =>
+        matchesSearch(
+          moduleSearch,
+          row.name,
+          row.sup.phone,
+          row.sup.designation,
+          row.sup.assignedBlocks?.join(" "),
+        ),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rawSchoolSupervisors, moduleSearch]);
 
   const renewalItems = useMemo(() => {
     if (!config?.renewalCategory) return [];
     return rawRenewals
       .filter((r) => r.category === config.renewalCategory)
+      .filter((r) =>
+        matchesSearch(moduleSearch, r.title, r.subType, r.clientName, r.ownerType, r.amount),
+      )
       .sort((a, b) => {
         const bandA = expiryBand(a);
         const bandB = expiryBand(b);
         const rank = (b: string) => (b === "passed" ? 0 : b === "soon" ? 1 : 2);
         return rank(bandA) - rank(bandB);
       });
-  }, [rawRenewals, config?.renewalCategory]);
+  }, [rawRenewals, config?.renewalCategory, moduleSearch]);
 
   const expenseRows = useMemo(() => {
     return rawSchoolWorks
@@ -137,26 +214,69 @@ export default function ObserverModulePage() {
           (Number(entry.trek) || 0) +
           (Number(entry.miscellaneous) || 0);
         if (total <= 0) return null;
-        return { id: school.id, name: school.schoolName, block: school.block, total };
+        return { school, id: school.id, name: school.schoolName, block: school.block, total };
       })
       .filter(Boolean)
-      .sort((a, b) => (b?.total || 0) - (a?.total || 0)) as { id: string; name: string; block: string; total: number }[];
-  }, [rawSchoolWorks, selectedMonth]);
+      .filter((row) =>
+        matchesSearch(moduleSearch, row?.name, row?.block, row?.school.district, row?.school.udise),
+      )
+      .sort((a, b) => (b?.total || 0) - (a?.total || 0)) as {
+      school: (typeof rawSchoolWorks)[0];
+      id: string;
+      name: string;
+      block: string;
+      total: number;
+    }[];
+  }, [rawSchoolWorks, selectedMonth, moduleSearch]);
 
   const partnerRows = useMemo(() => {
     return rawSchoolPartners
       .map((p) => ({
+        partner: p,
         id: p.id,
         name: p.partnerName,
         school: p.schoolName,
         pay: Number(p.monthlyPay) || 0,
         status: p.monthlyPayLedger?.[selectedMonth]?.paymentStatus || "Unpaid",
       }))
+      .filter((row) => matchesSearch(moduleSearch, row.name, row.school, row.partner.accountHolderName))
       .sort((a, b) => {
         const order = { Unpaid: 0, Hold: 1, Paid: 2 };
         return (order[a.status as keyof typeof order] ?? 0) - (order[b.status as keyof typeof order] ?? 0);
       });
-  }, [rawSchoolPartners, selectedMonth]);
+  }, [rawSchoolPartners, selectedMonth, moduleSearch]);
+
+  const filteredVisits = useMemo(
+    () =>
+      visitStats.recent.filter((v) =>
+        matchesSearch(moduleSearch, v.schoolName, v.supervisorName, v.block, v.udise, v.status),
+      ),
+    [visitStats.recent, moduleSearch],
+  );
+
+  const filteredCommitments = useMemo(
+    () =>
+      commitmentStats.items.filter((c) =>
+        matchesSearch(moduleSearch, c.schoolName, c.supervisorName, c.block, c.status, c.notes),
+      ),
+    [commitmentStats.items, moduleSearch],
+  );
+
+  const filteredTenders = useMemo(
+    () =>
+      rawTenders
+        .filter((t) => !t.deletedAt?.trim())
+        .filter((t) => matchesSearch(moduleSearch, t.bidNo, t.department, t.officerName, t.status, t.category)),
+    [rawTenders, moduleSearch],
+  );
+
+  const filteredContracts = useMemo(
+    () =>
+      rawContracts.filter((c) =>
+        matchesSearch(moduleSearch, c.contractNo, c.companyName, c.officeName, c.officerName, c.status),
+      ),
+    [rawContracts, moduleSearch],
+  );
 
   if (!config) {
     return <ObserverEmptyState icon={ClipboardList} title="Module not found" />;
@@ -172,6 +292,79 @@ export default function ObserverModulePage() {
     );
   }
 
+  const openDetail = (title: string, fields: DetailField[]) => setDetail({ title, fields });
+
+  if (moduleId === "supervisors") {
+    return (
+      <div className="space-y-4 pb-2">
+        <ObserverStatGrid>
+          <ObserverStatCard icon={MapPin} label="Total" value={supervisorStats.total} accent="blue" />
+          <ObserverStatCard icon={MapPin} label="Online Now" value={supervisorStats.online} accent="emerald" />
+        </ObserverStatGrid>
+        <ObserverSection title="All Supervisors">
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
+          {supervisorRows.length === 0 ? (
+            <ObserverEmptyState icon={MapPin} title="No supervisors found" />
+          ) : (
+            supervisorRows.map((row) => (
+              <ObserverListRow
+                key={row.id}
+                title={row.name}
+                subtitle={row.subtitle}
+                badge={row.online ? "Online" : "Offline"}
+                badgeTone={row.online ? "green" : "slate"}
+                onClick={() => openDetail(row.name, buildSupervisorDetails(row.sup))}
+              />
+            ))
+          )}
+        </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "employees") {
+    return (
+      <div className="space-y-4 pb-2">
+        <ObserverStatGrid>
+          <ObserverStatCard icon={Users} label="Active Staff" value={employeeRows.length} accent="blue" />
+        </ObserverStatGrid>
+        <ObserverSection title="Employees & Guards">
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, role, code…" />
+          {employeeRows.length === 0 ? (
+            <ObserverEmptyState icon={Users} title="No employees found" />
+          ) : (
+            employeeRows.map((row) => (
+              <ObserverListRow
+                key={row.id}
+                title={row.name}
+                subtitle={`${row.role} · ${row.location}`}
+                onClick={() =>
+                  openDetail(
+                    row.name,
+                    buildEmployeeDetails(
+                      row.emp,
+                      selectedMonth,
+                      esicEligibilityLimit,
+                      attendanceDb,
+                      locationCompliance,
+                      locationPtEnabled,
+                    ),
+                  )
+                }
+              />
+            ))
+          )}
+        </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
+      </div>
+    );
+  }
+
   if (moduleId === "salary") {
     return (
       <div className="space-y-4 pb-2">
@@ -179,7 +372,8 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={IndianRupee} label="Total Net Pay" value={formatInr(payrollNet)} sub={monthLabel} accent="orange" />
           <ObserverStatCard icon={IndianRupee} label="Employees" value={filteredSalaryEmployees.length} sub="On payroll" accent="blue" />
         </ObserverStatGrid>
-        <ObserverSection title={`Top earners · ${monthLabel}`}>
+        <ObserverSection title={`Payroll · ${monthLabel}`}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, role, code…" />
           {salaryRows.length === 0 ? (
             <ObserverEmptyState icon={IndianRupee} title="No salary data" />
           ) : (
@@ -189,10 +383,26 @@ export default function ObserverModulePage() {
                 title={row.name}
                 subtitle={row.role}
                 value={formatInr(row.net)}
+                onClick={() =>
+                  openDetail(
+                    row.name,
+                    buildEmployeeDetails(
+                      row.emp,
+                      selectedMonth,
+                      esicEligibilityLimit,
+                      attendanceDb,
+                      locationCompliance,
+                      locationPtEnabled,
+                    ),
+                  )
+                }
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -205,21 +415,26 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={ClipboardList} label="Pending" value={visitStats.pending} accent="amber" alert={visitStats.pending > 0} />
           <ObserverStatCard icon={ClipboardList} label="Approved" value={visitStats.approved} accent="emerald" />
         </ObserverStatGrid>
-        <ObserverSection title="Recent Visits">
-          {visitStats.recent.length === 0 ? (
-            <ObserverEmptyState icon={ClipboardList} title="No visits yet" />
+        <ObserverSection title="All Visits">
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor…" />
+          {filteredVisits.length === 0 ? (
+            <ObserverEmptyState icon={ClipboardList} title="No visits found" />
           ) : (
-            visitStats.recent.map((v) => (
+            filteredVisits.map((v) => (
               <ObserverListRow
                 key={v.id}
                 title={v.schoolName}
                 subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)}`}
                 badge={v.status}
                 badgeTone={v.status === "pending" ? "amber" : v.status === "approved" ? "green" : "slate"}
+                onClick={() => openDetail(v.schoolName, buildVisitDetails(v))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -233,10 +448,11 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={BookOpen} label="Upcoming" value={commitmentStats.upcoming} accent="emerald" />
         </ObserverStatGrid>
         <ObserverSection title="All Commitments">
-          {commitmentStats.items.length === 0 ? (
-            <ObserverEmptyState icon={BookOpen} title="No commitments" />
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
+          {filteredCommitments.length === 0 ? (
+            <ObserverEmptyState icon={BookOpen} title="No commitments found" />
           ) : (
-            commitmentStats.items.slice(0, 40).map((c) => (
+            filteredCommitments.map((c) => (
               <ObserverListRow
                 key={c.id}
                 title={c.schoolName}
@@ -249,16 +465,19 @@ export default function ObserverModulePage() {
                       ? "red"
                       : "blue"
                 }
+                onClick={() => openDetail(c.schoolName, buildCommitmentDetails(c))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
 
   if (moduleId === "tenders") {
-    const activeTenders = rawTenders.filter((t) => !t.deletedAt?.trim());
     return (
       <div className="space-y-4 pb-2">
         <ObserverStatGrid>
@@ -266,20 +485,25 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={Gavel} label="Upcoming Deadlines" value={tenderStats.upcoming} accent="amber" />
         </ObserverStatGrid>
         <ObserverSection title="Tender Pipeline">
-          {activeTenders.length === 0 ? (
-            <ObserverEmptyState icon={Gavel} title="No tenders" />
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
+          {filteredTenders.length === 0 ? (
+            <ObserverEmptyState icon={Gavel} title="No tenders found" />
           ) : (
-            activeTenders.slice(0, 40).map((t) => (
+            filteredTenders.map((t) => (
               <ObserverListRow
                 key={t.id}
                 title={t.bidNo || t.department || "Tender"}
                 subtitle={`${t.department || "—"} · Due ${formatDate(t.endDate || "")}`}
                 badge={t.status || "—"}
                 badgeTone="blue"
+                onClick={() => openDetail(t.bidNo || "Tender", buildTenderDetails(t))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -291,20 +515,25 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={FileText} label="Total Contracts" value={rawContracts.length} accent="slate" />
         </ObserverStatGrid>
         <ObserverSection title="Contracts">
-          {rawContracts.length === 0 ? (
-            <ObserverEmptyState icon={FileText} title="No contracts" />
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
+          {filteredContracts.length === 0 ? (
+            <ObserverEmptyState icon={FileText} title="No contracts found" />
           ) : (
-            rawContracts.slice(0, 40).map((c) => (
+            filteredContracts.map((c) => (
               <ObserverListRow
                 key={c.id}
                 title={c.contractNo || c.companyName || "Contract"}
                 subtitle={`${c.officeName || "—"} · Until ${formatDate(c.toDate || "")}`}
                 badge={c.status || "—"}
                 badgeTone="slate"
+                onClick={() => openDetail(c.contractNo || "Contract", buildContractDetails(c))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -325,6 +554,7 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={config.icon} label="Expired" value={catStats.expired} accent="rose" alert={catStats.expired > 0} />
         </ObserverStatGrid>
         <ObserverSection title={config.title}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
           {renewalItems.length === 0 ? (
             <ObserverEmptyState icon={config.icon} title={`No ${config.title.toLowerCase()}`} />
           ) : (
@@ -337,11 +567,15 @@ export default function ObserverModulePage() {
                   subtitle={`${r.clientName || r.ownerType || "—"} · Exp ${formatDate(r.expiresOn || r.expiryDate || "")}`}
                   badge={badge.label}
                   badgeTone={badge.tone}
+                  onClick={() => openDetail(r.title || r.subType || "Item", buildRenewalDetails(r))}
                 />
               );
             })
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -356,6 +590,7 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={Receipt} label="Misc" value={formatInr(expenseStats.miscellaneous)} accent="slate" />
         </ObserverStatGrid>
         <ObserverSection title={`School Expenses · ${monthLabel}`}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
           {expenseRows.length === 0 ? (
             <ObserverEmptyState icon={Receipt} title="No expenses this month" />
           ) : (
@@ -365,10 +600,14 @@ export default function ObserverModulePage() {
                 title={row.name}
                 subtitle={row.block}
                 value={formatInr(row.total)}
+                onClick={() => openDetail(row.name, buildExpenseDetails(row.school, selectedMonth))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }
@@ -383,8 +622,9 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={HandCoins} label="On Hold" value={partnerPayStats.hold} accent="amber" />
         </ObserverStatGrid>
         <ObserverSection title={`Partners · ${monthLabel}`}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />
           {partnerRows.length === 0 ? (
-            <ObserverEmptyState icon={HandCoins} title="No partners" />
+            <ObserverEmptyState icon={HandCoins} title="No partners found" />
           ) : (
             partnerRows.map((row) => (
               <ObserverListRow
@@ -394,10 +634,14 @@ export default function ObserverModulePage() {
                 value={formatInr(row.pay)}
                 badge={row.status}
                 badgeTone={row.status === "Paid" ? "green" : row.status === "Hold" ? "amber" : "red"}
+                onClick={() => openDetail(row.name, buildPartnerDetails(row.partner, selectedMonth))}
               />
             ))
           )}
         </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} onClose={() => setDetail(null)} />
+        )}
       </div>
     );
   }

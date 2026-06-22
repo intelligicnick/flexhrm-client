@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
-import { MapPin, ChevronRight, Route, User } from "lucide-react";
+import { MapPin, ChevronRight, Route, User, Maximize2, Minimize2 } from "lucide-react";
 import type { SchoolSupervisor, SchoolVisit } from "../types";
 import {
   buildSupervisorPaths,
@@ -26,6 +26,10 @@ type SupervisorMapPanelProps = {
   visits: SchoolVisit[];
   onOpenFieldTeam?: () => void;
   layoutRevision?: string;
+  variant?: "default" | "embedded";
+  mapHeightClass?: string;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 };
 
 function escapeHtml(value: string): string {
@@ -131,6 +135,10 @@ export default function SupervisorMapPanel({
   visits,
   onOpenFieldTeam,
   layoutRevision,
+  variant = "default",
+  mapHeightClass,
+  isFullscreen = false,
+  onToggleFullscreen,
 }: SupervisorMapPanelProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -322,8 +330,18 @@ export default function SupervisorMapPanel({
     }
   }, [visiblePaths, showPaths]);
 
+  const embedded = variant === "embedded";
+  const resolvedMapHeight =
+    mapHeightClass || (embedded ? "h-[calc(100dvh-11rem)]" : "h-80 md:h-[28rem]");
+
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left">
+    <div
+      className={
+        embedded
+          ? "text-left"
+          : "bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left"
+      }
+    >
       <style>{`
         @keyframes supervisor-map-pulse {
           0% { transform: scale(0.85); opacity: 0.45; }
@@ -332,17 +350,37 @@ export default function SupervisorMapPanel({
         }
       `}</style>
 
-      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 mb-4">
+      <div className={`flex flex-col lg:flex-row lg:items-start justify-between gap-3 ${embedded ? "px-3 pt-2" : "mb-4"}`}>
         <div>
-          <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-            <MapPin size={16} className="text-[#ff791a]" />
-            Supervisor Map
-          </h3>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Traversed visit paths for {periodLabel} with estimated travel distance
-          </p>
+          {!embedded && (
+            <>
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <MapPin size={16} className="text-[#ff791a]" />
+                Supervisor Map
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Traversed visit paths for {periodLabel} with estimated travel distance
+              </p>
+            </>
+          )}
+          {embedded && (
+            <p className="text-[11px] text-slate-500">
+              {periodLabel} · tap pins for supervisor details
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {onToggleFullscreen && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
+              title={isFullscreen ? "Exit fullscreen" : "Fullscreen map"}
+            >
+              {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              {isFullscreen ? "Exit" : "Full screen"}
+            </button>
+          )}
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
             {PERIOD_OPTIONS.map((option) => (
               <button
@@ -395,7 +433,7 @@ export default function SupervisorMapPanel({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500 mb-3">
+      <div className={`flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
         <span className="inline-flex items-center gap-1.5">
           <User size={12} className="text-emerald-600" />
           Online ({onlineCount})
@@ -413,7 +451,7 @@ export default function SupervisorMapPanel({
       </div>
 
       {paths.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className={`flex flex-wrap gap-2 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
           {paths.map((path) => (
             <button
               key={path.supervisorId}
@@ -442,10 +480,10 @@ export default function SupervisorMapPanel({
         </div>
       )}
 
-      <div className="relative">
+      <div className={`relative ${embedded ? "px-1" : ""}`}>
         <div
           ref={mapContainerRef}
-          className={`h-80 md:h-[28rem] w-full rounded-xl overflow-hidden border z-0 transition ${
+          className={`${resolvedMapHeight} w-full rounded-xl overflow-hidden border z-0 transition ${
             mapWheelActive
               ? "border-[#ff791a]/50 ring-2 ring-[#ff791a]/20"
               : "border-slate-200"
@@ -460,15 +498,17 @@ export default function SupervisorMapPanel({
       </div>
 
       {paths.length === 0 ? (
-        <p className="text-xs text-slate-400 mt-3">
+        <p className={`text-xs text-slate-400 ${embedded ? "px-3 mt-2" : "mt-3"}`}>
           No supervisor visit GPS data for {periodLabel.toLowerCase()}. Paths appear after supervisors submit
           geo-tagged field visits in this period.
         </p>
       ) : (
+        !embedded && (
         <p className="text-[10px] text-slate-400 mt-3">
           S = journey start · numbered stops = visit checkpoints · person icon = latest position in period · arrows
           show travel direction · distance is straight-line estimate between GPS points (actual road distance may differ)
         </p>
+        )
       )}
     </div>
   );

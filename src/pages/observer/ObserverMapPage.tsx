@@ -1,12 +1,11 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { useObserverStats } from "./useObserverStats";
-import { ObserverSection } from "./ObserverUI";
 
 const SupervisorMapPanel = lazy(() => import("../../components/SupervisorMapPanel"));
 
 function MapFallback() {
   return (
-    <div className="flex items-center justify-center h-64">
+    <div className="flex items-center justify-center h-[calc(100dvh-11rem)]">
       <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
     </div>
   );
@@ -14,29 +13,41 @@ function MapFallback() {
 
 export default function ObserverMapPage() {
   const { rawSchoolSupervisors, rawSchoolVisits, canView } = useObserverStats();
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   if (!canView("Field Team")) {
     return (
-      <ObserverSection>
-        <p className="text-sm text-slate-500 text-center py-8">You don&apos;t have access to view the supervisor map.</p>
-      </ObserverSection>
+      <div className="px-4 py-8">
+        <p className="text-sm text-slate-500 text-center">
+          You don&apos;t have access to view the supervisor map.
+        </p>
+      </div>
     );
   }
 
-  return (
-    <div className="space-y-3 -mx-1">
-      <ObserverSection title="Live Supervisor Locations">
-        <p className="text-xs text-slate-500 mb-3">
-          Tap pins to see supervisor details. Paths show today&apos;s movement.
-        </p>
-        <Suspense fallback={<MapFallback />}>
-          <SupervisorMapPanel
-            supervisors={rawSchoolSupervisors}
-            visits={rawSchoolVisits}
-            layoutRevision="observer-mobile"
-          />
-        </Suspense>
-      </ObserverSection>
-    </div>
+  const mapPanel = (
+    <Suspense fallback={<MapFallback />}>
+      <SupervisorMapPanel
+        supervisors={rawSchoolSupervisors}
+        visits={rawSchoolVisits}
+        layoutRevision={`observer-mobile-${isFullscreen ? "fs" : "std"}`}
+        variant="embedded"
+        mapHeightClass={
+          isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-16rem)] min-h-[320px]"
+        }
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={() => setIsFullscreen((v) => !v)}
+      />
+    </Suspense>
   );
+
+  if (isFullscreen) {
+    return (
+      <div className="fixed inset-0 z-40 bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
+        <div className="flex-1 overflow-hidden pt-2">{mapPanel}</div>
+      </div>
+    );
+  }
+
+  return <div className="pb-2">{mapPanel}</div>;
 }

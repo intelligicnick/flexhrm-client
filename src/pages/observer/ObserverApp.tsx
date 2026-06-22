@@ -8,6 +8,7 @@ const ObserverHomePage = lazy(() => import("./ObserverHomePage"));
 const ObserverMapPage = lazy(() => import("./ObserverMapPage"));
 const ObserverMenuPage = lazy(() => import("./ObserverMenuPage"));
 const ObserverModulePage = lazy(() => import("./ObserverModulePage"));
+const ObserverNotificationsPage = lazy(() => import("./ObserverNotificationsPage"));
 
 function ObserverFallback() {
   return (
@@ -44,6 +45,14 @@ export default function ObserverApp() {
             element={
               <Suspense fallback={<ObserverFallback />}>
                 <ObserverMenuPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="notifications"
+            element={
+              <Suspense fallback={<ObserverFallback />}>
+                <ObserverNotificationsPage />
               </Suspense>
             }
           />

@@ -46,6 +46,17 @@ export function getAdminNotificationTarget(
   return null;
 }
 
+/** Observer admin mobile app routes for notification deep links. */
+export function getObserverNotificationTarget(notification: AppNotification): string | null {
+  const admin = getAdminNotificationTarget(notification);
+  if (!admin) return null;
+  if (admin.fieldTeamView === "visits") return "/observer/visits";
+  if (admin.fieldTeamView === "commitments") return "/observer/commitments";
+  if (admin.fieldTeamView === "requests") return "/observer/visits";
+  if (admin.fieldTeamView === "supervisors") return "/observer/supervisors";
+  return null;
+}
+
 export function getSupervisorNotificationTarget(
   notification: AppNotification,
 ): SupervisorNotificationTarget | null {

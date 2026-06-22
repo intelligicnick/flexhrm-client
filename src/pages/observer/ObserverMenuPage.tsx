@@ -11,6 +11,8 @@ import {
   Receipt,
   HandCoins,
   MapPin,
+  Users,
+  Bell,
 } from "lucide-react";
 import { useObserverStats } from "./useObserverStats";
 import { ObserverMenuTile, formatInr } from "./ObserverUI";
@@ -28,9 +30,25 @@ export default function ObserverMenuPage() {
     expenseStats,
     partnerPayStats,
     supervisorStats,
+    adminNotificationUnreadCount,
   } = stats;
 
   const modules = [
+    {
+      icon: Bell,
+      label: "Notifications",
+      count: adminNotificationUnreadCount > 0 ? adminNotificationUnreadCount : "—",
+      to: "/observer/notifications",
+      color: "orange" as const,
+      alert: adminNotificationUnreadCount > 0,
+    },
+    canView("Employees") && {
+      icon: Users,
+      label: "Employees",
+      count: "Staff list",
+      to: "/observer/employees",
+      color: "blue" as const,
+    },
     canView("Salary") && {
       icon: IndianRupee,
       label: "Salary",
@@ -40,8 +58,15 @@ export default function ObserverMenuPage() {
     },
     canView("Field Team") && {
       icon: MapPin,
-      label: "Supervisors Map",
+      label: "Supervisors",
       count: `${supervisorStats.online} online`,
+      to: "/observer/supervisors",
+      color: "indigo" as const,
+    },
+    canView("Field Team") && {
+      icon: MapPin,
+      label: "Supervisors Map",
+      count: "Live GPS",
       to: "/observer/map",
       color: "blue" as const,
     },
