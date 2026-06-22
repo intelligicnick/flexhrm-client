@@ -548,7 +548,7 @@ export default function RolesPermissionsPanel() {
                         }
                         className="rounded text-violet-600 focus:ring-violet-500"
                       />
-                      Hide column picker and template controls on Salary sheet
+                      Hide column picker on Salary sheet (view-only users can otherwise choose columns within role limits)
                     </label>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

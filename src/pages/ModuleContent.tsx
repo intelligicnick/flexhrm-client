@@ -129,9 +129,11 @@ import {
 } from "../lib/attendance-helpers";
 import { getModuleKey, PERMISSION_MODULES, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
 import {
+  clampSelectedColumns,
   isColumnAllowed,
   isFilterLocked,
   isFilterVisible,
+  SALARY_COLUMNS,
 } from "../lib/role-ui-restrictions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import AdminAccountsPanel from "../components/admin/AdminAccountsPanel";
@@ -815,6 +817,7 @@ export default function ModuleContent() {
   const isSuperAdmin =
     String(sessionRole || "").toLowerCase() === "admin" ||
     String(sessionUser || "").toLowerCase() === "admin";
+  const canViewSalary = !!userPermissions.salary?.view;
   const canEditSalary = !!userPermissions.salary?.edit;
   const canEditLedger = !!userPermissions.ledger?.edit;
   const canEditAttendance = !!userPermissions.attendance?.edit;
@@ -865,6 +868,36 @@ export default function ModuleContent() {
     [salaryUiRestrictions],
   );
   const salaryColumnPickerLocked = !!salaryUiRestrictions?.hideColumnPicker;
+  const visibleSalaryColumns = useMemo(
+    () =>
+      clampSelectedColumns(selectedSalaryColumns, salaryUiRestrictions, SALARY_COLUMNS).filter((column) =>
+        allowSalaryColumn(column),
+      ),
+    [selectedSalaryColumns, salaryUiRestrictions, allowSalaryColumn],
+  );
+  const toggleSalaryColumn = useCallback(
+    (header: string, checked: boolean) => {
+      if (!allowSalaryColumn(header)) return;
+      setSelectedSalaryColumns((prev) => {
+        const next = checked ? [...prev, header] : prev.filter((item) => item !== header);
+        return clampSelectedColumns(next, salaryUiRestrictions, SALARY_COLUMNS);
+      });
+    },
+    [allowSalaryColumn, salaryUiRestrictions, setSelectedSalaryColumns],
+  );
+  const toggleSalaryColumnGroup = useCallback(
+    (groupHeaders: string[], isAllGroupChecked: boolean) => {
+      const allowedHeaders = groupHeaders.filter((header) => allowSalaryColumn(header));
+      if (allowedHeaders.length === 0) return;
+      setSelectedSalaryColumns((prev) => {
+        const next = isAllGroupChecked
+          ? prev.filter((header) => !allowedHeaders.includes(header))
+          : Array.from(new Set([...prev, ...allowedHeaders]));
+        return clampSelectedColumns(next, salaryUiRestrictions, SALARY_COLUMNS);
+      });
+    },
+    [allowSalaryColumn, salaryUiRestrictions, setSelectedSalaryColumns],
+  );
 
 
   return (
@@ -2102,12 +2135,12 @@ export default function ModuleContent() {
           
                                     <button
                                       type="button"
-                                      disabled={filteredSalaryEmployees.length === 0 || selectedSalaryColumns.length === 0}
+                                      disabled={filteredSalaryEmployees.length === 0 || visibleSalaryColumns.length === 0}
                                       onClick={() => {
                                         const dataToDownload = selectedSalaryEmployeeIds.length > 0
                                           ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
                                           : filteredSalaryEmployees;
-                                        downloadSalaryExcel(dataToDownload, selectedSalaryColumns, salaryLocationFilter, selectedMonth);
+                                        downloadSalaryExcel(dataToDownload, visibleSalaryColumns, salaryLocationFilter, selectedMonth);
                                       }}
                                       className="px-3.5 py-1.5 bg-[#107c41] hover:bg-[#0d6233] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
                                     >
@@ -2116,12 +2149,12 @@ export default function ModuleContent() {
           
                                     <button
                                       type="button"
-                                      disabled={filteredSalaryEmployees.length === 0 || selectedSalaryColumns.length === 0}
+                                      disabled={filteredSalaryEmployees.length === 0 || visibleSalaryColumns.length === 0}
                                       onClick={() => {
                                         const dataToDownload = selectedSalaryEmployeeIds.length > 0
                                           ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
                                           : filteredSalaryEmployees;
-                                        downloadSalaryPDF(dataToDownload, selectedSalaryColumns, salaryLocationFilter, selectedMonth);
+                                        downloadSalaryPDF(dataToDownload, visibleSalaryColumns, salaryLocationFilter, selectedMonth);
                                       }}
                                       className="px-3.5 py-1.5 bg-[#d62222] hover:bg-[#b51c1c] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
                                     >
@@ -2196,19 +2229,24 @@ export default function ModuleContent() {
                                   </div>
                                 )}
           
-                                {!salaryColumnPickerLocked && canEditSalary && (
+                                {!salaryColumnPickerLocked && canViewSalary && (
                                 <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-4 space-y-4 text-left animate-fade-in">
                                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/60 pb-3">
                                     <div>
                                       <h5 className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                                        <Wrench size={13} className="text-[#f57416]" /> Configure Calculations Columns & Templates
+                                        <Wrench size={13} className="text-[#f57416]" />
+                                        {canEditSalary
+                                          ? "Configure Calculations Columns & Templates"
+                                          : "Visible Columns"}
                                       </h5>
                                       <p className="text-[10px] text-slate-400 mt-0.5">
-                                        Customize columns displayed in the calculation sheet and export documents. Save layouts as custom templates for future use.
+                                        {canEditSalary
+                                          ? "Customize columns displayed in the calculation sheet and export documents. Save layouts as custom templates for future use."
+                                          : "Choose which columns to display in the salary sheet. Your role may limit which columns are available."}
                                       </p>
                                     </div>
           
-                                    {/* Template Management (Unified) */}
+                                    {canEditSalary && (
                                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shrink-0 max-w-full">
                                       <div className="flex items-center gap-1.5 min-w-0">
                                         <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider whitespace-nowrap">📋 Template:</span>
@@ -2253,6 +2291,7 @@ export default function ModuleContent() {
                                         </button>
                                       </form>
                                     </div>
+                                    )}
                                   </div>
           
                                   {/* Dynamic Bento Box Categories */}
@@ -2298,18 +2337,11 @@ export default function ModuleContent() {
                                         color: "bg-emerald-50/80 text-emerald-800 border-emerald-250",
                                         headers: ["Net Payable"]
                                       }
-                                    ].map(group => {
-                                      const groupCheckedCount = group.headers.filter(h => selectedSalaryColumns.includes(h)).length;
-                                      const isAllGroupChecked = groupCheckedCount === group.headers.length;
+                                    ].filter((group) => group.headers.some((header) => allowSalaryColumn(header))).map(group => {
+                                      const visibleGroupHeaders = group.headers.filter((header) => allowSalaryColumn(header));
+                                      const groupCheckedCount = visibleGroupHeaders.filter(h => visibleSalaryColumns.includes(h)).length;
+                                      const isAllGroupChecked = groupCheckedCount === visibleGroupHeaders.length && visibleGroupHeaders.length > 0;
                                       const isSomeGroupChecked = groupCheckedCount > 0 && !isAllGroupChecked;
-          
-                                      const toggleGroup = () => {
-                                        if (isAllGroupChecked) {
-                                          setSelectedSalaryColumns(prev => prev.filter(h => !group.headers.includes(h)));
-                                        } else {
-                                          setSelectedSalaryColumns(prev => Array.from(new Set([...prev, ...group.headers])));
-                                        }
-                                      };
           
                                       return (
                                         <div key={group.name} className="border border-slate-200 rounded-lg overflow-hidden bg-white flex flex-col text-left text-[11px] shadow-2xs">
@@ -2322,7 +2354,7 @@ export default function ModuleContent() {
                                                   if (el) el.indeterminate = isSomeGroupChecked;
                                                 }}
                                                 checked={isAllGroupChecked}
-                                                onChange={toggleGroup}
+                                                onChange={() => toggleSalaryColumnGroup(visibleGroupHeaders, isAllGroupChecked)}
                                                 className="w-3 h-3 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
                                               />
                                               <span className="text-[9px] font-black uppercase tracking-wider truncate">{group.name}</span>
@@ -2331,15 +2363,8 @@ export default function ModuleContent() {
           
                                           {/* Group Sub-headers (Children Checkboxes) */}
                                           <div className="p-2 space-y-1 grow bg-white">
-                                            {group.headers.map(header => {
-                                              const isChecked = selectedSalaryColumns.includes(header);
-                                              const toggleHeader = () => {
-                                                if (isChecked) {
-                                                  setSelectedSalaryColumns(prev => prev.filter(h => h !== header));
-                                                } else {
-                                                  setSelectedSalaryColumns(prev => [...prev, header]);
-                                                }
-                                              };
+                                            {visibleGroupHeaders.map(header => {
+                                              const isChecked = visibleSalaryColumns.includes(header);
                                           
                                               // Shorten names for clean fit inside small columns
                                               let displayName = header;
@@ -2367,7 +2392,7 @@ export default function ModuleContent() {
                                                   <input id="checkbox-field-6130" name="checkbox_6130"
                                                     type="checkbox"
                                                     checked={isChecked}
-                                                    onChange={toggleHeader}
+                                                    onChange={() => toggleSalaryColumn(header, !isChecked)}
                                                     className="w-3 h-3 mt-0.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416]"
                                                   />
                                                   <span className="font-semibold text-slate-700 leading-tight break-words">{displayName}</span>
@@ -2387,73 +2412,73 @@ export default function ModuleContent() {
                                   <table className="w-full text-xs text-left border-collapse bg-white table-fixed">
                                     <colgroup>
                                       <col className="w-[48px]" />
-                                      {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
+                                      {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
                                         <col className="w-[200px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Skill Category") && (
+                                      {visibleSalaryColumns.includes("Skill Category") && (
                                         <col className="w-[120px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Job Role") && (
+                                      {visibleSalaryColumns.includes("Job Role") && (
                                         <col className="w-[120px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Present Days") && (
+                                      {visibleSalaryColumns.includes("Present Days") && (
                                         <col className="w-[85px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Daily Wage") && (
+                                      {visibleSalaryColumns.includes("Daily Wage") && (
                                         <col className="w-[100px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Total Salary") && (
+                                      {visibleSalaryColumns.includes("Total Salary") && (
                                         <col className="w-[125px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
+                                      {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
                                         <col className="w-[125px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Basic Salary") && (
+                                      {visibleSalaryColumns.includes("Basic Salary") && (
                                         <col className="w-[125px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Employer PF (13%)") && (
+                                      {visibleSalaryColumns.includes("Employer PF (13%)") && (
                                         <col className="w-[110px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
+                                      {visibleSalaryColumns.includes("Employer ESIC (3.25%)") && (
                                         <col className="w-[110px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Employee PF (12%)") && (
+                                      {visibleSalaryColumns.includes("Employee PF (12%)") && (
                                         <col className="w-[110px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
+                                      {visibleSalaryColumns.includes("Employee ESIC (0.75%)") && (
                                         <col className="w-[110px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Professional Tax (PT)") && (
+                                      {visibleSalaryColumns.includes("Professional Tax (PT)") && (
                                         <col className="w-[95px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Advance Balance") && (
+                                      {visibleSalaryColumns.includes("Advance Balance") && (
                                         <col className="w-[100px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Uniform Deductions") && (
+                                      {visibleSalaryColumns.includes("Uniform Deductions") && (
                                         <col className="w-[100px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Penalty Balance") && (
+                                      {visibleSalaryColumns.includes("Penalty Balance") && (
                                         <col className="w-[100px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Net Salary") && (
+                                      {visibleSalaryColumns.includes("Net Salary") && (
                                         <col className="w-[125px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Total Deductions") && (
+                                      {visibleSalaryColumns.includes("Total Deductions") && (
                                         <col className="w-[125px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Food Perk") && (
+                                      {visibleSalaryColumns.includes("Food Perk") && (
                                         <col className="w-[105px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Accommodation Perk") && (
+                                      {visibleSalaryColumns.includes("Accommodation Perk") && (
                                         <col className="w-[105px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Conveyance Perk") && (
+                                      {visibleSalaryColumns.includes("Conveyance Perk") && (
                                         <col className="w-[105px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Net Payable") && (
+                                      {visibleSalaryColumns.includes("Net Payable") && (
                                         <col className="w-[140px]" />
                                       )}
-                                      {selectedSalaryColumns.includes("Payment Status") && (
+                                      {visibleSalaryColumns.includes("Payment Status") && (
                                         <col className="w-[110px]" />
                                       )}
                                     </colgroup>
@@ -2476,131 +2501,131 @@ export default function ModuleContent() {
                                             title="Select All Employees"
                                           />
                                         </th>
-                                        {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
+                                        {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100">Employee Details</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Skill Category") && (
+                                        {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Job Role") && (
+                                        {visibleSalaryColumns.includes("Job Role") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Job Role</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Present Days") && (
+                                        {visibleSalaryColumns.includes("Present Days") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Days</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Daily Wage") && (
+                                        {visibleSalaryColumns.includes("Daily Wage") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Daily Wage</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Total Salary") && (
+                                        {visibleSalaryColumns.includes("Total Salary") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Total Salary</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
+                                        {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Gross Pay</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Basic Salary") && (
+                                        {visibleSalaryColumns.includes("Basic Salary") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Basic Pay</th>
                                         )}
                                         {(() => {
-                                          const count = ["Employer PF (13%)", "Employer ESIC (3.25%)"].filter(c => selectedSalaryColumns.includes(c)).length;
+                                          const count = ["Employer PF (13%)", "Employer ESIC (3.25%)"].filter(c => visibleSalaryColumns.includes(c)).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-blue-50 text-blue-700 text-center" colSpan={count}>Employer Liability</th>
                                           ) : null;
                                         })()}
                                         {(() => {
-                                          const count = ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"].filter(c => selectedSalaryColumns.includes(c)).length;
+                                          const count = ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"].filter(c => visibleSalaryColumns.includes(c)).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
                                           ) : null;
                                         })()}
-                                        {selectedSalaryColumns.includes("Net Salary") && (
+                                        {visibleSalaryColumns.includes("Net Salary") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Total Deductions") && (
+                                        {visibleSalaryColumns.includes("Total Deductions") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-800 text-center">Total Deductions</th>
                                         )}
                                         {(() => {
-                                          const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => selectedSalaryColumns.includes(c)).length;
+                                          const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => visibleSalaryColumns.includes(c)).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks</th>
                                           ) : null;
                                         })()}
-                                        {selectedSalaryColumns.includes("Net Payable") && (
+                                        {visibleSalaryColumns.includes("Net Payable") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 bg-emerald-50 text-emerald-800 text-right">Net Payable</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Payment Status") && (
+                                        {visibleSalaryColumns.includes("Payment Status") && (
                                           <th rowSpan={2} className="sticky top-0 z-30 px-3 py-2.5 border-l border-slate-200 bg-violet-50 text-violet-900 text-center font-bold align-middle">Status</th>
                                         )}
                                       </tr>
                                       <tr className="border-t border-slate-200">
-                                        {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
+                                        {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold">Code & Name</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Skill Category") && (
+                                        {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Skill Category</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Job Role") && (
+                                        {visibleSalaryColumns.includes("Job Role") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Job Role</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Present Days") && (
+                                        {visibleSalaryColumns.includes("Present Days") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Present Days</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Daily Wage") && (
+                                        {visibleSalaryColumns.includes("Daily Wage") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Daily Wage</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Total Salary") && (
+                                        {visibleSalaryColumns.includes("Total Salary") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Total Salary (Full Month)</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
+                                        {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Gross (Monthly)</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Basic Salary") && (
+                                        {visibleSalaryColumns.includes("Basic Salary") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Basic Salary</th>
                                         )}
                                     
-                                        {selectedSalaryColumns.includes("Employer PF (13%)") && (
+                                        {visibleSalaryColumns.includes("Employer PF (13%)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">PF</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
+                                        {visibleSalaryColumns.includes("Employer ESIC (3.25%)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-blue-50 text-blue-800">ESIC</th>
                                         )}
                                     
-                                        {selectedSalaryColumns.includes("Employee PF (12%)") && (
+                                        {visibleSalaryColumns.includes("Employee PF (12%)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PF</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
+                                        {visibleSalaryColumns.includes("Employee ESIC (0.75%)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">ESIC</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Professional Tax (PT)") && (
+                                        {visibleSalaryColumns.includes("Professional Tax (PT)") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">PT</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Advance Balance") && (
+                                        {visibleSalaryColumns.includes("Advance Balance") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Adv</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Uniform Deductions") && (
+                                        {visibleSalaryColumns.includes("Uniform Deductions") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Uniform</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Penalty Balance") && (
+                                        {visibleSalaryColumns.includes("Penalty Balance") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Pen</th>
                                         )}
                                     
-                                        {selectedSalaryColumns.includes("Net Salary") && (
+                                        {visibleSalaryColumns.includes("Net Salary") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-800 text-center font-bold">Net Salary</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Total Deductions") && (
+                                        {visibleSalaryColumns.includes("Total Deductions") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-900 text-center font-bold">Total Ded.</th>
                                         )}
                                     
-                                        {selectedSalaryColumns.includes("Food Perk") && (
+                                        {visibleSalaryColumns.includes("Food Perk") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Food</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Accommodation Perk") && (
+                                        {visibleSalaryColumns.includes("Accommodation Perk") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Accom</th>
                                         )}
-                                        {selectedSalaryColumns.includes("Conveyance Perk") && (
+                                        {visibleSalaryColumns.includes("Conveyance Perk") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-indigo-50 text-indigo-800">Conv</th>
                                         )}
                                     
-                                        {selectedSalaryColumns.includes("Net Payable") && (
+                                        {visibleSalaryColumns.includes("Net Payable") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-emerald-50 text-emerald-800 text-right font-black">Net Payable</th>
                                         )}
                                       </tr>
@@ -2611,8 +2636,8 @@ export default function ModuleContent() {
                                           <td 
                                             colSpan={
                                               1 +
-                                              ((selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) ? 1 : 0) +
-                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => selectedSalaryColumns.includes(c)).length
+                                              ((visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) ? 1 : 0) +
+                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => visibleSalaryColumns.includes(c)).length
                                             } 
                                             className="p-8 text-center text-xs text-slate-400 font-medium"
                                           >
@@ -2692,117 +2717,117 @@ export default function ModuleContent() {
                                                   className="w-3.5 h-3.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] cursor-pointer"
                                                 />
                                               </td>
-                                              {(selectedSalaryColumns.includes("Employee Code") || selectedSalaryColumns.includes("Employee Name")) && (
+                                              {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 bg-slate-50/20 text-left truncate">
-                                                  {selectedSalaryColumns.includes("Employee Name") && (
+                                                  {visibleSalaryColumns.includes("Employee Name") && (
                                                     <div className="truncate" title={emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}>{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</div>
                                                   )}
-                                                  {selectedSalaryColumns.includes("Employee Code") && (
+                                                  {visibleSalaryColumns.includes("Employee Code") && (
                                                     <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate" title={`${emp.employeeCode} • ${emp.location || "No Site"}`}>{emp.employeeCode} • {emp.location || "No Site"}</div>
                                                   )}
                                                 </td>
                                               )}
           
-                                              {selectedSalaryColumns.includes("Skill Category") && (
+                                              {visibleSalaryColumns.includes("Skill Category") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.skillCategory || "-"}>
                                                   {emp.skillCategory || "-"}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Job Role") && (
+                                              {visibleSalaryColumns.includes("Job Role") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.role || "-"}>
                                                   {emp.role || "-"}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Present Days") && (
+                                              {visibleSalaryColumns.includes("Present Days") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-[#f57416] bg-orange-50/10">
                                                   {presents}
                                                 </td>
                                               )}
 
-                                              {selectedSalaryColumns.includes("Daily Wage") && (
+                                              {visibleSalaryColumns.includes("Daily Wage") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">
                                                   ₹{resolveEmployeeDailyWage(emp).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Total Salary") && (
+                                              {visibleSalaryColumns.includes("Total Salary") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{fullMonthSalary.toLocaleString("en-IN")}</td>
                                               )}
-                                              {selectedSalaryColumns.includes("Gross Salary (Monthly)") && (
+                                              {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium">₹{gross.toLocaleString("en-IN")}</td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Basic Salary") && (
+                                              {visibleSalaryColumns.includes("Basic Salary") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium text-slate-655 bg-slate-50/10">₹{basic.toLocaleString("en-IN")}</td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Employer PF (13%)") && (
+                                              {visibleSalaryColumns.includes("Employer PF (13%)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erPf).toLocaleString("en-IN")}` : ""}</td>
                                               )}
-                                              {selectedSalaryColumns.includes("Employer ESIC (3.25%)") && (
+                                              {visibleSalaryColumns.includes("Employer ESIC (3.25%)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erEsic).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Employee PF (12%)") && (
+                                              {visibleSalaryColumns.includes("Employee PF (12%)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empPf).toLocaleString("en-IN")}` : ""}</td>
                                               )}
-                                              {selectedSalaryColumns.includes("Employee ESIC (0.75%)") && (
+                                              {visibleSalaryColumns.includes("Employee ESIC (0.75%)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empEsic).toLocaleString("en-IN")}` : ""}</td>
                                               )}
-                                              {selectedSalaryColumns.includes("Professional Tax (PT)") && (
+                                              {visibleSalaryColumns.includes("Professional Tax (PT)") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-medium">{isPtEnabled ? `₹${pt}` : ""}</td>
                                               )}
-                                              {selectedSalaryColumns.includes("Advance Balance") && (
+                                              {visibleSalaryColumns.includes("Advance Balance") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
                                                   {adv > 0 ? <span className="font-semibold text-blue-700">₹{adv}</span> : "-"}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Uniform Deductions") && (
+                                              {visibleSalaryColumns.includes("Uniform Deductions") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
                                                   {uniform > 0 ? <span className="font-semibold text-rose-600">₹{uniform}</span> : "-"}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Penalty Balance") && (
+                                              {visibleSalaryColumns.includes("Penalty Balance") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
                                                   {pen > 0 ? <span className="font-semibold text-rose-600">₹{pen}</span> : "-"}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Net Salary") && (
+                                              {visibleSalaryColumns.includes("Net Salary") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-amber-800 bg-amber-50/10 font-semibold">
                                                   ₹{Math.round(netSalaryValue).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Total Deductions") && (
+                                              {visibleSalaryColumns.includes("Total Deductions") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-100/10 font-semibold">
                                                   ₹{Math.round(totalDeductionsValue).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Food Perk") && (
+                                              {visibleSalaryColumns.includes("Food Perk") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
                                                   {food || 0}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Accommodation Perk") && (
+                                              {visibleSalaryColumns.includes("Accommodation Perk") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
                                                   {acc || 0}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Conveyance Perk") && (
+                                              {visibleSalaryColumns.includes("Conveyance Perk") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center text-[#ff791a] bg-indigo-50/10 font-semibold">
                                                   {conv || 0}
                                                 </td>
                                               )}
                                           
-                                              {selectedSalaryColumns.includes("Net Payable") && (
+                                              {visibleSalaryColumns.includes("Net Payable") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 bg-emerald-50 text-emerald-800 text-right font-black text-xs">
                                                   ₹{(presents <= 0 ? 0 : Math.round(Math.max(0, netPayableValue))).toLocaleString("en-IN")}
                                                 </td>
                                               )}
-                                              {selectedSalaryColumns.includes("Payment Status") && (
+                                              {visibleSalaryColumns.includes("Payment Status") && (
                                                 <td className={`px-2 py-1.5 border-l border-r border-slate-150 text-center align-middle bg-violet-50 ${isSelected ? "!bg-orange-50" : ""}`}>
                                                   {canEditSalary ? (
                                                   <select id={`payment-status-${emp.id}`} name={`paymentStatus_${emp.id}`}

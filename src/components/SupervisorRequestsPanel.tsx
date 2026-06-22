@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle, MessageSquare, XCircle } from "lucide-react";
-import { SupervisorRequest } from "../types";
+import { resolveSupervisorLabel } from "../lib/resolve-supervisor-label";
+import { SchoolSupervisor, SupervisorRequest } from "../types";
 import { resolvePhotoSrc } from "../lib/media-url";
 
 interface SupervisorRequestsPanelProps {
   requests: SupervisorRequest[];
+  supervisors: SchoolSupervisor[];
   onRespond: (id: string, adminResponse: string, status: "responded" | "closed") => Promise<boolean>;
   onClose: (id: string, note?: string) => Promise<boolean>;
   onResolveEscalation?: (
@@ -66,6 +68,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function SupervisorRequestsPanel({
   requests,
+  supervisors,
   onRespond,
   onClose,
   onResolveEscalation,
@@ -79,22 +82,35 @@ export default function SupervisorRequestsPanel({
   const [responseText, setResponseText] = useState<Record<string, string>>({});
   const [submittingId, setSubmittingId] = useState<string | null>(null);
 
+  const enriched = useMemo(
+    () =>
+      requests.map((request) => ({
+        ...request,
+        supervisorName: resolveSupervisorLabel(
+          request.supervisorId,
+          request.supervisorName,
+          supervisors,
+        ),
+      })),
+    [requests, supervisors],
+  );
+
   const blocks = useMemo(() => {
     const set = new Set<string>();
-    requests.forEach((r) => r.schools?.forEach((s) => s.block && set.add(s.block)));
+    enriched.forEach((r) => r.schools?.forEach((s) => s.block && set.add(s.block)));
     return Array.from(set).sort();
-  }, [requests]);
+  }, [enriched]);
 
   const supervisorOptions = useMemo(() => {
     const map = new Map<string, string>();
-    requests.forEach((r) => {
+    enriched.forEach((r) => {
       if (r.supervisorId) map.set(r.supervisorId, r.supervisorName);
     });
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [requests]);
+  }, [enriched]);
 
   const filtered = useMemo(() => {
-    let rows = [...requests];
+    let rows = [...enriched];
     if (statusFilter) rows = rows.filter((r) => r.status === statusFilter);
     if (blockFilter) {
       rows = rows.filter((r) => r.schools?.some((s) => s.block === blockFilter));
@@ -104,7 +120,7 @@ export default function SupervisorRequestsPanel({
       (a, b) =>
         new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
     );
-  }, [requests, blockFilter, supervisorFilter, statusFilter]);
+  }, [enriched, blockFilter, supervisorFilter, statusFilter]);
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const escalatedCount = requests.filter((r) => r.status === "escalated").length;

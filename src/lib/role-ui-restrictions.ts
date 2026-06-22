@@ -78,7 +78,6 @@ export const OBSERVER_SALARY_PRESET: ModuleUiRestrictions = {
     "Net Payable",
     "Payment Status",
   ],
-  hideColumnPicker: true,
 };
 
 export function createEmptyRoleUiRestrictions(): RoleUiRestrictions {
@@ -108,6 +107,24 @@ export function isColumnAllowed(
   const allowed = moduleRestrictions?.allowedColumns;
   if (!allowed?.length) return true;
   return allowed.includes(column);
+}
+
+export function getSelectableColumns(
+  moduleRestrictions: ModuleUiRestrictions | undefined,
+  allColumns: readonly string[],
+): string[] {
+  const allowed = moduleRestrictions?.allowedColumns;
+  if (!allowed?.length) return [...allColumns];
+  return allColumns.filter((column) => allowed.includes(column));
+}
+
+export function clampSelectedColumns(
+  selected: string[],
+  moduleRestrictions: ModuleUiRestrictions | undefined,
+  allColumns: readonly string[],
+): string[] {
+  const selectable = new Set(getSelectableColumns(moduleRestrictions, allColumns));
+  return selected.filter((column) => selectable.has(column));
 }
 
 export function isFilterLocked(

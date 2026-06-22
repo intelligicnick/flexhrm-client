@@ -17,12 +17,14 @@ import {
   visitMatchesFilter,
   type SupervisorHistoryFilter,
 } from "../lib/supervisor-dates";
-import { SchoolVisit } from "../types";
+import { resolveSupervisorLabel } from "../lib/resolve-supervisor-label";
+import { SchoolSupervisor, SchoolVisit } from "../types";
 import { DateInput } from "./ui/DateInput";
 import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
+  supervisors: SchoolSupervisor[];
   onUpdateStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
   onBulkUpdateStatus?: (ids: string[], status: "approved" | "rejected") => Promise<boolean>;
   readOnly?: boolean;
@@ -158,6 +160,7 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDet
 
 export default function SupervisorVisitsPanel({
   visits,
+  supervisors,
   onUpdateStatus,
   onBulkUpdateStatus,
   readOnly = false,
@@ -179,15 +182,31 @@ export default function SupervisorVisitsPanel({
     photoIndex: number;
   } | null>(null);
 
-  const blocks = useMemo(
-    () => Array.from(new Set(visits.map((v) => v.block).filter(Boolean))).sort(),
-    [visits],
+  const enriched = useMemo(
+    () =>
+      visits.map((visit) => ({
+        ...visit,
+        supervisorName: resolveSupervisorLabel(
+          visit.supervisorId,
+          visit.supervisorName,
+          supervisors,
+        ),
+      })),
+    [visits, supervisors],
   );
 
-  const supervisors = useMemo(
-    () => Array.from(new Set(visits.map((v) => v.supervisorName).filter(Boolean))).sort(),
-    [visits],
+  const blocks = useMemo(
+    () => Array.from(new Set(enriched.map((v) => v.block).filter(Boolean))).sort(),
+    [enriched],
   );
+
+  const supervisorOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    enriched.forEach((visit) => {
+      if (visit.supervisorId) map.set(visit.supervisorId, visit.supervisorName);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [enriched]);
 
   const submittedCount = useMemo(
     () => visits.filter((v) => v.status === "submitted").length,
@@ -200,7 +219,7 @@ export default function SupervisorVisitsPanel({
   );
 
   const filtered = useMemo(() => {
-    let rows = [...visits];
+    let rows = [...enriched];
     const q = searchTerm.trim().toLowerCase();
     if (q) {
       rows = rows.filter(
@@ -212,12 +231,12 @@ export default function SupervisorVisitsPanel({
       );
     }
     if (blockFilter) rows = rows.filter((v) => v.block === blockFilter);
-    if (supervisorFilter) rows = rows.filter((v) => v.supervisorName === supervisorFilter);
+    if (supervisorFilter) rows = rows.filter((v) => v.supervisorId === supervisorFilter);
     if (statusFilter) rows = rows.filter((v) => v.status === statusFilter);
     if (visitTypeFilter) rows = rows.filter((v) => (v.visitType || "adhoc") === visitTypeFilter);
     if (dateFilter) rows = rows.filter((v) => visitMatchesFilter(v.visitDate, dateFilter));
     return rows.sort((a, b) => visitText(b.visitDate).localeCompare(visitText(a.visitDate)));
-  }, [visits, searchTerm, blockFilter, supervisorFilter, statusFilter, visitTypeFilter, dateFilter]);
+  }, [enriched, searchTerm, blockFilter, supervisorFilter, statusFilter, visitTypeFilter, dateFilter]);
 
   const selectableVisits = useMemo(
     () => filtered.filter((v) => !readOnly && v.status === "submitted"),
@@ -438,8 +457,8 @@ export default function SupervisorVisitsPanel({
             className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs cursor-pointer"
           >
             <option value="">All Supervisors</option>
-            {supervisors.map((name) => (
-              <option key={name} value={name}>
+            {supervisorOptions.map(([id, name]) => (
+              <option key={id} value={id}>
                 {name}
               </option>
             ))}

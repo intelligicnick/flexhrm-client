@@ -85,6 +85,8 @@ function StatusBadge({ status }: { status: CommitmentDiary["status"] }) {
   );
 }
 
+import { resolveSupervisorLabel as resolveSupervisorDisplayName } from "../lib/resolve-supervisor-label";
+
 function resolveSchoolLabel(entry: CommitmentDiary, schools: SchoolWork[]): string {
   const stored = String(entry.schoolName || "").trim();
   if (stored) return stored;
@@ -99,11 +101,7 @@ function resolveSupervisorLabel(
   entry: CommitmentDiary,
   supervisors: SchoolSupervisor[],
 ): string {
-  const stored = String(entry.supervisorName || "").trim();
-  const supervisor = supervisors.find((row) => row.id === entry.supervisorId);
-  if (supervisor?.name) return supervisor.name;
-  if (stored && !/^\d{10}$/.test(stored)) return stored;
-  return supervisor?.phone || stored || entry.supervisorId;
+  return resolveSupervisorDisplayName(entry.supervisorId, entry.supervisorName, supervisors);
 }
 
 function buildCommitmentByDate(

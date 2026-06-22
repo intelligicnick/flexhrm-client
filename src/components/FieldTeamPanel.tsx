@@ -168,6 +168,7 @@ export default function FieldTeamPanel({
       {view === "visits" ? (
         <SupervisorVisitsPanel
           visits={visits}
+          supervisors={supervisors}
           onUpdateStatus={onUpdateVisitStatus}
           onBulkUpdateStatus={onBulkUpdateVisitStatus}
           readOnly={readOnly}
@@ -175,6 +176,7 @@ export default function FieldTeamPanel({
       ) : view === "requests" ? (
         <SupervisorRequestsPanel
           requests={requests}
+          supervisors={supervisors}
           onRespond={onRespondToRequest}
           onClose={onCloseRequest}
           onResolveEscalation={onResolveEscalation}
