@@ -87,7 +87,7 @@ describe("computeProratedGrossAndBasic", () => {
 });
 
 describe("resolveFullMonthSalary", () => {
-  it("uses calendar days times daily wage for daily wage employees", () => {
+  it("uses working days in month times daily wage for daily wage employees", () => {
     const emp = {
       grossSalary: 15000,
       dailyWage: 500,
@@ -97,6 +97,17 @@ describe("resolveFullMonthSalary", () => {
     expect(resolveFullMonthSalary(emp, "January 2026")).toBe(15500);
     expect(resolveFullMonthSalary(emp, "April 2026")).toBe(15000);
     expect(resolveFullMonthSalary(emp, "February 2026")).toBe(14000);
+  });
+
+  it("uses salary-cycle working days for 26-day daily wage employees", () => {
+    const emp = {
+      grossSalary: 13000,
+      dailyWage: 500,
+      workingDaysType: "26 Days (Sun Off)",
+      salaryWageMode: "daily" as const,
+    };
+    expect(resolveFullMonthSalary(emp, "June 2026")).toBe(13000);
+    expect(resolveFullMonthSalary(emp, "January 2026")).toBe(13500);
   });
 
   it("uses stored gross for monthly wage employees", () => {

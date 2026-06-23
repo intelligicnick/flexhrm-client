@@ -215,7 +215,7 @@ export default function BulkAttendanceDateCalendar({
       <div>
         <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-1 mb-2 text-left">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Click dates to select. Arrow keys + Shift for ranges. Weekly offs are skipped per employee when applied.
+            Click dates to select. Arrow keys + Shift for ranges. Weekly offs are marked as WO per employee based on month and salary cycle.
           </p>
           <span className="text-orange-500 font-extrabold text-[9px]">
             ⚡ Click C1-C7 (Columns) or W1-W5 (Weeks) to bulk toggle

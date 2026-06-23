@@ -10,6 +10,7 @@ import {
   openAppUninstall,
 } from "../../lib/supervisor-installed-apps";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
+import { SupervisorActionButton } from "./SupervisorUI";
 
 type GatePhase = "scanning" | "blocked" | "clear" | "native_required";
 
@@ -178,13 +179,16 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
 
           <div className="px-4 pb-5 space-y-3">
             <p className="text-[11px] text-slate-500 text-center">{t("appsCheckUninstallHint")}</p>
-            <button
+            <SupervisorActionButton
               type="button"
               onClick={() => void runScan()}
-              className="w-full py-3.5 rounded-2xl bg-[#ff791a] hover:bg-[#e4640c] text-white text-sm font-black cursor-pointer"
+              loading={phase === "scanning"}
+              loadingText={t("loading")}
+              fullWidth
+              className="py-3.5 text-sm font-black"
             >
               {t("appsCheckRescan")}
-            </button>
+            </SupervisorActionButton>
           </div>
         </div>
       </div>

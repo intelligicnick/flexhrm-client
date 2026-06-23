@@ -556,6 +556,11 @@ export default function ModuleContent() {
     fieldTeamView,
     setFieldTeamView,
     tenderDeadlineFilter,
+    renewalExpiryFilter,
+    bgDdExpiryFilter,
+    bgDdTypeFilter,
+    schoolDistrictFilter,
+    setSchoolDistrictFilter,
     rawSchoolPartners,
     rawSchoolSupervisors,
     isSupervisorFormOpen,
@@ -4549,7 +4554,7 @@ export default function ModuleContent() {
                                                   ))}
                                                 </div>
                                                 <p className="text-[10px] text-slate-500 mt-1.5">
-                                                  Weekly off days (Sun for 26-day, Sat/Sun for 22-day) are skipped automatically per employee.
+                                                  Weekly off days (Sun for 26-day, Sat/Sun for 22-day) are marked as WO automatically per employee based on the selected month and salary cycle.
                                                 </p>
                                               </div>
                                             </div>
@@ -5072,6 +5077,8 @@ export default function ModuleContent() {
                                       supervisors={rawSchoolSupervisors}
                                       selectedIds={selectedSchoolIds}
                                       onSelectionChange={setSelectedSchoolIds}
+                                      districtFilter={schoolDistrictFilter}
+                                      onDistrictFilterChange={setSchoolDistrictFilter}
                                       onEditClick={(school) => {
                                         setCurrentSchool(school);
                                         setIsSchoolFormOpen(true);
@@ -5392,6 +5399,7 @@ export default function ModuleContent() {
                                     tabLabel={activeSidebarTab}
                                     renewals={categoryRenewals}
                                     readOnly={!userPermissions.renewals?.edit}
+                                    initialExpiryFilter={renewalExpiryFilter}
                                     onRefresh={fetchRenewals}
                                     onCreate={handleCreateRenewal}
                                     onUpdate={handleUpdateRenewal}
@@ -5406,6 +5414,8 @@ export default function ModuleContent() {
                               records={rawBgDdRecords}
                               contracts={rawContracts}
                               readOnly={!userPermissions.bids?.edit}
+                              initialExpiryFilter={bgDdExpiryFilter}
+                              initialTypeFilter={bgDdTypeFilter}
                               onRefresh={fetchBgDdRecords}
                               onCreate={handleCreateBgDdRecord}
                               onUpdate={handleUpdateBgDdRecord}

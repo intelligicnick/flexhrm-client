@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useOutletContext } from "react-router-dom";
-import { ArrowLeft, Camera, CheckCircle2, ImagePlus, Loader2, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, ImagePlus, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SchoolWork, SCHOOL_MATERIAL_ITEMS, SchoolVisit } from "../../types";
 import { parseApiError } from "../../api";
 import {
@@ -24,7 +24,7 @@ import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import { resolvePhotoSrc } from "../../lib/media-url";
-import { SupervisorLoadingScreen } from "./SupervisorUI";
+import { SupervisorActionButton, SupervisorLoadingScreen } from "./SupervisorUI";
 
 function photoSrc(photo: StampedVisitPhoto) {
   return resolvePhotoSrc(photo);
@@ -466,24 +466,19 @@ export default function SupervisorVisitPage() {
               </div>
             )}
 
-            <button
+            <SupervisorActionButton
               type="button"
               onClick={handleLiveCapture}
               disabled={capturingPhoto || visitBlocked || !gpsReady}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#ff791a] to-[#ff981a] py-4 text-sm font-black text-white shadow-lg shadow-orange-200/60 cursor-pointer disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
+              loading={capturingPhoto}
+              loadingText={t("stampingPhoto")}
+              variant="gradient"
+              fullWidth
+              className="py-4 text-sm font-black"
+              icon={photos.length > 0 ? <ImagePlus size={20} /> : <Camera size={20} />}
             >
-              {capturingPhoto ? (
-                <>
-                  <Loader2 size={20} className="animate-spin" />
-                  {t("stampingPhoto")}
-                </>
-              ) : (
-                <>
-                  {photos.length > 0 ? <ImagePlus size={20} /> : <Camera size={20} />}
-                  {photos.length > 0 ? t("addAnotherPhoto") : t("takePhoto")}
-                </>
-              )}
-            </button>
+              {photos.length > 0 ? t("addAnotherPhoto") : t("takePhoto")}
+            </SupervisorActionButton>
 
             {!gpsReady && (
               <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
@@ -509,16 +504,19 @@ export default function SupervisorVisitPage() {
       </form>
 
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-30 px-4 pt-3 pb-4 safe-area-bottom bg-white border-t border-slate-200">
-        <button
+        <SupervisorActionButton
           type="button"
           onClick={() => formRef.current?.requestSubmit()}
           disabled={!canSubmit}
-          className="w-full flex items-center justify-center gap-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold py-3.5 rounded-xl cursor-pointer disabled:bg-slate-300 disabled:text-slate-500 text-base"
+          loading={saving}
+          loadingText={t("submitting")}
+          fullWidth
+          className="py-3.5 text-base"
+          icon={<Save size={18} />}
         >
-          <Save size={18} />
-          {saving ? t("submitting") : t("submitVisit")}
+          {t("submitVisit")}
           {photos.length > 0 && !saving && <span className="text-orange-100">({photos.length})</span>}
-        </button>
+        </SupervisorActionButton>
       </div>
     </div>
   );

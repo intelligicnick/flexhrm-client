@@ -2,6 +2,10 @@ import { SchoolWork } from "../types";
 
 type SchoolsFetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
+export function normalizeSchoolWorkId(id: string | number | null | undefined): string {
+  return String(id ?? "").trim();
+}
+
 let cachedSchools: SchoolWork[] | null = null;
 let cachedAt = 0;
 let inFlight: Promise<SchoolWork[]> | null = null;

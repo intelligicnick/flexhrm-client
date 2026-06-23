@@ -21,9 +21,11 @@ export function latestVisitDateBySchool(
 ): Map<string, string> {
   const map = new Map<string, string>();
   for (const visit of visits) {
-    const prev = map.get(visit.schoolWorkId);
+    const schoolId = String(visit.schoolWorkId || "").trim();
+    if (!schoolId) continue;
+    const prev = map.get(schoolId);
     if (!prev || visit.visitDate > prev) {
-      map.set(visit.schoolWorkId, visit.visitDate);
+      map.set(schoolId, visit.visitDate);
     }
   }
   return map;

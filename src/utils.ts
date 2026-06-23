@@ -6,6 +6,7 @@
 import * as XLSX from "xlsx";
 import { Employee, EXCEL_ROW_HEADERS } from "./types";
 import { getDaysInMonthStatic } from "./lib/date-helpers";
+import { countWorkingDaysInMonth } from "./lib/attendance-helpers";
 import {
   getWorkingDaysCount,
   inferSalaryWageMode,
@@ -556,15 +557,15 @@ export function computeProratedGrossAndBasic(
   };
 }
 
-/** Full-month salary before attendance proration. Daily: daily wage × calendar days; monthly: stored gross. */
+/** Full-month salary before attendance proration. Daily: daily wage × working days in month; monthly: stored gross. */
 export function resolveFullMonthSalary(
   emp: Pick<Employee, "grossSalary" | "dailyWage" | "workingDaysType" | "salaryWageMode">,
   month: string,
 ): number {
   if (resolveSalaryWageMode(emp) === "daily") {
     const dailyWage = resolveEmployeeDailyWage(emp);
-    const calendarDays = getDaysInMonthStatic(month);
-    return Math.round(dailyWage * calendarDays);
+    const workingDays = countWorkingDaysInMonth(emp.workingDaysType, month);
+    return Math.round(dailyWage * workingDays);
   }
   return Number(emp.grossSalary) || 0;
 }

@@ -15,7 +15,8 @@ import {
   canVisitSchoolAgain,
   latestVisitDateBySchool,
 } from "../../lib/supervisor-visit-cooldown";
-import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
+import { fetchSupervisorSchools, normalizeSchoolWorkId } from "../../lib/supervisor-schools-cache";
+import { SupervisorActionButton } from "./SupervisorUI";
 
 type SelectionMode = "single" | "multi" | "range";
 
@@ -65,6 +66,7 @@ export default function SupervisorCalendarPage() {
     } catch {
       setPlanned([]);
       setCommitments([]);
+      setRecentVisits([]);
     } finally {
       setLoading(false);
     }
@@ -185,15 +187,15 @@ export default function SupervisorCalendarPage() {
     const map = latestVisitDateBySchool(recentVisits);
     const blocked = new Set<string>();
     for (const [schoolId, lastVisit] of map) {
-      if (!canVisitSchoolAgain(lastVisit)) blocked.add(schoolId);
+      if (!canVisitSchoolAgain(lastVisit)) blocked.add(normalizeSchoolWorkId(schoolId));
     }
     return blocked;
   }, [recentVisits]);
 
   const getCommittedSchoolIds = (date: string) => {
-    const set = new Set((commitmentByDate.get(date) || []).map((c) => c.schoolWorkId));
-    for (const id of cooldownSchoolIds) set.add(id);
-    return set;
+    return new Set(
+      (commitmentByDate.get(date) || []).map((c) => normalizeSchoolWorkId(c.schoolWorkId)),
+    );
   };
 
   const getCommittedSchoolIdsForRange = (fromDate: string, toDate: string) => {
@@ -201,10 +203,9 @@ export default function SupervisorCalendarPage() {
     for (const entry of commitments) {
       if (entry.status === "cancelled") continue;
       if (entry.fromDate <= toDate && entry.toDate >= fromDate) {
-        set.add(entry.schoolWorkId);
+        set.add(normalizeSchoolWorkId(entry.schoolWorkId));
       }
     }
-    for (const id of cooldownSchoolIds) set.add(id);
     return set;
   };
 
@@ -216,9 +217,23 @@ export default function SupervisorCalendarPage() {
     setError(null);
   };
 
-  const openPlanForm = () => {
+  const openPlanForm = async () => {
     if (selectionIncludesPastDate) {
       setError(t("pastDateNotAllowed"));
+      return;
+    }
+    setError(null);
+    try {
+      const schoolList = await fetchSupervisorSchools(supervisorFetch, {
+        force: schools.length === 0,
+      });
+      setSchools(schoolList);
+      if (schoolList.length === 0) {
+        setError(t("schoolListLoadFailed"));
+        return;
+      }
+    } catch {
+      setError(t("schoolListLoadFailed"));
       return;
     }
     if (selectionMode === "multi") {
@@ -231,7 +246,6 @@ export default function SupervisorCalendarPage() {
       setPlanSchoolIds([]);
     }
     setPlanNotes("");
-    setError(null);
     setShowPlanForm(true);
   };
 
@@ -540,6 +554,7 @@ export default function SupervisorCalendarPage() {
           type="button"
           onClick={openPlanForm}
           disabled={
+            loading ||
             selectionIncludesPastDate ||
             (selectionMode === "range" && !rangeComplete) ||
             (selectionMode === "multi" && selectedDates.length === 0)
@@ -581,6 +596,7 @@ export default function SupervisorCalendarPage() {
                   key={date}
                   label={formatDisplayDate(date, lang)}
                   schools={schools}
+                  loading={loading}
                   selectedIds={schoolsByDate[date] || []}
                   excludedIds={getCommittedSchoolIds(date)}
                   onChange={(ids) =>
@@ -594,6 +610,7 @@ export default function SupervisorCalendarPage() {
             <SchoolMultiSelect
               label={t("selectSchools")}
               schools={schools}
+              loading={loading}
               selectedIds={planSchoolIds}
               excludedIds={
                 selectionMode === "range"
@@ -616,17 +633,16 @@ export default function SupervisorCalendarPage() {
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
-            <button
+            <SupervisorActionButton
               type="submit"
-              disabled={saving || (selectionMode === "range" && !rangeComplete)}
-              className="flex-1 py-2.5 bg-[#ff791a] text-white font-bold rounded-xl text-xs disabled:opacity-50"
+              loading={saving}
+              loadingText={t("loading")}
+              disabled={selectionMode === "range" && !rangeComplete}
+              fullWidth
+              className="flex-1 py-2.5 rounded-xl text-xs"
             >
-              {saving
-                ? t("loading")
-                : selectionMode === "range"
-                  ? t("commitRange")
-                  : t("savePlan")}
-            </button>
+              {selectionMode === "range" ? t("commitRange") : t("savePlan")}
+            </SupervisorActionButton>
             <button
               type="button"
               onClick={resetPlanForm}
@@ -703,7 +719,7 @@ export default function SupervisorCalendarPage() {
                     <Link
                       to={`/supervisor/visit/${plan.schoolWorkId}`}
                       className={`shrink-0 px-3 py-2 text-[10px] font-bold rounded-xl transition ${
-                        cooldownSchoolIds.has(plan.schoolWorkId)
+                        cooldownSchoolIds.has(normalizeSchoolWorkId(plan.schoolWorkId))
                           ? "bg-slate-200 text-slate-500 pointer-events-none"
                           : "bg-[#ff791a] text-white hover:bg-orange-600"
                       }`}
@@ -766,7 +782,7 @@ function CommitmentListSection({
         {entries.map((entry) => {
           const canComplete =
             (entry.status === "committed" || entry.status === "in_progress") &&
-            !cooldownSchoolIds.has(entry.schoolWorkId);
+            !cooldownSchoolIds.has(normalizeSchoolWorkId(entry.schoolWorkId));
           return (
             <div
               key={entry.id}
@@ -810,6 +826,7 @@ function CommitmentListSection({
 function SchoolMultiSelect({
   label,
   schools,
+  loading = false,
   selectedIds,
   excludedIds,
   onChange,
@@ -817,13 +834,16 @@ function SchoolMultiSelect({
 }: {
   label: string;
   schools: SchoolWork[];
+  loading?: boolean;
   selectedIds: string[];
   excludedIds: Set<string>;
   onChange: (ids: string[]) => void;
   t: (key: string) => string;
 }) {
   const [search, setSearch] = useState("");
-  const availableSchools = schools.filter((school) => !excludedIds.has(school.id));
+  const availableSchools = schools.filter(
+    (school) => !excludedIds.has(normalizeSchoolWorkId(school.id)),
+  );
   const filteredSchools = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return availableSchools;
@@ -836,10 +856,11 @@ function SchoolMultiSelect({
   }, [availableSchools, search]);
 
   const toggleSchool = (id: string) => {
+    const normalized = normalizeSchoolWorkId(id);
     onChange(
-      selectedIds.includes(id)
-        ? selectedIds.filter((x) => x !== id)
-        : [...selectedIds, id],
+      selectedIds.includes(normalized)
+        ? selectedIds.filter((x) => x !== normalized)
+        : [...selectedIds, normalized],
     );
   };
 
@@ -854,14 +875,19 @@ function SchoolMultiSelect({
         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs mb-2"
       />
       <div className="max-h-40 overflow-y-auto space-y-1 border border-slate-100 rounded-xl p-2">
-        {filteredSchools.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-2">{t("noSchoolsFound")}</p>
+        {loading && schools.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-3">{t("loading")}</p>
+        ) : filteredSchools.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-2">
+            {schools.length === 0 ? t("schoolListLoadFailed") : t("noSchoolsFound")}
+          </p>
         ) : (
           filteredSchools.map((school) => {
-            const checked = selectedIds.includes(school.id);
+            const schoolId = normalizeSchoolWorkId(school.id);
+            const checked = selectedIds.includes(schoolId);
             return (
               <label
-                key={school.id}
+                key={schoolId}
                 className={`flex items-start gap-2 p-2 rounded-lg cursor-pointer text-xs ${
                   checked ? "bg-orange-50 border border-orange-200" : "hover:bg-slate-50"
                 }`}
@@ -869,7 +895,7 @@ function SchoolMultiSelect({
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={() => toggleSchool(school.id)}
+                  onChange={() => toggleSchool(schoolId)}
                   className="mt-0.5 accent-[#ff791a]"
                 />
                 <span>

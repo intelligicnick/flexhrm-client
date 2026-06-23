@@ -78,9 +78,11 @@ import {
 } from "../lib/employee-bulk-edit-fields";
 import {
   applySalaryFieldChange,
+  applyWageModeSwitch,
+  inferSalaryWageMode,
   isSalaryCascadeField,
   toSalaryFieldValues,
-  type SalaryAnchor,
+  type SalaryWageMode,
 } from "../lib/salary-calc";
 import PasswordInput from "../components/PasswordInput";
 import {
@@ -142,7 +144,7 @@ import {
 import {
   countMonthAttendance,
   getEffectiveAttendanceStatus,
-  isWeeklyOffDay,
+  resolveBulkAttendanceStatus,
   type AttendanceRecordFilter,
 } from "../lib/attendance-helpers";
 import {
@@ -172,9 +174,47 @@ import { TOAST_DURATION_MS } from "../components/ui/AppToast";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 
+function applySalaryFieldsToDraft(
+  emp: Employee,
+  nextDraft: Partial<Employee>,
+  values: ReturnType<typeof toSalaryFieldValues>,
+  wageMode: SalaryWageMode,
+): void {
+  for (const salaryField of [
+    "grossSalary",
+    "dailyWage",
+    "basicSalary",
+    "workingDaysType",
+    "esic",
+  ] as const) {
+    const originalVal = getEmployeeFieldValue(emp, salaryField);
+    const newVal =
+      salaryField === "workingDaysType"
+        ? values.workingDaysType
+        : salaryField === "esic"
+          ? values.esic
+          : String(values[salaryField]);
+
+    if (newVal === originalVal || (newVal === "0" && originalVal === "")) {
+      delete (nextDraft as Record<string, unknown>)[salaryField];
+    } else if (salaryField === "esic" || salaryField === "workingDaysType") {
+      (nextDraft as Record<string, unknown>)[salaryField] = newVal;
+    } else {
+      (nextDraft as Record<string, unknown>)[salaryField] = Number(newVal) || 0;
+    }
+  }
+
+  const originalMode = inferSalaryWageMode(emp);
+  if (wageMode === originalMode) {
+    delete nextDraft.salaryWageMode;
+  } else {
+    nextDraft.salaryWageMode = wageMode;
+  }
+}
+
 function applyBulkEditDraftUpdate(
   prev: Record<string, Partial<Employee>>,
-  anchors: Record<string, SalaryAnchor | null>,
+  wageModes: Record<string, SalaryWageMode>,
   employees: Employee[],
   employeeId: string,
   field: keyof Employee,
@@ -183,53 +223,45 @@ function applyBulkEditDraftUpdate(
   esicEligibilityLimit: number,
 ): {
   drafts: Record<string, Partial<Employee>>;
-  anchors: Record<string, SalaryAnchor | null>;
+  wageModes: Record<string, SalaryWageMode>;
 } {
   const emp = employees.find((e) => resolveEmployeeRecordId(e) === employeeId);
-  if (!emp) return { drafts: prev, anchors };
+  if (!emp) return { drafts: prev, wageModes };
 
   const fieldDef = BULK_EDIT_FIELDS.find((f) => f.key === field);
   const currentDraft = { ...(prev[employeeId] || {}) };
   const nextDraft: Partial<Employee> = { ...currentDraft };
-  const nextAnchors = { ...anchors };
+  const nextWageModes = { ...wageModes };
 
-  if (isSalaryCascadeField(field)) {
+  if (field === "salaryWageMode") {
+    const merged = buildMergedEmployee(emp, currentDraft);
+    const newMode: SalaryWageMode = value === "daily" ? "daily" : "monthly";
+    const currentMode = wageModes[employeeId] ?? inferSalaryWageMode(merged);
+    if (newMode === currentMode) {
+      return { drafts: prev, wageModes };
+    }
+    const values = applyWageModeSwitch(
+      toSalaryFieldValues(merged),
+      newMode,
+      basicSalaryPercent,
+      esicEligibilityLimit,
+    );
+    nextWageModes[employeeId] = newMode;
+    applySalaryFieldsToDraft(emp, nextDraft, values, newMode);
+  } else if (isSalaryCascadeField(field)) {
     const merged = buildMergedEmployee(emp, currentDraft);
     const currentSalary = toSalaryFieldValues(merged);
-    const currentAnchor = anchors[employeeId] ?? null;
-    const { values, anchor } = applySalaryFieldChange(
+    const currentMode = wageModes[employeeId] ?? inferSalaryWageMode(merged);
+    const { values, wageMode: nextMode } = applySalaryFieldChange(
       currentSalary,
-      currentAnchor,
+      currentMode,
       field,
       value,
       basicSalaryPercent,
       esicEligibilityLimit,
     );
-    nextAnchors[employeeId] = anchor;
-
-    for (const salaryField of [
-      "grossSalary",
-      "dailyWage",
-      "basicSalary",
-      "workingDaysType",
-      "esic",
-    ] as const) {
-      const originalVal = getEmployeeFieldValue(emp, salaryField);
-      const newVal =
-        salaryField === "workingDaysType"
-          ? values.workingDaysType
-          : salaryField === "esic"
-            ? values.esic
-            : String(values[salaryField]);
-
-      if (newVal === originalVal || (newVal === "0" && originalVal === "")) {
-        delete (nextDraft as Record<string, unknown>)[salaryField];
-      } else if (salaryField === "esic" || salaryField === "workingDaysType") {
-        (nextDraft as Record<string, unknown>)[salaryField] = newVal;
-      } else {
-        (nextDraft as Record<string, unknown>)[salaryField] = Number(newVal) || 0;
-      }
-    }
+    nextWageModes[employeeId] = nextMode;
+    applySalaryFieldsToDraft(emp, nextDraft, values, nextMode);
   } else {
     const originalVal = getEmployeeFieldValue(emp, field);
     let comparableNew = value;
@@ -250,10 +282,10 @@ function applyBulkEditDraftUpdate(
 
   if (Object.keys(nextDraft).length === 0) {
     const { [employeeId]: _, ...rest } = prev;
-    const { [employeeId]: __, ...restAnchors } = nextAnchors;
-    return { drafts: rest, anchors: restAnchors };
+    const { [employeeId]: __, ...restWageModes } = nextWageModes;
+    return { drafts: rest, wageModes: restWageModes };
   }
-  return { drafts: { ...prev, [employeeId]: nextDraft }, anchors: nextAnchors };
+  return { drafts: { ...prev, [employeeId]: nextDraft }, wageModes: nextWageModes };
 }
 
 function applyBulkEditCustomFieldUpdate(
@@ -456,6 +488,17 @@ export function useHRMSApp() {
   const [employeeListStatusFilter, setEmployeeListStatusFilter] = useState<
     "active" | "exited" | "all" | "eligible_for_exit"
   >("active");
+  const [employeeListLocationFilter, setEmployeeListLocationFilter] = useState("");
+  const [employeeListEsicCoverageFilter, setEmployeeListEsicCoverageFilter] = useState<"" | "covered">("");
+  const [renewalExpiryFilter, setRenewalExpiryFilter] = useState<
+    "all" | "active" | "expiring_soon" | "expired" | "no_expiry" | "alert"
+  >("all");
+  const [bgDdExpiryFilter, setBgDdExpiryFilter] = useState<
+    "all" | "active" | "expiring_soon" | "expired" | "alert"
+  >("all");
+  const [bgDdTypeFilter, setBgDdTypeFilter] = useState<"" | "bg" | "dd">("");
+  const [schoolDistrictFilter, setSchoolDistrictFilter] = useState("");
+  const [showEmployeeChangeRequestsModal, setShowEmployeeChangeRequestsModal] = useState(false);
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Record<string, boolean>>({
     "School Work": false,
     "Bids": false,
@@ -1423,10 +1466,10 @@ export function useHRMSApp() {
   }, [ledgerSelectedEmployeeIds]);
 
   const [bulkEditDrafts, setBulkEditDrafts] = useState<Record<string, Partial<Employee>>>({});
-  const [bulkEditSalaryAnchors, setBulkEditSalaryAnchors] = useState<
-    Record<string, SalaryAnchor | null>
+  const [bulkEditSalaryWageModes, setBulkEditSalaryWageModes] = useState<
+    Record<string, SalaryWageMode>
   >({});
-  const bulkEditSalaryAnchorsRef = useRef<Record<string, SalaryAnchor | null>>({});
+  const bulkEditSalaryWageModesRef = useRef<Record<string, SalaryWageMode>>({});
   const [employeeChangeRequests, setEmployeeChangeRequests] = useState<EmployeeChangeRequest[]>([]);
   const [pendingChangeCount, setPendingChangeCount] = useState(0);
   const [isFetchingChangeRequests, setIsFetchingChangeRequests] = useState(false);
@@ -1838,10 +1881,7 @@ export function useHRMSApp() {
     const entries = filtered.flatMap((emp) =>
       Array.from({ length: end - start + 1 }, (_, i) => {
         const day = start + i;
-        if (
-          isEmployeeExitedOnDayStatic(emp, selectedMonth, day) ||
-          isWeeklyOffDay(emp.workingDaysType, selectedMonth, day)
-        ) {
+        if (isEmployeeExitedOnDayStatic(emp, selectedMonth, day)) {
           return null;
         }
         return {
@@ -1850,7 +1890,12 @@ export function useHRMSApp() {
           location: emp.location,
           monthKey: selectedMonth,
           day,
-          status: bulkStatus,
+          status: resolveBulkAttendanceStatus(
+            emp.workingDaysType,
+            selectedMonth,
+            day,
+            bulkStatus,
+          ),
         };
       }).filter((entry): entry is NonNullable<typeof entry> => entry !== null),
     );
@@ -1868,13 +1913,15 @@ export function useHRMSApp() {
         filtered.forEach(emp => {
           const empData = { ...(updatedMonth[emp.id] || {}) };
           for (let d = start; d <= end; d++) {
-            if (
-              isEmployeeExitedOnDayStatic(emp, selectedMonth, d) ||
-              isWeeklyOffDay(emp.workingDaysType, selectedMonth, d)
-            ) {
+            if (isEmployeeExitedOnDayStatic(emp, selectedMonth, d)) {
               continue;
             }
-            empData[d] = bulkStatus;
+            empData[d] = resolveBulkAttendanceStatus(
+              emp.workingDaysType,
+              selectedMonth,
+              d,
+              bulkStatus,
+            );
           }
           updatedMonth[emp.id] = empData;
         });
@@ -1917,20 +1964,24 @@ export function useHRMSApp() {
         const daysInMonth = getDaysInMonthStatic(monthKey);
         return Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
-          if (
-            emp &&
-            (isEmployeeExitedOnDayStatic(emp, monthKey, day) ||
-              isWeeklyOffDay(emp.workingDaysType, monthKey, day))
-          ) {
+          if (emp && isEmployeeExitedOnDayStatic(emp, monthKey, day)) {
             return null;
           }
+          const workingDayStatus = sortedDates.includes(day) ? "P" : "A";
           return {
             employeeId: empId,
             employeeCode: emp?.employeeCode,
             location: emp?.location,
             monthKey,
             day,
-            status: sortedDates.includes(day) ? "P" : "A",
+            status: emp
+              ? resolveBulkAttendanceStatus(
+                  emp.workingDaysType,
+                  monthKey,
+                  day,
+                  workingDayStatus,
+                )
+              : workingDayStatus,
           };
         }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       })
@@ -1955,18 +2006,18 @@ export function useHRMSApp() {
             const emp = employees.find(e => e.id === empId);
             const empData = { ...(monthData[empId] || {}) };
             for (let d = 1; d <= daysInMonth; d++) {
-              if (
-                emp &&
-                (isEmployeeExitedOnDayStatic(emp, m, d) ||
-                  isWeeklyOffDay(emp.workingDaysType, m, d))
-              ) {
+              if (emp && isEmployeeExitedOnDayStatic(emp, m, d)) {
                 continue;
               }
-              if (sortedDates.includes(d)) {
-                empData[d] = "P";
-              } else {
-                empData[d] = "A";
-              }
+              const workingDayStatus = sortedDates.includes(d) ? "P" : "A";
+              empData[d] = emp
+                ? resolveBulkAttendanceStatus(
+                    emp.workingDaysType,
+                    m,
+                    d,
+                    workingDayStatus,
+                  )
+                : workingDayStatus;
             }
             monthData[empId] = empData;
           });
@@ -5031,9 +5082,9 @@ export function useHRMSApp() {
 
   const handleBulkEditDraftChange = (employeeId: string, field: keyof Employee, value: string) => {
     setBulkEditDrafts((prev) => {
-      const { drafts, anchors } = applyBulkEditDraftUpdate(
+      const { drafts, wageModes } = applyBulkEditDraftUpdate(
         prev,
-        bulkEditSalaryAnchorsRef.current,
+        bulkEditSalaryWageModesRef.current,
         rawEmployees,
         employeeId,
         field,
@@ -5041,8 +5092,8 @@ export function useHRMSApp() {
         basicSalaryPercentage,
         esicEligibilityLimit,
       );
-      bulkEditSalaryAnchorsRef.current = anchors;
-      setBulkEditSalaryAnchors(anchors);
+      bulkEditSalaryWageModesRef.current = wageModes;
+      setBulkEditSalaryWageModes(wageModes);
       return drafts;
     });
   };
@@ -5057,11 +5108,11 @@ export function useHRMSApp() {
     }
     setBulkEditDrafts((prev) => {
       let nextDrafts = prev;
-      let nextAnchors = bulkEditSalaryAnchorsRef.current;
+      let nextWageModes = bulkEditSalaryWageModesRef.current;
       for (const update of updates) {
         const result = applyBulkEditDraftUpdate(
           nextDrafts,
-          nextAnchors,
+          nextWageModes,
           rawEmployees,
           update.employeeId,
           update.field,
@@ -5070,10 +5121,10 @@ export function useHRMSApp() {
           esicEligibilityLimit,
         );
         nextDrafts = result.drafts;
-        nextAnchors = result.anchors;
+        nextWageModes = result.wageModes;
       }
-      bulkEditSalaryAnchorsRef.current = nextAnchors;
-      setBulkEditSalaryAnchors(nextAnchors);
+      bulkEditSalaryWageModesRef.current = nextWageModes;
+      setBulkEditSalaryWageModes(nextWageModes);
       return nextDrafts;
     });
   };
@@ -5125,8 +5176,8 @@ export function useHRMSApp() {
     });
     if (!confirmed) return;
     setBulkEditDrafts({});
-    bulkEditSalaryAnchorsRef.current = {};
-    setBulkEditSalaryAnchors({});
+    bulkEditSalaryWageModesRef.current = {};
+    setBulkEditSalaryWageModes({});
   };
 
   const handleApplyBulkEmployeeChanges = async () => {
@@ -5153,8 +5204,8 @@ export function useHRMSApp() {
 
       const result = await res.json();
       setBulkEditDrafts({});
-      bulkEditSalaryAnchorsRef.current = {};
-      setBulkEditSalaryAnchors({});
+      bulkEditSalaryWageModesRef.current = {};
+      setBulkEditSalaryWageModes({});
       await fetchEmployees();
       triggerSuccess(
         `Applied bulk edit for ${result.applied ?? result.employeeCount ?? updates.length} employee(s).`,
@@ -5306,7 +5357,7 @@ export function useHRMSApp() {
         body: JSON.stringify({ ids: [id] }),
       });
 
-      if (!res.ok) throw new Error("Delete request refused by backend.");
+      if (!res.ok) throw await parseApiError(res, "Delete request refused by backend.");
 
       setSelectedIds((prev) => prev.filter((item) => item !== id));
       await fetchEmployees();
@@ -5384,7 +5435,7 @@ export function useHRMSApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [id] }),
       });
-      if (!res.ok) throw new Error("Delete request refused by backend.");
+      if (!res.ok) throw await parseApiError(res, "Delete request refused by backend.");
       setSelectedSchoolIds((prev) => prev.filter((item) => item !== id));
       await fetchSchoolWorks();
       await fetchSchoolPartners();
@@ -5409,7 +5460,7 @@ export function useHRMSApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
-      if (!res.ok) throw new Error("Bulk delete rejected.");
+      if (!res.ok) throw await parseApiError(res, "Bulk delete rejected.");
       setSelectedSchoolIds([]);
       await fetchSchoolWorks();
       await fetchSchoolPartners();
@@ -6344,7 +6395,7 @@ export function useHRMSApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [id] }),
       });
-      if (!res.ok) throw new Error("Delete request refused by backend.");
+      if (!res.ok) throw await parseApiError(res, "Delete request refused by backend.");
       await fetchSchoolSupervisors();
       triggerSuccess("School supervisor removed.");
     } catch (err: any) {
@@ -6390,7 +6441,7 @@ export function useHRMSApp() {
         body: JSON.stringify({ ids }),
       });
 
-      if (!res.ok) throw new Error("Bulk delete rejected.");
+      if (!res.ok) throw await parseApiError(res, "Bulk delete rejected.");
 
       setSelectedIds([]);
       await fetchEmployees();
@@ -7261,7 +7312,21 @@ export function useHRMSApp() {
     activePimSubTab,
     employeeListRoleFilter,
     employeeListStatusFilter,
+    employeeListLocationFilter,
+    employeeListEsicCoverageFilter,
     setEmployeeListStatusFilter,
+    setEmployeeListLocationFilter,
+    setEmployeeListEsicCoverageFilter,
+    renewalExpiryFilter,
+    setRenewalExpiryFilter,
+    bgDdExpiryFilter,
+    setBgDdExpiryFilter,
+    bgDdTypeFilter,
+    setBgDdTypeFilter,
+    schoolDistrictFilter,
+    setSchoolDistrictFilter,
+    showEmployeeChangeRequestsModal,
+    setShowEmployeeChangeRequestsModal,
     exitEligibleEmployees,
     exitEligibilityCheckedMonths,
     exitedEmployeesCount,

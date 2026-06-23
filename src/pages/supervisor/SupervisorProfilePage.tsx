@@ -21,6 +21,7 @@ import { toIsoDate } from "../../lib/supervisor-dates";
 import { resolveProfilePhotoSrc, resolvePhotoSrc } from "../../lib/media-url";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorGamificationCard from "./SupervisorGamificationCard";
+import { SupervisorActionButton } from "./SupervisorUI";
 interface SupervisorProfile {
   supervisorId: string;
   name: string;
@@ -331,21 +332,18 @@ export default function SupervisorProfilePage() {
           ))}
         </div>
 
-        <button
+        <SupervisorActionButton
           type="button"
           onClick={handleSaveLanguage}
-          disabled={savingLang || preferredLang === profile.defaultLanguage}
-          className="mt-3 w-full rounded-xl border-2 border-[#ff791a] py-2.5 text-sm font-bold text-[#ff791a] cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
+          loading={savingLang}
+          loadingText={t("savingProfile")}
+          disabled={preferredLang === profile.defaultLanguage}
+          variant="outline"
+          fullWidth
+          className="mt-3 py-2.5 text-sm"
         >
-          {savingLang ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              {t("savingProfile")}
-            </>
-          ) : (
-            t("saveLanguage")
-          )}
-        </button>
+          {t("saveLanguage")}
+        </SupervisorActionButton>
         {langSuccess && (
           <p className="mt-2 text-center text-[11px] font-semibold text-emerald-600 flex items-center justify-center gap-1">
             <Check size={12} />

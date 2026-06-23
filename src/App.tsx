@@ -10,6 +10,7 @@ import "./index.css";
 import NotFoundPage from "./pages/NotFoundPage";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";
+import { ActionButtonFeedback } from "./components/ActionButtonFeedback";
 
 const AdminPortal = lazy(() => import("./AdminPortal"));
 const EmployeeVerifyPage = lazy(() => import("./pages/EmployeeVerifyPage"));
@@ -72,6 +73,7 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <BrowserRouter>
+        <ActionButtonFeedback />
         <AppRoutes />
       </BrowserRouter>
     </AppErrorBoundary>

@@ -1,5 +1,5 @@
 import { Employee } from "../types";
-import { MONTH_NAME_LIST } from "./date-helpers";
+import { getDaysInMonthStatic, MONTH_NAME_LIST } from "./date-helpers";
 import { isEmployeeExitedOnDayStatic } from "./employee-helpers";
 import { getWorkingDaysCount } from "./salary-calc";
 
@@ -28,6 +28,34 @@ export function isWeeklyOffDay(
     return false;
   }
   return dow === 0;
+}
+
+/** Count non-weekly-off days in a calendar month for the employee's salary cycle. */
+export function countWorkingDaysInMonth(
+  workingDaysType: string | undefined,
+  monthStr: string,
+): number {
+  const daysInMonth = getDaysInMonthStatic(monthStr);
+  let count = 0;
+  for (let day = 1; day <= daysInMonth; day++) {
+    if (!isWeeklyOffDay(workingDaysType, monthStr, day)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/** Bulk attendance status: weekly offs are WO; otherwise the supplied working-day status. */
+export function resolveBulkAttendanceStatus(
+  workingDaysType: string | undefined,
+  monthStr: string,
+  dayNum: number,
+  workingDayStatus: string,
+): string {
+  if (isWeeklyOffDay(workingDaysType, monthStr, dayNum)) {
+    return "WO";
+  }
+  return workingDayStatus;
 }
 
 export function getEffectiveAttendanceStatus(

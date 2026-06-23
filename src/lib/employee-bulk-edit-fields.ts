@@ -1,4 +1,5 @@
 import { Employee } from "../types";
+import { inferSalaryWageMode } from "./salary-calc";
 
 export type BulkEditFieldType = "text" | "number" | "select" | "boolean";
 
@@ -35,12 +36,6 @@ const NUMBER_FIELDS = new Set<keyof Employee>([
   "grossSalary",
   "basicSalary",
   "dailyWage",
-  "advance",
-  "penalty",
-  "uniform",
-  "foodPerk",
-  "accommodationPerk",
-  "conveyancePerk",
 ]);
 
 /** Every editable scalar field on the employee master profile (matches form modal tabs). */
@@ -52,9 +47,10 @@ export const BULK_EDIT_FIELDS: BulkEditFieldDef[] = [
   { key: "skillCategory", label: "Skill Category", type: "select", options: SKILL_OPTIONS, minWidth: "130px", group: "Corporate" },
   { key: "role", label: "Job Role", type: "select", dynamicOptions: "role", minWidth: "130px", group: "Corporate" },
   { key: "workingDaysType", label: "Working Days", type: "select", options: WORKING_DAYS_OPTIONS, minWidth: "160px", group: "Corporate" },
-  { key: "grossSalary", label: "Gross Salary", type: "number", minWidth: "100px", group: "Corporate" },
-  { key: "basicSalary", label: "Basic Salary", type: "number", minWidth: "100px", group: "Corporate" },
+  { key: "salaryWageMode", label: "Wage Mode", type: "select", options: ["monthly", "daily"], minWidth: "130px", group: "Corporate" },
+  { key: "grossSalary", label: "Monthly Salary", type: "number", minWidth: "110px", group: "Corporate" },
   { key: "dailyWage", label: "Daily Wage", type: "number", minWidth: "100px", group: "Corporate" },
+  { key: "basicSalary", label: "Basic Salary", type: "number", minWidth: "100px", group: "Corporate" },
   { key: "esic", label: "ESIC", type: "select", options: ESIC_OPTIONS, minWidth: "80px", group: "Corporate" },
   { key: "complianceEnabled", label: "PF/ESIC Compliance", type: "boolean", minWidth: "100px", group: "Corporate" },
   { key: "ptEnabled", label: "Professional Tax", type: "boolean", minWidth: "100px", group: "Corporate" },
@@ -63,13 +59,6 @@ export const BULK_EDIT_FIELDS: BulkEditFieldDef[] = [
   { key: "pfJoiningDate", label: "PF Join Date", type: "text", minWidth: "110px", group: "Corporate" },
   { key: "previousUanNo", label: "Previous UAN", type: "text", minWidth: "120px", group: "Corporate" },
   { key: "previousEsicNo", label: "Previous ESIC", type: "text", minWidth: "120px", group: "Corporate" },
-  // Perks & deductions (employee-level defaults)
-  { key: "advance", label: "Advance", type: "number", minWidth: "90px", group: "Perks" },
-  { key: "penalty", label: "Penalty", type: "number", minWidth: "90px", group: "Perks" },
-  { key: "uniform", label: "Uniform", type: "number", minWidth: "90px", group: "Perks" },
-  { key: "foodPerk", label: "Food Perk", type: "number", minWidth: "90px", group: "Perks" },
-  { key: "accommodationPerk", label: "Accommodation Perk", type: "number", minWidth: "110px", group: "Perks" },
-  { key: "conveyancePerk", label: "Conveyance Perk", type: "number", minWidth: "110px", group: "Perks" },
   // Identity & Personal
   { key: "aadharNo", label: "Aadhar No", type: "text", minWidth: "130px", group: "Identity" },
   { key: "nameAsPerAadharColumn", label: "Name as per Aadhar", type: "text", minWidth: "160px", group: "Identity" },
@@ -125,6 +114,9 @@ export function collectCustomFieldNames(employees: Employee[]): string[] {
 }
 
 export function getEmployeeFieldValue(emp: Employee, key: keyof Employee): string {
+  if (key === "salaryWageMode") {
+    return inferSalaryWageMode(emp);
+  }
   if (key === "complianceEnabled") {
     return emp.complianceEnabled === false ? "No" : "Yes";
   }
@@ -167,6 +159,7 @@ export function parseFieldValueForSubmit(
   raw: string,
 ): unknown {
   if (field.type === "boolean") return raw === "Yes";
+  if (field.key === "salaryWageMode") return raw === "daily" ? "daily" : "monthly";
   if (field.type === "number" || NUMBER_FIELDS.has(field.key)) {
     return Number(raw) || 0;
   }
@@ -266,6 +259,8 @@ export interface BulkEditReviewEntry {
 
 export function formatBulkEditDisplayValue(val: unknown): string {
   if (val === undefined || val === null || val === "") return "(empty)";
+  if (val === "monthly") return "Monthly Wage";
+  if (val === "daily") return "Daily Wage";
   if (typeof val === "boolean") return val ? "Yes" : "No";
   if (typeof val === "number") return String(val);
   return String(val);

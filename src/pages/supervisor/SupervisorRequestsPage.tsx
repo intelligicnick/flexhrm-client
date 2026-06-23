@@ -26,6 +26,7 @@ import { getSupervisorNotificationTarget } from "../../lib/notification-navigati
 import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import { localizeSupervisorNotification } from "../../lib/supervisor-notifications-i18n";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
+import { SupervisorActionButton } from "./SupervisorUI";
 
 type PageTab = "raise" | "mine" | "notifications";
 
@@ -496,14 +497,16 @@ export default function SupervisorRequestsPage() {
           {error && <p className="text-xs text-red-600 font-semibold">{error}</p>}
           {success && <p className="text-xs text-emerald-600 font-semibold">{success}</p>}
 
-          <button
+          <SupervisorActionButton
             type="submit"
-            disabled={submitting}
-            className="w-full py-3 bg-[#ff791a] text-white font-black rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+            loading={submitting}
+            loadingText={t("submittingRequest")}
+            fullWidth
+            className="py-3 text-sm font-black"
+            icon={<Send size={18} />}
           >
-            {submitting ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-            {submitting ? t("submittingRequest") : t("submitRequest")}
-          </button>
+            {t("submitRequest")}
+          </SupervisorActionButton>
         </form>
       ) : tab === "mine" ? (
         <div className="space-y-3">
@@ -648,19 +651,17 @@ export default function SupervisorRequestsPage() {
                         ))}
                       </div>
                     )}
-                    <button
+                    <SupervisorActionButton
                       type="button"
-                      disabled={replyingId === req.id}
+                      loading={replyingId === req.id}
+                      loadingText={t("submittingReply")}
                       onClick={() => void handleReply(req.id)}
-                      className="w-full py-2.5 bg-[#ff791a] text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                      fullWidth
+                      className="py-2.5 text-xs font-black"
+                      icon={<Send size={16} />}
                     >
-                      {replyingId === req.id ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <Send size={16} />
-                      )}
-                      {replyingId === req.id ? t("submittingReply") : t("sendReply")}
-                    </button>
+                      {t("sendReply")}
+                    </SupervisorActionButton>
                   </div>
                 )}
                 {req.status === "closed" && (
@@ -678,19 +679,18 @@ export default function SupervisorRequestsPage() {
                       placeholder={t("escalationPlaceholder")}
                       className="w-full px-3 py-2 border border-rose-200 rounded-xl text-xs resize-none"
                     />
-                    <button
+                    <SupervisorActionButton
                       type="button"
-                      disabled={escalatingId === req.id}
+                      variant="danger"
+                      loading={escalatingId === req.id}
+                      loadingText={t("submittingEscalation")}
                       onClick={() => void handleEscalate(req.id)}
-                      className="w-full py-2.5 bg-rose-600 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                      fullWidth
+                      className="py-2.5 text-xs font-black"
+                      icon={<AlertTriangle size={16} />}
                     >
-                      {escalatingId === req.id ? (
-                        <Loader2 size={16} className="animate-spin" />
-                      ) : (
-                        <AlertTriangle size={16} />
-                      )}
-                      {escalatingId === req.id ? t("submittingEscalation") : t("escalateRequest")}
-                    </button>
+                      {t("escalateRequest")}
+                    </SupervisorActionButton>
                   </div>
                 )}
               </div>

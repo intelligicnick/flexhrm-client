@@ -11,6 +11,7 @@ import {
   BULK_EDIT_FIELDS,
   BOOLEAN_OPTIONS,
   SKILL_OPTIONS,
+  buildMergedEmployee,
   buildReviewEntries,
   collectCustomFieldNames,
   countDraftChanges,
@@ -23,6 +24,7 @@ import {
   BulkEditReviewEntry,
 } from "../lib/employee-bulk-edit-fields";
 import { normalizeSkillCategory } from "../utils";
+import { inferSalaryWageMode, type SalaryWageMode } from "../lib/salary-calc";
 import {
   getEmployeeWageModeRowClassName,
   getEmployeeWageModeStickyCellClassName,
@@ -172,6 +174,110 @@ function ReviewChangeRow({ entry }: { entry: BulkEditReviewEntry }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function formatSalaryAmount(value: number | undefined): string {
+  const num = Number(value) || 0;
+  return num > 0 ? num.toLocaleString("en-IN") : "0";
+}
+
+function isSalaryInputEditable(
+  fieldKey: keyof Employee,
+  wageMode: SalaryWageMode,
+): boolean {
+  if (fieldKey === "grossSalary") return wageMode === "monthly";
+  if (fieldKey === "dailyWage") return wageMode === "daily";
+  return false;
+}
+
+function WageModeToggle({
+  emp,
+  draft,
+  isSelected,
+  onChange,
+}: {
+  emp: Employee;
+  draft: Partial<Employee> | undefined;
+  isSelected?: boolean;
+  onChange: (mode: SalaryWageMode) => void;
+}) {
+  const dirty = isFieldDirty(emp, draft, "salaryWageMode");
+  const mode = inferSalaryWageMode(buildMergedEmployee(emp, draft));
+  const isMonthly = mode === "monthly";
+  const selectedClass = isSelected ? "ring-2 ring-blue-500" : "";
+  const dirtyClass = dirty ? "ring-1 ring-amber-300" : "";
+
+  return (
+    <div
+      className={`inline-flex rounded-md border border-slate-250 overflow-hidden bg-white ${selectedClass} ${dirtyClass}`}
+      data-bulk-cell="salaryWageMode"
+      data-employee-id={resolveEmployeeRecordId(emp)}
+    >
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => onChange("monthly")}
+        className={`px-2 py-1 text-[10px] font-bold transition cursor-pointer ${
+          isMonthly ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        Monthly
+      </button>
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => onChange("daily")}
+        className={`px-2 py-1 text-[10px] font-bold transition border-l border-slate-250 cursor-pointer ${
+          !isMonthly ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        Daily
+      </button>
+    </div>
+  );
+}
+
+function CalculatedSalaryCell({
+  emp,
+  field,
+  draft,
+  wageMode,
+  isSelected,
+}: {
+  emp: Employee;
+  field: BulkEditFieldDef;
+  draft: Partial<Employee> | undefined;
+  wageMode: SalaryWageMode;
+  isSelected?: boolean;
+}) {
+  const merged = buildMergedEmployee(emp, draft);
+  const value =
+    field.key === "grossSalary"
+      ? merged.grossSalary
+      : field.key === "dailyWage"
+        ? merged.dailyWage
+        : merged.basicSalary;
+  const dirty = isFieldDirty(emp, draft, field.key);
+  const selectedClass = isSelected ? "ring-2 ring-blue-500 border-blue-400 bg-blue-50/60" : "";
+
+  return (
+    <div
+      data-bulk-cell={field.key}
+      data-employee-id={resolveEmployeeRecordId(emp)}
+      className={`w-full min-w-0 px-1.5 py-1 text-[11px] border rounded font-mono text-slate-700 bg-slate-100/80 border-slate-200 ${
+        dirty ? "border-amber-300 bg-amber-50/50" : ""
+      } ${selectedClass}`}
+      title={
+        field.key === "basicSalary"
+          ? "Auto-calculated from monthly salary and basic %"
+          : wageMode === "monthly"
+            ? "Auto-calculated from monthly salary and working days"
+            : "Auto-calculated from daily wage and working days"
+      }
+    >
+      {formatSalaryAmount(value)}
     </div>
   );
 }
@@ -680,7 +786,8 @@ export default function BulkEmployeeEditTable({
         <div>
           <h3 className="font-bold text-amber-950 text-sm">ECR Whole-Detail Bulk Edit</h3>
           <p className="text-xs text-amber-800/80 mt-0.5">
-            All ECR employee fields — corporate, salary, identity, bank, nominee, perks, custom attributes.
+            All ECR employee fields — corporate, salary, identity, bank, nominee, custom attributes.
+            Use the wage-mode toggle per row; select multiple rows to bulk-apply monthly or daily wage.
             Review old vs new values side-by-side, then apply directly to the live registry.
           </p>
         </div>
@@ -778,6 +885,27 @@ export default function BulkEmployeeEditTable({
               {selectedColumnLabel ? ` in ${selectedColumnLabel}` : ""}
             </span>
           </div>
+          {selectedEmployeeIds.length > 1 && columnSelection?.columnId === "salaryWageMode" && (
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-semibold text-blue-900 whitespace-nowrap">
+                Fill all selected:
+              </label>
+              <button
+                type="button"
+                onClick={() => handleBulkFillSelect("monthly")}
+                className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-1.5 cursor-pointer"
+              >
+                Monthly Wage
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkFillSelect("daily")}
+                className="text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg px-3 py-1.5 cursor-pointer"
+              >
+                Daily Wage
+              </button>
+            </div>
+          )}
           {selectedEmployeeIds.length > 1 && selectedFieldDef && isDropdownField(selectedFieldDef) && (
             <div className="flex items-center gap-2">
               <label className="text-[11px] font-semibold text-blue-900 whitespace-nowrap">
@@ -930,7 +1058,9 @@ export default function BulkEmployeeEditTable({
                 const recordId = resolveEmployeeRecordId(emp);
                 const draft = draftChanges[recordId];
                 const rowHasChanges = !!draft && Object.keys(draft).length > 0;
-                const wageModeVariant = resolveEmployeeWageModeRowVariant(emp);
+                const merged = buildMergedEmployee(emp, draft);
+                const wageMode = inferSalaryWageMode(merged);
+                const wageModeVariant = resolveEmployeeWageModeRowVariant(merged);
                 const rowClassName = getEmployeeWageModeRowClassName(wageModeVariant, {
                   hasDraftChanges: rowHasChanges,
                 });
@@ -950,27 +1080,52 @@ export default function BulkEmployeeEditTable({
                       <td
                         key={field.key}
                         onMouseDown={(e) =>
-                          handleTdMouseDown(e, recordId, field.key, isDropdownField(field))
+                          handleTdMouseDown(
+                            e,
+                            recordId,
+                            field.key,
+                            field.key === "salaryWageMode" || isDropdownField(field),
+                          )
                         }
                         className={`p-1 border-r border-slate-100 ${
                           isCellSelected(recordId, field.key) ? "bg-blue-50/40" : ""
                         }`}
                         style={{ minWidth: field.minWidth }}
                       >
-                        <EditableCell
-                          emp={emp}
-                          field={field}
-                          draft={draft}
-                          selectOptions={resolveFieldOptions(
-                            field,
-                            availableLocations,
-                            availableRoles,
-                            emp,
-                          )}
-                          isSelected={isCellSelected(recordId, field.key)}
-                          onKeyNavigate={(e) => handleCellKeyDown(e, recordId, field.key)}
-                          onChange={(val) => handleFieldChange(recordId, field.key, val)}
-                        />
+                        {field.key === "salaryWageMode" ? (
+                          <WageModeToggle
+                            emp={emp}
+                            draft={draft}
+                            isSelected={isCellSelected(recordId, field.key)}
+                            onChange={(mode) => handleFieldChange(recordId, "salaryWageMode", mode)}
+                          />
+                        ) : (field.key === "grossSalary" ||
+                            field.key === "dailyWage" ||
+                            field.key === "basicSalary") &&
+                          !isSalaryInputEditable(field.key, wageMode) ? (
+                          <CalculatedSalaryCell
+                            emp={emp}
+                            field={field}
+                            draft={draft}
+                            wageMode={wageMode}
+                            isSelected={isCellSelected(recordId, field.key)}
+                          />
+                        ) : (
+                          <EditableCell
+                            emp={emp}
+                            field={field}
+                            draft={draft}
+                            selectOptions={resolveFieldOptions(
+                              field,
+                              availableLocations,
+                              availableRoles,
+                              emp,
+                            )}
+                            isSelected={isCellSelected(recordId, field.key)}
+                            onKeyNavigate={(e) => handleCellKeyDown(e, recordId, field.key)}
+                            onChange={(val) => handleFieldChange(recordId, field.key, val)}
+                          />
+                        )}
                       </td>
                     ))}
                     {customFieldNames.map((name) => {

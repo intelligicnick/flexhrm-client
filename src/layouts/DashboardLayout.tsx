@@ -809,6 +809,7 @@ export default function DashboardLayout() {
                         return (
                           <button
                             key={item.name}
+                            type="button"
                             onClick={() => {
                               navigateToTab(item.name);
                               triggerSuccess(`Switched module view to: ${item.name}`);
@@ -1457,6 +1458,7 @@ export default function DashboardLayout() {
                       return (
                         <button
                           key={item.name}
+                          type="button"
                           onClick={() => {
                             navigateToTab(item.name);
                             setIsSidebarCollapsed(true); // Close drawer if open

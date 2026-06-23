@@ -1,5 +1,6 @@
-import React from "react";
-import { LucideIcon } from "lucide-react";
+import React, { useState } from "react";
+import { LucideIcon, Loader2 } from "lucide-react";
+import { busyButtonClasses, inferLoadingLabel, normalizeButtonLabel } from "../../lib/button-loading";
 
 export function SupervisorPageHeader({
   title,
@@ -115,6 +116,7 @@ export function SupervisorQuickAction({
   return (
     <button
       type="button"
+      data-no-busy
       onClick={onClick}
       className={`flex flex-col items-center gap-1.5 p-3 rounded-2xl text-[11px] font-bold transition cursor-pointer ${
         variant === "primary"
@@ -164,6 +166,7 @@ export function SupervisorChip({
   return (
     <button
       type="button"
+      data-no-busy
       onClick={onClick}
       className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition cursor-pointer ${
         active
@@ -214,5 +217,105 @@ export function SupervisorFormStep({
       </div>
       <div className="p-4">{children}</div>
     </div>
+  );
+}
+
+function extractButtonText(children: React.ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") {
+    return String(children);
+  }
+
+  const parts: string[] = [];
+  React.Children.forEach(children, (child) => {
+    if (typeof child === "string" || typeof child === "number") {
+      parts.push(String(child));
+      return;
+    }
+    if (React.isValidElement<{ children?: React.ReactNode }>(child) && child.props.children) {
+      parts.push(extractButtonText(child.props.children));
+    }
+  });
+  return normalizeButtonLabel(parts.join(" "));
+}
+
+const supervisorActionVariants = {
+  primary:
+    "bg-[#ff791a] hover:bg-[#e4640c] text-white shadow-lg shadow-orange-200/50 disabled:shadow-none",
+  secondary: "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200",
+  outline: "border-2 border-[#ff791a] text-[#ff791a] bg-white hover:bg-orange-50",
+  danger: "bg-rose-600 hover:bg-rose-700 text-white",
+  gradient:
+    "bg-gradient-to-r from-[#ff791a] to-[#ff981a] text-white shadow-lg shadow-orange-200/60 disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none",
+} as const;
+
+export type SupervisorActionButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  loading?: boolean;
+  loadingText?: string;
+  variant?: keyof typeof supervisorActionVariants;
+  fullWidth?: boolean;
+  icon?: React.ReactNode;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void | Promise<void>;
+};
+
+export function SupervisorActionButton({
+  loading = false,
+  loadingText,
+  variant = "primary",
+  fullWidth = false,
+  icon,
+  className = "",
+  disabled,
+  children,
+  onClick,
+  type = "button",
+  ...props
+}: SupervisorActionButtonProps) {
+  const [internalBusy, setInternalBusy] = useState(false);
+  const busy = loading || internalBusy;
+  const idleLabel = extractButtonText(children);
+  const busyLabel = loadingText ?? inferLoadingLabel(idleLabel);
+
+  const handleClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (busy || disabled || !onClick) return;
+
+    const result = onClick(event);
+    if (!result || typeof result.then !== "function") return;
+
+    setInternalBusy(true);
+    try {
+      await result;
+    } finally {
+      setInternalBusy(false);
+    }
+  };
+
+  return (
+    <button
+      {...props}
+      type={type}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
+      onClick={handleClick}
+      className={[
+        "inline-flex items-center justify-center gap-2 font-bold rounded-xl transition active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed",
+        busy ? busyButtonClasses : supervisorActionVariants[variant],
+        fullWidth ? "w-full" : "",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {busy ? (
+        <>
+          <Loader2 size={18} className="animate-spin shrink-0" />
+          {busyLabel}
+        </>
+      ) : (
+        <>
+          {icon}
+          {children}
+        </>
+      )}
+    </button>
   );
 }

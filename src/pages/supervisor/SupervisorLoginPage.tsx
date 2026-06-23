@@ -22,6 +22,7 @@ import {
 } from "../../lib/supervisor-session";
 import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorBlockedAppsGate from "./SupervisorBlockedAppsGate";
+import { SupervisorActionButton } from "./SupervisorUI";
 
 function LoginForm() {
   const navigate = useNavigate();
@@ -278,27 +279,32 @@ function LoginForm() {
               </div>
             )}
 
-            <button
+            <SupervisorActionButton
               type="submit"
-              disabled={loading}
-              className="w-full py-4 bg-[#ff791a] hover:bg-[#e4640c] text-white font-black rounded-2xl text-sm shadow-lg shadow-orange-200/50 active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              loading={loading}
+              loadingText={t("signingIn")}
+              fullWidth
+              className="py-4 rounded-2xl text-sm font-black"
+              icon={<LogIn size={18} />}
             >
-              <LogIn size={18} />
-              {loading ? t("signingIn") : needsDeviceOtp ? t("verifyDevice") : t("signIn")}
-            </button>
+              {needsDeviceOtp ? t("verifyDevice") : t("signIn")}
+            </SupervisorActionButton>
           </form>
         </div>
 
         {!appInstalled && installPromptEvent && (
-          <button
+          <SupervisorActionButton
             type="button"
             onClick={() => void handleInstallApp()}
-            disabled={installingApp}
-            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-white px-4 py-3 text-sm font-bold text-[#ff791a] shadow-sm cursor-pointer disabled:opacity-50"
+            loading={installingApp}
+            loadingText={t("loading")}
+            variant="outline"
+            fullWidth
+            className="mt-4 rounded-2xl px-4 py-3 text-sm shadow-sm"
+            icon={<Smartphone size={16} />}
           >
-            <Smartphone size={16} />
-            {installingApp ? t("loading") : t("installFieldTeamApp")}
-          </button>
+            {t("installFieldTeamApp")}
+          </SupervisorActionButton>
         )}
 
         <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">

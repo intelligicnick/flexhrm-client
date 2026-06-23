@@ -7,6 +7,8 @@ import {
   getBulkAttendanceDisabledDays,
   filterSelectableBulkDays,
   countMonthAttendance,
+  countWorkingDaysInMonth,
+  resolveBulkAttendanceStatus,
 } from "./attendance-helpers";
 
 const baseEmployee = (overrides: Partial<Employee> = {}): Employee =>
@@ -54,6 +56,40 @@ describe("getEffectiveAttendanceStatus", () => {
   it("returns absent when explicitly marked on a weekly off day", () => {
     expect(
       getEffectiveAttendanceStatus("26 Days (Sun Off)", "June 2026", 7, "A"),
+    ).toBe("A");
+  });
+});
+
+describe("countWorkingDaysInMonth", () => {
+  it("counts non-Sunday days for 26-day cycle in June 2026", () => {
+    // June 2026 has 30 days and 4 Sundays (7, 14, 21, 28)
+    expect(countWorkingDaysInMonth("26 Days (Sun Off)", "June 2026")).toBe(26);
+  });
+
+  it("counts non-weekend days for 22-day cycle in June 2026", () => {
+    // June 2026 has 4 Saturdays and 4 Sundays
+    expect(countWorkingDaysInMonth("22 Days (Sat/Sun Off)", "June 2026")).toBe(22);
+  });
+
+  it("counts all calendar days for 30/31-day cycle", () => {
+    expect(countWorkingDaysInMonth("30/31 Days (No Off)", "January 2026")).toBe(31);
+    expect(countWorkingDaysInMonth("30/31 Days (No Off)", "February 2026")).toBe(28);
+  });
+});
+
+describe("resolveBulkAttendanceStatus", () => {
+  it("returns WO on weekly off days", () => {
+    expect(
+      resolveBulkAttendanceStatus("26 Days (Sun Off)", "June 2026", 7, "P"),
+    ).toBe("WO");
+  });
+
+  it("returns working-day status on non-off days", () => {
+    expect(
+      resolveBulkAttendanceStatus("26 Days (Sun Off)", "June 2026", 8, "P"),
+    ).toBe("P");
+    expect(
+      resolveBulkAttendanceStatus("26 Days (Sun Off)", "June 2026", 8, "A"),
     ).toBe("A");
   });
 });
