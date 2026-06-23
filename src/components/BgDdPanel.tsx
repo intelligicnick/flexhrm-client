@@ -243,6 +243,7 @@ export default function BgDdPanel({
     setIsFormOpen(false);
     setEditingId(null);
     setFormError(null);
+    setSaving(false);
     docsPanelRef.current?.clearPending();
   };
 

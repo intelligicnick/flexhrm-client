@@ -382,6 +382,7 @@ export default function RenewalsPanel({
     setEditingId(null);
     docsPanelRef.current?.clearPending();
     setFormError(null);
+    setSaving(false);
   };
 
   const buildPayload = (): CreateRenewalInput => ({

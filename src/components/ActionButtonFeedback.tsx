@@ -27,11 +27,40 @@ function isActionButton(button: HTMLButtonElement): boolean {
 }
 
 const BUSY_FEEDBACK_DELAY_MS = 120;
-const MODAL_OVERLAY_SELECTOR = ".fixed.inset-0.z-50";
+
+function modalZIndex(className: string): number | null {
+  const arbitrary = className.match(/\bz-\[(\d+)\]/);
+  if (arbitrary) return Number(arbitrary[1]);
+
+  const standard = className.match(/\bz-(\d+)\b/);
+  if (standard) return Number(standard[1]);
+
+  return null;
+}
+
+function isModalOverlayElement(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (!el.classList.contains("fixed") || !el.classList.contains("inset-0")) return false;
+
+  const className = el.className;
+  if (el.classList.contains("pointer-events-none")) return false;
+  if (el.classList.contains("bg-transparent") && /\bz-40\b/.test(className)) return false;
+
+  const z = modalZIndex(className);
+  return z !== null && z >= 50;
+}
+
+function getOpenModalOverlays(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".fixed.inset-0")).filter(isModalOverlayElement);
+}
 
 function isModalOverlayOpen(button: HTMLButtonElement): boolean {
-  const overlay = document.querySelector(MODAL_OVERLAY_SELECTOR);
-  return !!overlay && !button.closest(MODAL_OVERLAY_SELECTOR);
+  return getOpenModalOverlays().some((overlay) => !overlay.contains(button));
+}
+
+function nodeContainsModalOverlay(node: Element): boolean {
+  if (isModalOverlayElement(node)) return true;
+  return Array.from(node.querySelectorAll(".fixed.inset-0")).some(isModalOverlayElement);
 }
 
 const busyButtonSnapshots = new WeakMap<
@@ -230,9 +259,7 @@ export function ActionButtonFeedback() {
 
         for (const node of mutation.removedNodes) {
           if (!(node instanceof Element)) continue;
-          const removedOverlay =
-            node.matches?.(MODAL_OVERLAY_SELECTOR) || node.querySelector?.(MODAL_OVERLAY_SELECTOR);
-          if (!removedOverlay) continue;
+          if (!nodeContainsModalOverlay(node)) continue;
 
           document.querySelectorAll("button[aria-busy='true']").forEach((node) => {
             if (!(node instanceof HTMLButtonElement)) return;

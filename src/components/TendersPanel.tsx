@@ -58,6 +58,8 @@ const STATUS_LABELS: Record<TenderStatus, string> = {
   representation_asked: "Representation Asked",
   challenged_representation: "Challenged Representation",
   financial: "Financial",
+  bid_awarded: "Bid Awarded",
+  bid_not_awarded: "Bid Not Awarded",
   won_bid: "Won the Bid",
 };
 
@@ -73,6 +75,8 @@ const STATUS_STYLES: Record<TenderStatus, string> = {
   representation_asked: "bg-violet-50 text-violet-700 border-violet-200",
   challenged_representation: "bg-purple-50 text-purple-700 border-purple-200",
   financial: "bg-blue-50 text-blue-700 border-blue-200",
+  bid_awarded: "bg-emerald-50 text-emerald-800 border-emerald-300",
+  bid_not_awarded: "bg-amber-50 text-amber-800 border-amber-300",
   won_bid: "bg-green-50 text-green-800 border-green-300",
 };
 
@@ -87,6 +91,8 @@ const STATUS_ORDER: TenderStatus[] = [
   "representation_asked",
   "challenged_representation",
   "financial",
+  "bid_awarded",
+  "bid_not_awarded",
   "won_bid",
 ];
 
@@ -396,6 +402,10 @@ function normalizeTenderStatus(raw: string): TenderStatus {
   }
   if (value.includes("representation")) return "representation_asked";
   if (value.includes("financial")) return "financial";
+  if (value.includes("bid not awarded") || value.includes("not awarded")) {
+    return "bid_not_awarded";
+  }
+  if (value.includes("bid awarded")) return "bid_awarded";
   if (value.includes("technical") && value.includes("qualified")) {
     return "technical_qualified";
   }
@@ -405,7 +415,7 @@ function normalizeTenderStatus(raw: string): TenderStatus {
   if (value.includes("disqualified")) return "disqualified";
   if (value.includes("technical")) return "technical_not_open";
   if (value.includes("cancel")) return "cancelled";
-  if (value.includes("filed") || value.includes("bid awarded")) return "filed";
+  if (value.includes("filed")) return "filed";
   return "filed";
 }
 
@@ -423,7 +433,8 @@ function looksLikeStatus(raw: string): boolean {
     value.includes("representation") ||
     value.includes("financial") ||
     value.includes("won") ||
-    value.includes("bid awarded")
+    value.includes("bid awarded") ||
+    value.includes("bid not awarded")
   );
 }
 

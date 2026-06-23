@@ -381,6 +381,8 @@ export type TenderStatus =
   | "representation_asked"
   | "challenged_representation"
   | "financial"
+  | "bid_awarded"
+  | "bid_not_awarded"
   | "won_bid";
 
 /** @deprecated Use TenderStatus */
