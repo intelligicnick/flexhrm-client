@@ -1,0 +1,85 @@
+# Release signing: configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+# ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD repository secrets for signed APKs.
+name: Android APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "android-supervisor-app/**"
+      - "android-observer-app/**"
+      - "shared/**"
+      - "scripts/build-android-*.sh"
+      - ".github/workflows/android-apk.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "android-supervisor-app/**"
+      - "android-observer-app/**"
+      - "shared/**"
+      - "scripts/build-android-*.sh"
+      - ".github/workflows/android-apk.yml"
+
+jobs:
+  build-apks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Field Team APK
+        run: npm run build:android-apk
+
+      - name: Build Observer Admin APK
+        run: npm run build:android-observer-apk
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlexHRM-Android-APKs
+          path: |
+            FlexHRM-FieldTeam-*.apk
+            FlexHRM-ObserverAdmin-*.apk
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-apks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlexHRM-Android-APKs
+          path: release
+
+      - name: Rename APKs for stable download URLs
+        shell: bash
+        run: |
+          cp release/FlexHRM-FieldTeam-*.apk release/FlexHRM-FieldTeam.apk
+          cp release/FlexHRM-ObserverAdmin-*.apk release/FlexHRM-ObserverAdmin.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-apk-v${{ github.run_number }}
+          name: Flex HRM Android APKs
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -22,7 +22,7 @@ npm install
 npm run dev
 ```
 
-Start the [backend](../backend) first (`npm run start:dev`). Open [http://localhost:3000](http://localhost:3000).
+Start the [backend](https://github.com/intelligicnick/flexhrm-server) first (`npm run start:dev`). Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment
 
@@ -46,7 +46,7 @@ Start the [backend](../backend) first (`npm run start:dev`). Open [http://localh
 | App | Hostinger URL | Setup guide |
 |-----|---------------|-------------|
 | **Frontend (this repo)** | https://greenyellow-woodpecker-750354.hostingersite.com | Build with `npm run build`, deploy `dist/` |
-| **Backend API** | https://midnightblue-partridge-476451.hostingersite.com/api | [../backend/HOSTINGER_SETUP.md](../backend/HOSTINGER_SETUP.md) |
+| **Backend API** | https://midnightblue-partridge-476451.hostingersite.com/api | [flexhrm-server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md) |
 
 Verify the API after deploy:
 

@@ -2,7 +2,7 @@
 # One-time Flex HRM frontend install on VPS (run after unzip).
 # Usage: chmod +x scripts/install-on-server.sh && ./scripts/install-on-server.sh
 #
-# Requires the NestJS + MongoDB backend running separately (see ../backend).
+# Requires the NestJS + MongoDB backend running separately (see flexhrm-server).
 
 set -e
 cd "$(dirname "$0")/.."

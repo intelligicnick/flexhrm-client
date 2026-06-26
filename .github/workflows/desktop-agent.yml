@@ -1,0 +1,74 @@
+# Code signing: configure CSC_LINK and CSC_KEY_PASSWORD secrets for signed Windows installers.
+name: Desktop Agent (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/desktop-agent.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "desktop-agent/**"
+      - ".github/workflows/desktop-agent.yml"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop-agent/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test
+        run: npm run build && npm test
+
+      - name: Build Windows installer
+        run: npm run pack
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlexHRM-Connect-Windows
+          path: desktop-agent/release/*.exe
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: build-windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlexHRM-Connect-Windows
+          path: release
+
+      - name: Rename installer for stable download URL
+        shell: bash
+        run: |
+          EXE=$(ls release/*.exe | head -1)
+          cp "$EXE" release/FlexHRM-Connect-Setup.exe
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-agent-v${{ github.run_number }}
+          name: Flex HRM Connect Windows
+          files: release/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
