@@ -156,10 +156,6 @@ import {
 } from "../lib/ledger-helpers";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
-import LeavePage from "./LeavePage";
-import ShiftPage from "./ShiftPage";
-import CompanySettingsPage from "./CompanySettingsPage";
-import EnterpriseHubPage from "./EnterpriseHubPage";
 import AdminDashboardPage from "./AdminDashboardPage";
 
 function attendanceBadgeClass(code: string): string {
@@ -5436,14 +5432,6 @@ export default function ModuleContent() {
                             />
                           ) : isMonitorTab(activeSidebarTab) ? (
                             <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
-                          ) : activeSidebarTab === "Leave" ? (
-                            <LeavePage />
-                          ) : activeSidebarTab === "Shifts" ? (
-                            <ShiftPage />
-                          ) : activeSidebarTab === "Company Settings" ? (
-                            <CompanySettingsPage />
-                          ) : activeSidebarTab === "Enterprise" ? (
-                            <EnterpriseHubPage />
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
                            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">

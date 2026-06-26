@@ -60,8 +60,6 @@ const TAB_TO_SAAS_MODULE: Record<string, SaasModuleKey> = {
   "IT Renewals": "compliance",
   Licenses: "compliance",
   "BG & DD": "compliance",
-  Shifts: "shifts",
-  Enterprise: "performance",
 };
 
 export function getSaasModuleKey(tabName: string): SaasModuleKey | null {

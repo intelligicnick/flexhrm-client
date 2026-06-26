@@ -33,7 +33,6 @@ import {
   ChevronDown,
   ChevronUp,
   Menu,
-  Settings,
   Bell,
   Lock,
   User,
@@ -4746,6 +4745,9 @@ export function useHRMSApp() {
         throw await parseApiError(res, "Unable to process password reset request.");
       }
       const data = await res.json();
+      if (data.tenantId) {
+        localStorage.setItem("flexhrm_tenant_id", String(data.tenantId));
+      }
       setForgotMessage(data.message);
       setResetError(null);
       setResetSuccess(null);
@@ -4796,14 +4798,11 @@ export function useHRMSApp() {
 
     try {
       setIsUpdatingPassword(true);
+      const payload = { username, resetToken: token, newPassword: newP };
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username,
-          resetToken: token,
-          newPassword: newP,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         throw await parseApiError(res, "Unable to reset password.");
@@ -4932,8 +4931,7 @@ export function useHRMSApp() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Failed to reset administrator password.");
+        throw await parseApiError(res, "Failed to reset administrator password.");
       }
 
       resetEditAdminPasswordFields();
@@ -7300,9 +7298,6 @@ export function useHRMSApp() {
     { name: "Advance & Penalty", icon: Calculator, badge: "New" },
     { name: "Leave", icon: CalendarOff, badge: "" },
     { name: "Attendance", icon: Clock, badge: "" },
-    { name: "Shifts", icon: Clock, badge: "New" },
-    { name: "Company Settings", icon: Settings, badge: "SaaS" },
-    { name: "Enterprise", icon: Settings, badge: "New" },
     { name: "Directory", icon: Contact, badge: "" },
     { name: "Birthdays", icon: Cake, badge: "Gift" },
     {
