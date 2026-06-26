@@ -4753,22 +4753,23 @@ export function useHRMSApp() {
       setResetSuccess(null);
       setResetNewPassword("");
       setResetConfirmPassword("");
-      const genericNotFoundMessage =
-        "If an account with that username or email exists, a reset code has been sent to the registered email address.";
-      const resetIssued =
-        !!data.resetToken ||
+      const accountNotFoundMsg =
+        "If an account with that username or email exists";
+      const accountFound =
         !!data.username ||
-        (data.success && data.message && data.message !== genericNotFoundMessage);
-      if (resetIssued) {
+        !!data.resetToken ||
+        (typeof data.message === "string" && !data.message.startsWith(accountNotFoundMsg));
+      if (accountFound) {
+        const resolvedUser = data.username || cleanUser;
+        setForgotUsername(resolvedUser);
+        setUsernameInput(resolvedUser);
         if (data.resetToken) {
           setIssuedResetToken(data.resetToken);
           setResetTokenInput(data.resetToken);
         } else {
-          setIssuedResetToken(null);
           setResetTokenInput("");
+          setIssuedResetToken(null);
         }
-        setForgotUsername(data.username || cleanUser);
-        setUsernameInput(data.username || cleanUser);
         setLoginView("reset");
       }
     } catch (err: any) {
@@ -4833,6 +4834,9 @@ export function useHRMSApp() {
   };
 
   const openForgotPassword = () => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("flexhrm_tenant_id");
+    }
     setLoginView("forgot");
     setLoginError(null);
     setForgotError(null);

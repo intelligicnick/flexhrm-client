@@ -16,6 +16,13 @@ function resolveFetchUrl(input: RequestInfo | URL): string {
   return String(input);
 }
 
+function isPasswordRecoveryRequestUrl(urlStr: string): boolean {
+  return (
+    urlStr.includes("/api/auth/forgot-password") ||
+    urlStr.includes("/api/auth/reset-password")
+  );
+}
+
 function isPublicAuthUrl(urlStr: string): boolean {
   return (
     urlStr.includes("/api/auth/login") ||
@@ -119,11 +126,11 @@ export function setupFetchInterceptor(): void {
 
     if (isApiCall) {
       const headers = new Headers(resolvedInit.headers ?? {});
-      const skipTenantHeader =
-        urlStr.includes("/api/auth/forgot-password") ||
-        urlStr.includes("/api/auth/reset-password");
-      const tenantId = skipTenantHeader ? "" : getStoredTenantId();
-      if (tenantId) headers.set("x-tenant-id", tenantId);
+      // Forgot-password resolves tenant from username; stale x-tenant-id breaks lookup.
+      if (!isPasswordRecoveryRequestUrl(urlStr) || urlStr.includes("/api/auth/reset-password")) {
+        const tenantId = getStoredTenantId();
+        if (tenantId) headers.set("x-tenant-id", tenantId);
+      }
       const employeeToken = getEmployeePortalToken();
       if (
         employeeToken &&
