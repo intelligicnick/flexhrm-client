@@ -109,6 +109,7 @@ import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 import { useHRMS } from "../context/HRMSContext";
+import TrialBanner from "../components/TrialBanner";
 import NotificationsBell from "../components/NotificationsBell";
 import {
   ExtensionIntegrationModal,
@@ -1143,6 +1144,7 @@ export default function DashboardLayout() {
                     )}
         
                     {/* 4. MAIN INNER SCROLLABLE VIEWPORT CONTENT */}
+                    <TrialBanner />
           <Suspense
             fallback={
               <div className="flex-1 flex items-center justify-center text-sm text-slate-400">

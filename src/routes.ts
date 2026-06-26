@@ -53,6 +53,9 @@ export const TAB_TO_PATH: Record<string, string> = {
   "Advance & Penalty": "/advance-penalty",
   "Leave": "/leave",
   "Attendance": "/attendance",
+  "Shifts": "/shifts",
+  "Company Settings": "/company-settings",
+  "Enterprise": "/enterprise",
   "Directory": "/directory",
   "Birthdays": "/birthdays",
   "Schools": "/schools",
@@ -77,6 +80,9 @@ export const PATH_TO_TAB: Record<string, string> = Object.fromEntries(
 export const DEFAULT_PATH = "/dashboard";
 
 export const LOGIN_PATH = "/hrmlogin";
+export const REGISTER_PATH = "/register";
+export const PLATFORM_LOGIN_PATH = "/platform/login";
+export const PLATFORM_DASHBOARD_PATH = "/platform/dashboard";
 
 export function tabToPath(tab: string): string {
   return TAB_TO_PATH[tab] ?? DEFAULT_PATH;
@@ -112,6 +118,9 @@ export const APP_ROUTES = [
   { path: "/advance-penalty", tab: "Advance & Penalty" },
   { path: "/leave", tab: "Leave" },
   { path: "/attendance", tab: "Attendance" },
+  { path: "/shifts", tab: "Shifts" },
+  { path: "/company-settings", tab: "Company Settings" },
+  { path: "/enterprise", tab: "Enterprise" },
   { path: "/directory", tab: "Directory" },
   { path: "/birthdays", tab: "Birthdays" },
   { path: "/schools", tab: "Schools" },

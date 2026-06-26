@@ -156,6 +156,10 @@ import {
 } from "../lib/ledger-helpers";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
+import LeavePage from "./LeavePage";
+import ShiftPage from "./ShiftPage";
+import CompanySettingsPage from "./CompanySettingsPage";
+import EnterpriseHubPage from "./EnterpriseHubPage";
 import AdminDashboardPage from "./AdminDashboardPage";
 
 function attendanceBadgeClass(code: string): string {
@@ -576,6 +580,7 @@ export default function ModuleContent() {
     filteredSidebarItems,
     activeModuleKey,
     isModuleAccessDenied,
+    tenantEntitlements,
     SALARY_HEADERS,
     userPermissions,
     employees,
@@ -919,7 +924,9 @@ export default function ModuleContent() {
                             <div className="space-y-2">
                               <h2 className="text-lg font-extrabold text-slate-800">{activeSidebarTab} access restricted</h2>
                               <p className="text-sm text-slate-500">
-                                Your role does not include view permission for the {activeSidebarTab} module. Contact an administrator if you need access.
+                                {tenantEntitlements.isSubscriptionDenied(activeSidebarTab)
+                                  ? `This module is not included in your ${tenantEntitlements.entitlements?.planName ?? "current"} plan. Upgrade your subscription to unlock ${activeSidebarTab}.`
+                                  : `Your role does not include view permission for the ${activeSidebarTab} module. Contact an administrator if you need access.`}
                               </p>
                             </div>
                             <button
@@ -5429,6 +5436,14 @@ export default function ModuleContent() {
                             />
                           ) : isMonitorTab(activeSidebarTab) ? (
                             <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
+                          ) : activeSidebarTab === "Leave" ? (
+                            <LeavePage />
+                          ) : activeSidebarTab === "Shifts" ? (
+                            <ShiftPage />
+                          ) : activeSidebarTab === "Company Settings" ? (
+                            <CompanySettingsPage />
+                          ) : activeSidebarTab === "Enterprise" ? (
+                            <EnterpriseHubPage />
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
                            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">

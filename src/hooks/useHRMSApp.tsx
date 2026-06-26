@@ -169,6 +169,7 @@ import {
 import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
 import { useAuth } from "./useAuth";
+import { useTenantEntitlements } from "./useTenantEntitlements";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -329,6 +330,7 @@ export function useHRMSApp() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
+  const tenantEntitlements = useTenantEntitlements(auth.isLoggedIn);
   const {
     authBootstrapping,
     isLoggedIn,
@@ -7298,6 +7300,9 @@ export function useHRMSApp() {
     { name: "Advance & Penalty", icon: Calculator, badge: "New" },
     { name: "Leave", icon: CalendarOff, badge: "" },
     { name: "Attendance", icon: Clock, badge: "" },
+    { name: "Shifts", icon: Clock, badge: "New" },
+    { name: "Company Settings", icon: Settings, badge: "SaaS" },
+    { name: "Enterprise", icon: Settings, badge: "New" },
     { name: "Directory", icon: Contact, badge: "" },
     { name: "Birthdays", icon: Cake, badge: "Gift" },
     {
@@ -7345,23 +7350,28 @@ export function useHRMSApp() {
         item.name.toLowerCase().includes(sidebarSearch.toLowerCase())
       );
     }
-    // Filter by view permissions
+    // Filter by role permissions and subscription entitlements
     return items.filter(item => {
+      if (tenantEntitlements.isSubscriptionDenied(item.name)) return false;
       const key = getModuleKey(item.name);
       if (!key && item.children?.length) {
-        return item.children.some((child) => !!userPermissions[getModuleKey(child.tab)]?.view);
+        return item.children.some((child) => {
+          if (tenantEntitlements.isSubscriptionDenied(child.tab)) return false;
+          return !!userPermissions[getModuleKey(child.tab)]?.view;
+        });
       }
       if (!key) return true;
       return !!userPermissions[key]?.view;
     });
-  }, [sidebarSearch, sidebarItems, userPermissions]);
+  }, [sidebarSearch, sidebarItems, userPermissions, tenantEntitlements]);
 
   const activeModuleKey = getModuleKey(activeSidebarTab);
   const isModuleAccessDenied =
     isLoggedIn &&
     sessionPermissions !== null &&
     !!activeModuleKey &&
-    !userPermissions[activeModuleKey]?.view;
+    (!userPermissions[activeModuleKey]?.view ||
+      tenantEntitlements.isSubscriptionDenied(activeSidebarTab));
 
   // Handle Employees Menu Actions which map directly to flow items
   const handlePimSubTabClick = (tabName: string) => {
@@ -7901,6 +7911,7 @@ export function useHRMSApp() {
     filteredSidebarItems,
     activeModuleKey,
     isModuleAccessDenied,
+    tenantEntitlements,
     SALARY_HEADERS,
     userPermissions,
     userUiRestrictions,

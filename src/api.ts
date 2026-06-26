@@ -27,7 +27,9 @@ function isPublicAuthUrl(urlStr: string): boolean {
     urlStr.includes("/api/auth/quick-login") ||
     urlStr.includes("/api/auth/supervisor/login") ||
     urlStr.includes("/api/auth/supervisor/portal-policy") ||
-    urlStr.includes("/api/auth/supervisor/register-device")
+    urlStr.includes("/api/auth/supervisor/register-device") ||
+    urlStr.includes("/api/employee-portal/login") ||
+    urlStr.includes("/api/platform/register")
   );
 }
 
@@ -75,6 +77,22 @@ function isApiUrl(urlStr: string): boolean {
   return urlStr.startsWith("/api/") || urlStr.includes("/api/");
 }
 
+function getStoredTenantId(): string {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem("flexhrm_tenant_id")?.trim() ?? "";
+}
+
+function getEmployeePortalToken(): string {
+  if (typeof localStorage === "undefined") return "";
+  return localStorage.getItem("flexhrm_employee_token")?.trim() ?? "";
+}
+
+function getCsrfTokenFromCookie(): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(/(?:^|;\s*)flexhrm_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 /** Install global fetch interceptor before React mounts for API URL resolution and cookies. */
 export function setupFetchInterceptor(): void {
   if (typeof window === "undefined") return;
@@ -100,12 +118,32 @@ export function setupFetchInterceptor(): void {
     };
 
     if (isApiCall) {
-      const headers = new Headers(resolvedInit.headers || {});
-      const observerToken = getObserverToken();
-      if (observerToken && !headers.has("Authorization")) {
-        headers.set("Authorization", `Bearer ${observerToken}`);
+      const headers = new Headers(resolvedInit.headers ?? {});
+      const tenantId = getStoredTenantId();
+      if (tenantId) headers.set("x-tenant-id", tenantId);
+      const employeeToken = getEmployeePortalToken();
+      if (
+        employeeToken &&
+        (urlStr.includes("/api/employee-portal") || urlStr.includes("/api/attendance-punch/employee"))
+      ) {
+        headers.set("Authorization", `Bearer ${employeeToken}`);
+      } else {
+        const observerToken = getObserverToken();
+        if (observerToken && !headers.has("Authorization")) {
+          headers.set("Authorization", `Bearer ${observerToken}`);
+        }
       }
       resolvedInit.headers = headers;
+    }
+
+    const method = (resolvedInit.method ?? "GET").toUpperCase();
+    if (isApiCall && !isPublicApi && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+      const csrf = getCsrfTokenFromCookie();
+      if (csrf) {
+        const headers = new Headers(resolvedInit.headers ?? {});
+        headers.set("x-csrf-token", csrf);
+        resolvedInit.headers = headers;
+      }
     }
 
     let response: Response;
@@ -117,7 +155,12 @@ export function setupFetchInterceptor(): void {
     }
 
     if (isApiCall && !isPublicApi && response.status === 401) {
-      if (localStorage.getItem("hrms_logged_in") === "true") {
+      const isSessionProbe =
+        urlStr.includes("/api/auth/me") || urlStr.includes("/api/platform/auth/me");
+      if (
+        !isSessionProbe &&
+        localStorage.getItem("hrms_logged_in") === "true"
+      ) {
         localStorage.removeItem("hrms_logged_in");
         localStorage.removeItem("hrms_username");
         localStorage.removeItem("hrms_role");
