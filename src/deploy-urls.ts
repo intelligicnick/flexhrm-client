@@ -1,5 +1,5 @@
 /** Live Hostinger deployments (override via env at build/runtime). */
-import clientConfig from "../../shared/client-config.json";
+import clientConfig from "../shared/client-config.json";
 
 /** NestJS API origin — no trailing slash. */
 export const PRODUCTION_API_BASE =

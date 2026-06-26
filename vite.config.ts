@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 /** Read shared defaults without importing deploy-urls (import.meta.env is unavailable in vite.config). */
 const clientConfig = JSON.parse(
-  fs.readFileSync(path.resolve(__dirname, '../shared/client-config.json'), 'utf8'),
+  fs.readFileSync(path.resolve(__dirname, 'shared/client-config.json'), 'utf8'),
 ) as { apiOrigin: string; frontendOrigin: string };
 
 /** Runs before Vite HMR scripts so extension rejections are caught early. */
