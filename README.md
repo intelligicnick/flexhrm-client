@@ -43,4 +43,13 @@ Start the [backend](../backend) first (`npm run start:dev`). Open [http://localh
 
 ## Deployment
 
-See [HOSTINGER_SETUP.md](./HOSTINGER_SETUP.md) and [DEPLOYMENT.md](./DEPLOYMENT.md).
+| App | Hostinger URL | Setup guide |
+|-----|---------------|-------------|
+| **Frontend (this repo)** | https://greenyellow-woodpecker-750354.hostingersite.com | Build with `npm run build`, deploy `dist/` |
+| **Backend API** | https://midnightblue-partridge-476451.hostingersite.com/api | [../backend/HOSTINGER_SETUP.md](../backend/HOSTINGER_SETUP.md) |
+
+Verify the API after deploy:
+
+```bash
+curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+```
