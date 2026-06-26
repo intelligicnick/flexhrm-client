@@ -22,6 +22,8 @@ function isPublicAuthUrl(urlStr: string): boolean {
     urlStr.includes("/api/auth/logout") ||
     urlStr.includes("/api/auth/captcha") ||
     urlStr.includes("/api/auth/me") ||
+    urlStr.includes("/api/auth/forgot-password") ||
+    urlStr.includes("/api/auth/reset-password") ||
     urlStr.includes("/api/auth/quick-login") ||
     urlStr.includes("/api/auth/supervisor/login") ||
     urlStr.includes("/api/auth/supervisor/portal-policy") ||

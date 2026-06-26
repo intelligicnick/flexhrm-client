@@ -4745,9 +4745,14 @@ export function useHRMSApp() {
       }
       const data = await res.json();
       setForgotMessage(data.message);
+      setResetError(null);
+      setResetSuccess(null);
+      setResetNewPassword("");
+      setResetConfirmPassword("");
       if (data.resetToken) {
         setIssuedResetToken(data.resetToken);
         setResetTokenInput(data.resetToken);
+        setForgotUsername(data.username || cleanUser);
         setUsernameInput(data.username || cleanUser);
         setLoginView("reset");
       } else if (data.username) {
@@ -4828,6 +4833,19 @@ export function useHRMSApp() {
     setForgotMessage(null);
     setIssuedResetToken(null);
     setForgotUsername(usernameInput);
+  };
+
+  const openRequestNewResetCode = () => {
+    setLoginView("forgot");
+    setResetError(null);
+    setResetSuccess(null);
+    setIssuedResetToken(null);
+    setResetTokenInput("");
+    setResetNewPassword("");
+    setResetConfirmPassword("");
+    setForgotError(null);
+    setForgotMessage(null);
+    setForgotUsername((forgotUsername || usernameInput).trim());
   };
 
   const backToSignIn = () => {
@@ -7701,6 +7719,7 @@ export function useHRMSApp() {
     handleForgotPasswordSubmit,
     handleResetPasswordSubmit,
     openForgotPassword,
+    openRequestNewResetCode,
     backToSignIn,
     handleInviteAdminSubmit,
     handleUpdateAdminSubmit,

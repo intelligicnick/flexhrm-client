@@ -21,6 +21,7 @@ export default function LoginPage() {
     captchaRefreshKey,
     handleLoginSubmit,
     openForgotPassword,
+    openRequestNewResetCode,
     forgotError,
     forgotMessage,
     forgotUsername,
@@ -37,7 +38,6 @@ export default function LoginPage() {
     resetConfirmPassword,
     setResetConfirmPassword,
     handleResetPasswordSubmit,
-    setLoginView,
     isLoggingIn,
     isSendingResetCode,
     isUpdatingPassword,
@@ -231,6 +231,11 @@ export default function LoginPage() {
                 {resetSuccess}
               </div>
             )}
+            {forgotMessage && !issuedResetToken && (
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-blue-800 text-sm font-semibold leading-snug">
+                {forgotMessage}
+              </div>
+            )}
             {issuedResetToken && (
               <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-amber-900 text-sm">
                 <span className="font-bold block mb-1">Your reset code (valid 15 minutes):</span>
@@ -306,7 +311,7 @@ export default function LoginPage() {
 
             <button
               type="button"
-              onClick={() => setLoginView("forgot")}
+              onClick={openRequestNewResetCode}
               className="w-full py-3 text-slate-500 hover:text-slate-700 font-semibold rounded-xl text-sm transition cursor-pointer min-h-[44px] touch-manipulation"
             >
               ← Request a new code
