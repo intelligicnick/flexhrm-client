@@ -4,6 +4,8 @@ React 19 + Vite UI. Serves on port `3000` and proxies `/api/*` to the NestJS bac
 
 **Repository:** https://github.com/intelligicnick/flexhrm-client
 
+Related repos: [flexhrm-server](https://github.com/intelligicnick/flexhrm-server) (API), [flexhrm-chrome-extension](https://github.com/intelligicnick/flexhrm-chrome-extension), [flexhrm-desktop-agent](https://github.com/intelligicnick/flexhrm-desktop-agent)
+
 ## Live deployment
 
 | Service | URL |

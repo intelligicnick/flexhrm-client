@@ -1,6 +1,6 @@
 {
   "apiOrigin": "https://midnightblue-partridge-476451.hostingersite.com",
   "frontendOrigin": "https://greenyellow-woodpecker-750354.hostingersite.com",
-  "desktopAgentReleaseUrl": "https://github.com/intelligicnick/flexhrm-client/releases/latest/download/FlexHRM-Connect-Setup.exe",
+  "desktopAgentReleaseUrl": "https://github.com/intelligicnick/flexhrm-desktop-agent/releases/latest/download/FlexHRM-Connect-Setup.exe",
   "fieldTeamApkReleaseUrl": "https://github.com/intelligicnick/flexhrm-client/releases/latest/download/FlexHRM-FieldTeam.apk"
 }

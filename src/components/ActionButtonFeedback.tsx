@@ -62,6 +62,7 @@ function isActionButton(button: HTMLButtonElement): boolean {
 }
 
 const BUSY_FEEDBACK_DELAY_MS = 120;
+const BUSY_IDLE_RESET_MS = 4000;
 
 function modalZIndex(className: string): number | null {
   const arbitrary = className.match(/\bz-\[(\d+)\]/);
@@ -91,6 +92,22 @@ function getOpenModalOverlays(): HTMLElement[] {
 
 function isModalOverlayOpen(button: HTMLButtonElement): boolean {
   return getOpenModalOverlays().some((overlay) => !overlay.contains(button));
+}
+
+function isInsideModalOverlay(button: HTMLButtonElement): boolean {
+  return getOpenModalOverlays().some((overlay) => overlay.contains(button));
+}
+
+function hasReactLoadingUI(button: HTMLButtonElement): boolean {
+  return (
+    button.getAttribute("aria-busy") === "true" ||
+    button.querySelector(".animate-spin") !== null ||
+    /\.\.\.$/.test(button.textContent || "")
+  );
+}
+
+function hasOurBusySpinner(button: HTMLButtonElement): boolean {
+  return button.querySelector("[data-flexhrm-busy-spinner]") !== null;
 }
 
 function nodeContainsModalOverlay(node: Element): boolean {
@@ -128,7 +145,7 @@ function applyBusyState(button: HTMLButtonElement) {
   ]
     .filter(Boolean)
     .join(" ");
-  button.innerHTML = `<span class="inline-flex items-center justify-center gap-2"><svg class="animate-spin shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>${busyLabel}</span></span>`;
+  button.innerHTML = `<span class="inline-flex items-center justify-center gap-2"><svg data-flexhrm-busy-spinner class="animate-spin shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg><span>${busyLabel}</span></span>`;
   requestAnimationFrame(() => {
     delete button.dataset.flexhrmBusySuppressMutation;
   });
@@ -156,12 +173,25 @@ function resetBusyState(button: HTMLButtonElement) {
   busyButtonSnapshots.delete(button);
 }
 
+function releaseBusyManagement(button: HTMLButtonElement) {
+  if (button.dataset.flexhrmBusyManaged !== "1") return;
+
+  delete button.dataset.flexhrmBusyManaged;
+  delete button.dataset.flexhrmBusyOriginalClass;
+  delete button.dataset.flexhrmBusyOriginalHtml;
+  busyButtonSnapshots.delete(button);
+}
+
 function shouldSkipBusyFeedback(button: HTMLButtonElement): boolean {
   if (!button.isConnected) return true;
   if (button.disabled) return true;
   if (button.getAttribute("aria-busy") === "true" && button.dataset.flexhrmBusyManaged !== "1") {
     return true;
   }
+  if (hasReactLoadingUI(button) && button.dataset.flexhrmBusyManaged !== "1") {
+    return true;
+  }
+  if (isInsideModalOverlay(button)) return true;
   if (isModalOverlayOpen(button)) return true;
   return false;
 }
@@ -200,6 +230,15 @@ export function ActionButtonFeedback() {
 
           const safetyTimer = trackTimer(window.setTimeout(() => resetBusyState(button), 60000));
           buttonTimers.set(button, safetyTimer);
+
+          trackTimer(
+            window.setTimeout(() => {
+              if (button.dataset.flexhrmBusyManaged === "1" && hasOurBusySpinner(button)) {
+                clearButtonTimer(button);
+                resetBusyState(button);
+              }
+            }, BUSY_IDLE_RESET_MS),
+          );
         }, BUSY_FEEDBACK_DELAY_MS),
       );
 
@@ -261,19 +300,21 @@ export function ActionButtonFeedback() {
           mutation.type === "attributes" &&
           (mutation.attributeName === "aria-busy" || mutation.attributeName === "disabled")
         ) {
-          if (
-            target.getAttribute("aria-busy") === "true" &&
-            mutation.attributeName === "aria-busy" &&
-            mutation.oldValue !== "true"
-          ) {
-            resetBusyState(target);
-          }
           if (!target.disabled && mutation.attributeName === "disabled") {
-            resetBusyState(target);
+            if (hasOurBusySpinner(target)) {
+              resetBusyState(target);
+            } else {
+              releaseBusyManagement(target);
+            }
           }
         }
 
         if (mutation.type === "childList" || mutation.type === "characterData") {
+          if (hasOurBusySpinner(target)) continue;
+          if (hasReactLoadingUI(target)) {
+            releaseBusyManagement(target);
+            continue;
+          }
           resetBusyState(target);
         }
       }
