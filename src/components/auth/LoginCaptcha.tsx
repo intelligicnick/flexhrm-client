@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { apiUrl } from "../../api";
 
 export interface LoginCaptchaValue {
   id: string;
@@ -11,54 +10,29 @@ interface LoginCaptchaProps {
   value: LoginCaptchaValue;
   onChange: (value: LoginCaptchaValue) => void;
   disabled?: boolean;
+  refreshKey?: number;
 }
 
-export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptchaProps) {
-  const [svg, setSvg] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+function generateMathChallenge(): { id: string; question: string } {
+  const a = Math.floor(Math.random() * 10) + 1;
+  const b = Math.floor(Math.random() * 10) + 1;
+  return { id: `math:${a}+${b}`, question: `${a} + ${b} = ?` };
+}
+
+export default function LoginCaptcha({ value, onChange, disabled, refreshKey = 0 }: LoginCaptchaProps) {
+  const [question, setQuestion] = useState("");
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  const loadCaptcha = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const res = await fetch(apiUrl("/api/auth/captcha"), { credentials: "include" });
-      if (!res.ok) {
-        let message = "Unable to load captcha.";
-        if (res.status === 404) {
-          message = "Captcha API is unavailable. Restart the backend server and try again.";
-        } else if (res.status === 502 || res.status === 503) {
-          message =
-            "Backend API is unavailable. Start it with: cd backend && npm run start:dev";
-        } else {
-          try {
-            const body = (await res.json()) as { error?: string; message?: string };
-            const detail = body.message || body.error;
-            if (detail) message = detail;
-          } catch {
-            // Keep generic message when response is not JSON.
-          }
-        }
-        throw new Error(message);
-      }
-      const data = (await res.json()) as { id: string; svg: string };
-      if (!data.id || !data.svg) throw new Error("Invalid captcha response.");
-      setSvg(data.svg);
-      onChangeRef.current({ id: data.id, answer: "" });
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Unable to load captcha.");
-      setSvg("");
-      onChangeRef.current({ id: "", answer: "" });
-    } finally {
-      setLoading(false);
-    }
+  const loadCaptcha = useCallback(() => {
+    const challenge = generateMathChallenge();
+    setQuestion(challenge.question);
+    onChangeRef.current({ id: challenge.id, answer: "" });
   }, []);
 
   useEffect(() => {
-    void loadCaptcha();
-  }, [loadCaptcha]);
+    loadCaptcha();
+  }, [loadCaptcha, refreshKey]);
 
   return (
     <div className="space-y-2.5">
@@ -66,44 +40,35 @@ export default function LoginCaptcha({ value, onChange, disabled }: LoginCaptcha
         Security Check
       </label>
       <div className="flex items-stretch gap-2 min-w-0">
-        <div className="flex-1 min-w-0 min-h-[56px] rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
-          {loading ? (
-            <span className="text-xs text-slate-400 font-semibold px-2 text-center">Loading captcha…</span>
-          ) : svg ? (
-            <img
-              src={svg}
-              alt="Captcha challenge"
-              className="h-[56px] w-full max-w-full object-contain select-none"
-              draggable={false}
-            />
-          ) : (
-            <span className="text-xs text-rose-500 font-semibold px-2 text-center leading-snug">
-              {loadError || "Captcha unavailable"}
-            </span>
-          )}
+        <div className="flex-1 min-w-0 min-h-[56px] rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden px-4">
+          <span className="text-xl sm:text-2xl font-bold text-slate-800 tracking-wide select-none font-mono">
+            {question}
+          </span>
         </div>
         <button
           type="button"
-          onClick={() => void loadCaptcha()}
-          disabled={disabled || loading}
+          onClick={loadCaptcha}
+          disabled={disabled}
           className="shrink-0 min-w-[48px] min-h-[48px] p-3 rounded-xl border border-slate-200 text-slate-500 hover:text-[#ff791a] hover:border-orange-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center touch-manipulation"
-          title="Refresh captcha"
-          aria-label="Refresh captcha"
+          title="New question"
+          aria-label="New question"
         >
-          <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={18} />
         </button>
       </div>
       <input
         type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
         id="login-captcha-field"
         name="captcha"
         autoComplete="off"
         spellCheck={false}
         value={value.answer}
-        onChange={(e) => onChange({ ...value, answer: e.target.value.toUpperCase() })}
-        placeholder="Enter characters shown above"
+        onChange={(e) => onChange({ ...value, answer: e.target.value.replace(/\D/g, "") })}
+        placeholder="Enter the answer"
         disabled={disabled || !value.id}
-        className="w-full px-3.5 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base text-slate-800 transition uppercase tracking-widest font-mono bg-slate-50/50 touch-manipulation"
+        className="w-full px-3.5 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base text-slate-800 transition font-mono bg-slate-50/50 touch-manipulation"
       />
     </div>
   );
