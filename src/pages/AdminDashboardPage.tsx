@@ -779,6 +779,7 @@ export default function AdminDashboardPage() {
                 visits={rawSchoolVisits}
                 onOpenFieldTeam={() => goToFieldTeam("supervisors")}
                 layoutRevision={widgetOrder.join("-")}
+                mapVariant="trajectory"
               />
             </Suspense>
           </section>

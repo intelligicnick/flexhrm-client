@@ -97,6 +97,37 @@ export function countMonthAttendance(
   return { presents, absents };
 }
 
+/** True when at least one working day has an explicit attendance mark (P, A, WO, etc.). */
+export function employeeHasMarkedAttendanceForMonth(
+  empData: Record<string | number, string>,
+  daysInMonth: number,
+  isExitedOnDay: (day: number) => boolean,
+): boolean {
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (isExitedOnDay(d)) continue;
+    if (String(empData[d] || "").trim()) return true;
+  }
+  return false;
+}
+
+export function monthHasAnyMarkedAttendance(
+  monthData: Record<string, Record<string | number, string>>,
+  employees: Employee[],
+  monthStr: string,
+  isExitedForMonth: (emp: Employee, monthStr: string) => boolean,
+  isExitedOnDay: (emp: Employee, monthStr: string, day: number) => boolean,
+): boolean {
+  const daysInMonth = getDaysInMonthStatic(monthStr);
+  return employees.some((emp) => {
+    if (isExitedForMonth(emp, monthStr)) return false;
+    return employeeHasMarkedAttendanceForMonth(
+      monthData[emp.id] || {},
+      daysInMonth,
+      (day) => isExitedOnDay(emp, monthStr, day),
+    );
+  });
+}
+
 export type AttendanceRecordFilter = "all" | "absent" | "present";
 
 export function employeeMatchesAttendanceRecordFilter(

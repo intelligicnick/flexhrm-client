@@ -22,6 +22,7 @@ export function ObserverPeriodTabs({
         <button
           key={option.key}
           type="button"
+          data-no-busy
           onClick={() => onPeriodChange(option.key)}
           className={`flex-1 px-2 py-2 rounded-xl text-[11px] font-bold transition cursor-pointer ${
             period === option.key

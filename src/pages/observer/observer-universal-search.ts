@@ -12,7 +12,7 @@ import type {
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { parseFlexibleDateMs } from "../../lib/date-helpers";
 import { formatInr, formatMonthLabel } from "./ObserverUI";
-import { matchesSearch } from "./observer-details";
+import { matchesSearch, getLastPaidSalaryLabel } from "./observer-details";
 
 export type UniversalSearchResult = {
   id: string;
@@ -190,12 +190,12 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
               input.locationPtEnabled,
             ),
           ) || 0;
-        const payStatus = emp.monthlyLedger?.[input.selectedMonth]?.paymentStatus || "Unpaid";
+        const lastPaid = getLastPaidSalaryLabel(emp);
         pushResult(results, {
           id: `salary-${emp.id}-${input.selectedMonth}`,
           category: "Salary",
           title: name,
-          subtitle: `${formatInr(net)} · ${payStatus} · ${monthLabel}`,
+          subtitle: `${formatInr(net)} · Last paid ${lastPaid.label} · ${emp.location || "—"}`,
           dateLabel: monthLabel,
           to: "/observer/salary",
           kind: "salary",

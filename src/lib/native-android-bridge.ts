@@ -134,6 +134,19 @@ function waitForNativePhoto(timeoutMs = 120_000): Promise<string> {
   });
 }
 
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const trimmed = dataUrl.trim();
+  const match = trimmed.match(/^data:([^;]+);base64,(.+)$/);
+  const mimeType = match?.[1] || "image/jpeg";
+  const base64 = match?.[2] || trimmed;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new File([bytes], filename, { type: mimeType });
+}
+
 export async function captureNativePhotoFile(): Promise<File> {
   const bridge = getBridge();
   if (!bridge?.capturePhoto) {
@@ -143,9 +156,7 @@ export async function captureNativePhotoFile(): Promise<File> {
   const pending = waitForNativePhoto();
   bridge.capturePhoto();
   const dataUrl = await pending;
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-  return new File([blob], `live-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
+  return dataUrlToFile(dataUrl, `live-${Date.now()}.jpg`);
 }
 
 export function canUseNativeCamera(): boolean {

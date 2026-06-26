@@ -51,8 +51,8 @@ import {
   formatDateTime,
   getSalaryStatusTone,
   getTenderTypeBadge,
+  getLastPaidSalaryLabel,
   matchesSearch,
-  salaryPaymentStatus,
   type DetailField,
   type ObserverDocumentLink,
 } from "./observer-details";
@@ -178,7 +178,9 @@ export default function ObserverModulePage() {
         id: emp.id,
         name: emp.nameAsPerAadhar || emp.employeeCode,
         role: emp.role || "—",
-        status: salaryPaymentStatus(emp, selectedMonth),
+        status: getLastPaidSalaryLabel(emp).label,
+        statusTone: getLastPaidSalaryLabel(emp).tone,
+        location: emp.location || "—",
         net:
           Number(
             getSalaryColumnValue(
@@ -478,9 +480,9 @@ export default function ObserverModulePage() {
               <ObserverListRow
                 key={row.id}
                 title={row.name}
-                subtitle={`${row.role} · ${formatInr(row.net)}`}
+                subtitle={`${row.role} · ${row.location} · ${formatInr(row.net)}`}
                 badge={row.status}
-                badgeTone={getSalaryStatusTone(row.status)}
+                badgeTone={row.statusTone || getSalaryStatusTone(row.status)}
                 onClick={() =>
                   openDetail(
                     row.name,

@@ -1,4 +1,5 @@
-import React, { lazy, Suspense, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
+import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import { useObserverStats } from "./useObserverStats";
 
 const SupervisorMapPanel = lazy(() => import("../../components/SupervisorMapPanel"));
@@ -14,6 +15,14 @@ function MapFallback() {
 export default function ObserverMapPage() {
   const { rawSchoolSupervisors, rawSchoolVisits, canView } = useObserverStats();
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!isFullscreen) return undefined;
+    return registerObserverBackHandler(() => {
+      setIsFullscreen(false);
+      return true;
+    });
+  }, [isFullscreen]);
 
   if (!canView("Field Team")) {
     return (
@@ -32,6 +41,7 @@ export default function ObserverMapPage() {
         visits={rawSchoolVisits}
         layoutRevision={`observer-mobile-${isFullscreen ? "fs" : "std"}`}
         variant="embedded"
+        mapVariant="trajectory"
         mapHeightClass={
           isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-14rem)] min-h-[340px]"
         }

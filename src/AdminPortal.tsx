@@ -1,9 +1,18 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { HRMSProvider, useHRMS } from "./context/HRMSContext";
 import LoginPage from "./components/auth/LoginPage";
-import DashboardLayout from "./layouts/DashboardLayout";
 import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
+
+const DashboardLayout = lazy(() => import("./layouts/DashboardLayout"));
+
+function DashboardFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm text-slate-500">
+      <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isLoggedIn, authBootstrapping } = useHRMS();
@@ -32,7 +41,9 @@ function PortalRoutes() {
         path="*"
         element={
           <ProtectedRoute>
-            <DashboardLayout />
+            <Suspense fallback={<DashboardFallback />}>
+              <DashboardLayout />
+            </Suspense>
           </ProtectedRoute>
         }
       />

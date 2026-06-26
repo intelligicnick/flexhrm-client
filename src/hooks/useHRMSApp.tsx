@@ -3,6 +3,7 @@
  */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { resetAllBusyButtons } from "../components/ActionButtonFeedback";
 import { 
   Users, 
   UserPlus, 
@@ -62,10 +63,9 @@ import {
   School,
   Gavel,
   Landmark,
+  Monitor,
 } from "lucide-react";
-import ExcelJS from "exceljs";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import { loadExcelJS, loadPdfExport } from "../lib/lazy-export-deps";
 import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, Renewal, CreateRenewalInput, BgDdRecord, CreateBgDdInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   BULK_EDIT_FIELDS,
@@ -116,10 +116,13 @@ import {
   loadPayrollConfig,
   savePayrollConfig,
   validatePayrollConfig,
+  loadFinancialYearConfig,
+  saveFinancialYearConfig,
   type PayrollConfig,
+  type FinancialYearSelectionConfig,
 } from "../lib/hrms-config";
 import {
-  getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
+  getCurrentFY, getCurrentFYRange, getSelectableFinancialYears, financialYearHasData, MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
   getCurrentMonthName, getTodayBirthdayLabel, getOrdinalDay, parseDateOfBirth,
   formatEmployeeBirthDate,
@@ -143,6 +146,8 @@ import {
 } from "../lib/ledger-helpers";
 import {
   countMonthAttendance,
+  employeeHasMarkedAttendanceForMonth,
+  monthHasAnyMarkedAttendance,
   getEffectiveAttendanceStatus,
   resolveBulkAttendanceStatus,
   type AttendanceRecordFilter,
@@ -161,7 +166,7 @@ import {
   SALARY_FILTER_DEFINITIONS,
   type RoleUiRestrictions,
 } from "../lib/role-ui-restrictions";
-import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
+import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
 import { useAuth } from "./useAuth";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
@@ -409,8 +414,6 @@ export function useHRMSApp() {
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
-  const PERMISSION_MODULES = ["employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin"] as const;
-
   // Parse permissions dynamically — prefer server session from /api/auth/me
   const userPermissions = useMemo(() => {
     const isSuperAdmin = String(sessionRole || "").toLowerCase() === "admin" || String(sessionUser || "").toLowerCase() === "admin";
@@ -508,6 +511,7 @@ export function useHRMSApp() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return typeof window !== "undefined" ? window.innerWidth < 768 : true;
   });
+  const prevSidebarTabRef = useRef(activeSidebarTab);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const [isMobileProfileOpen, setIsMobileProfileOpen] = useState(false);
@@ -577,6 +581,8 @@ export function useHRMSApp() {
   const [companyBranch, setCompanyBranch] = useState(savedPayrollConfig.companyBranch);
   const [configValidationError, setConfigValidationError] = useState<string | null>(null);
   const [isSavingPayrollConfig, setIsSavingPayrollConfig] = useState(false);
+  const [financialYearConfig, setFinancialYearConfig] = useState(() => loadFinancialYearConfig());
+  const [financialYearsWithData, setFinancialYearsWithData] = useState<string[]>([]);
 
   // Custom locations list with sync and edit capabilities
   const [registeredLocations, setRegisteredLocations] = useState<string[]>([]);
@@ -1127,8 +1133,9 @@ export function useHRMSApp() {
   };
 
   // Export Audit Trail to PDF
-  const handleExportAuditPDF = () => {
+  const handleExportAuditPDF = async () => {
     try {
+      const { jsPDF, autoTable } = await loadPdfExport();
       const doc = new jsPDF("landscape", "mm", "a4");
       
       doc.setFillColor(255, 121, 26); // flex orange
@@ -1198,6 +1205,7 @@ export function useHRMSApp() {
   // Export Audit Trail to Excel
   const handleExportAuditExcel = async () => {
     try {
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const ws = workbook.addWorksheet("Security Audit Trail");
       
@@ -1414,7 +1422,7 @@ export function useHRMSApp() {
   }, [selectedMonth]);
 
   const activeFYRange = useMemo(() => {
-    if (!selectedMonth) return "2025-2026";
+    if (!selectedMonth) return getCurrentFYRange();
     const parts = selectedMonth.split(" ");
     const monthName = parts[0];
     const calendarYearStr = parts[1] || String(new Date().getFullYear());
@@ -1426,7 +1434,34 @@ export function useHRMSApp() {
     return `${year}-${year + 1}`;
   }, [selectedMonth]);
 
+  const availableFYRanges = useMemo(
+    () => getSelectableFinancialYears(financialYearConfig, financialYearsWithData),
+    [financialYearConfig, financialYearsWithData],
+  );
+
+  const fetchFinancialYearsWithData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/attendance/years-with-data");
+      if (!res.ok) return;
+      const data = await res.json();
+      setFinancialYearsWithData(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Financial years with data fetch error:", err);
+    }
+  }, []);
+
   const MONTHS_LIST = useMemo(() => getMonthsForFY(activeFYRange), [activeFYRange]);
+
+  useEffect(() => {
+    if (availableFYRanges.includes(activeFYRange)) return;
+    const currentFY = getCurrentFYRange();
+    const months = getMonthsForFY(currentFY);
+    const today = new Date();
+    const defaultMonth = normalizeMonthKey(
+      `${MONTH_NAME_LIST[today.getMonth()]} ${today.getFullYear()}`,
+    );
+    setSelectedMonth(months.includes(defaultMonth) ? defaultMonth : months[0] || defaultMonth);
+  }, [availableFYRanges, activeFYRange]);
 
   // Advance & Penalty Month-wise Batch states
   const [ledgerSearchQuery, setLedgerSearchQuery] = useState("");
@@ -1768,6 +1803,19 @@ export function useHRMSApp() {
   }, [userPermissions.attendance?.view, activeSidebarTab]);
 
   useEffect(() => {
+    if (!isLoggedIn || !selectedMonth || !canFetchAttendanceData) return;
+    if (activeSidebarTab === "Salary" || activeSidebarTab === "Saved Bulk Pay") {
+      void fetchAttendanceForMonth(selectedMonth);
+    }
+  }, [
+    activeSidebarTab,
+    isLoggedIn,
+    selectedMonth,
+    canFetchAttendanceData,
+    fetchAttendanceForMonth,
+  ]);
+
+  useEffect(() => {
     if (selectedMonth) {
       localStorage.setItem("hrms_selected_month", selectedMonth);
       setBulkSelMonths([selectedMonth]);
@@ -1847,6 +1895,7 @@ export function useHRMSApp() {
         };
       });
       scheduleFetchExitEligibility(selectedMonth, false);
+      void fetchFinancialYearsWithData();
     } catch (err: any) {
       setErrorMessage(err.message || `Failed to mark attendance for ${empName}.`);
     }
@@ -1934,6 +1983,7 @@ export function useHRMSApp() {
 
       triggerSuccess("Attendance marked successfully.");
       scheduleFetchExitEligibility(selectedMonth, true, TOAST_DURATION_MS);
+      void fetchFinancialYearsWithData();
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply bulk attendance.");
     }
@@ -2117,8 +2167,9 @@ export function useHRMSApp() {
   };
 
   // Landscape branded PDF download
-  const downloadAttendancePDF = () => {
+  const downloadAttendancePDF = async () => {
     try {
+      const { jsPDF, autoTable } = await loadPdfExport();
       const daysInMonth = getDaysInSelectedMonth(selectedMonth);
       const filtered = employees.filter(emp => {
         const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
@@ -3431,6 +3482,7 @@ export function useHRMSApp() {
   // Download custom Excel report using ExcelJS
   const downloadReportsExcel = async (data: Employee[], cols: string[], activeLocation: string) => {
     try {
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const ws = workbook.addWorksheet("Corporate Onboarding Customs");
 
@@ -3505,8 +3557,9 @@ export function useHRMSApp() {
   };
 
   // Download PDF report
-  const downloadReportsPDF = (data: Employee[], cols: string[], activeLocation: string) => {
+  const downloadReportsPDF = async (data: Employee[], cols: string[], activeLocation: string) => {
     try {
+      const { jsPDF, autoTable } = await loadPdfExport();
       const doc = new jsPDF({
         orientation: "landscape",
         unit: "mm",
@@ -3582,6 +3635,7 @@ export function useHRMSApp() {
   // Download custom Salary Excel sheet using ExcelJS in landscape orientation with active Location stamp
   const downloadSalaryExcel = async (data: Employee[], cols: string[], activeLocation: string, month: string) => {
     try {
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const ws = workbook.addWorksheet("Salary Calculations Sheet");
 
@@ -3656,8 +3710,9 @@ export function useHRMSApp() {
   };
 
   // Download custom Salary PDF sheet in landscape orientation with active Location stamp
-  const downloadSalaryPDF = (data: Employee[], cols: string[], activeLocation: string, month: string) => {
+  const downloadSalaryPDF = async (data: Employee[], cols: string[], activeLocation: string, month: string) => {
     try {
+      const { jsPDF, autoTable } = await loadPdfExport();
       const doc = new jsPDF({
         orientation: "landscape",
         unit: "mm",
@@ -4383,8 +4438,9 @@ export function useHRMSApp() {
       fetchExportTemplates();
       fetchPendingChangeCount();
       fetchAdminNotifications();
+      void fetchFinancialYearsWithData();
     }
-  }, [isLoggedIn]);
+  }, [isLoggedIn, fetchFinancialYearsWithData]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -5489,6 +5545,7 @@ export function useHRMSApp() {
       URL.revokeObjectURL(url);
       triggerSuccess(`Exported ${selected.length} school record(s) as CSV.`);
     } else {
+      const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
       const ws = workbook.addWorksheet("School Work");
       ws.addRow(SCHOOL_EXCEL_ROW_HEADERS);
@@ -6736,7 +6793,7 @@ export function useHRMSApp() {
   };
 
   // Export selected row items back into matching formatted patterns (CSV, Excel, or PDF)
-  const handleExportSelected = (exportType: "csv" | "excel" | "pdf", ids: string[]) => {
+  const handleExportSelected = async (exportType: "csv" | "excel" | "pdf", ids: string[]) => {
     const selectedEmployees = employees.filter((e) => ids.includes(e.id));
     if (selectedEmployees.length === 0) {
       alert("No rows selected to export.");
@@ -6826,6 +6883,7 @@ export function useHRMSApp() {
     }
 
     if (exportType === "pdf") {
+      const { jsPDF, autoTable } = await loadPdfExport();
       const doc = new jsPDF({
         orientation: "landscape",
         unit: "mm",
@@ -6966,6 +7024,38 @@ export function useHRMSApp() {
       setIsSavingPayrollConfig(false);
     }
   };
+
+  const handleToggleFinancialYear = useCallback(
+    (fyRange: string, category: "previous" | "upcoming", enabled: boolean) => {
+      if (!enabled && financialYearHasData(fyRange, financialYearsWithData)) {
+        setErrorMessage(
+          `Cannot disable ${fyRange} — this year has attendance, payroll, or billing data.`,
+        );
+        return;
+      }
+
+      setFinancialYearConfig((prev) => {
+        const key = category === "previous" ? "enabledPreviousYears" : "enabledUpcomingYears";
+        const otherKey = category === "previous" ? "enabledUpcomingYears" : "enabledPreviousYears";
+        const current = new Set(prev[key]);
+        if (enabled) current.add(fyRange);
+        else current.delete(fyRange);
+        const next: FinancialYearSelectionConfig = {
+          ...prev,
+          [key]: Array.from(current),
+          [otherKey]: prev[otherKey].filter((fy) => fy !== fyRange),
+        };
+        saveFinancialYearConfig(next);
+        return next;
+      });
+      triggerSuccess(
+        enabled
+          ? `Financial year ${fyRange} is now available in the year dropdown.`
+          : `Financial year ${fyRange} removed from the year dropdown.`,
+      );
+    },
+    [financialYearsWithData, triggerSuccess],
+  );
 
   const handleResetPayrollConfig = () => {
     setEsicEligibilityLimit(savedPayrollConfig.esicEligibilityLimit);
@@ -7126,10 +7216,25 @@ export function useHRMSApp() {
       if (salaryFilterType === "penalties" && !hasPen) return false;
       if (salaryFilterType === "perks" && !hasPerks) return false;
 
+      // 13. Only employees with attendance marked for the selected month
+      const monthData = attendanceDb[selectedMonth] || {};
+      const daysInMonth = getDaysInMonthStatic(selectedMonth);
+      const empAttendance = monthData[emp.id] || {};
+      if (
+        !employeeHasMarkedAttendanceForMonth(
+          empAttendance,
+          daysInMonth,
+          (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+        )
+      ) {
+        return false;
+      }
+
       return true;
     });
   }, [
     employees,
+    attendanceDb,
     salarySearchQuery,
     salaryLocationFilter,
     salaryFilterType,
@@ -7149,6 +7254,20 @@ export function useHRMSApp() {
     salaryRoleFilters,
     salaryPaymentStatusFilter
   ]);
+
+  const selectedMonthHasMarkedAttendance = useMemo(
+    () =>
+      selectedMonth
+        ? monthHasAnyMarkedAttendance(
+            attendanceDb[selectedMonth] || {},
+            employees,
+            selectedMonth,
+            isEmployeeExitedForMonth,
+            isEmployeeExitedOnDayStatic,
+          )
+        : false,
+    [attendanceDb, employees, selectedMonth],
+  );
 
   // Sidebar navigation options mimicking OrangeHRM layout
   const sidebarItems: SidebarItemDef[] = [
@@ -7195,6 +7314,7 @@ export function useHRMSApp() {
       ],
     },
     { name: "BG & DD", icon: Landmark, badge: "New" },
+    { name: "Monitor", icon: Monitor, badge: "New" },
   ];
 
   // Filtered sidebar items
@@ -7253,11 +7373,23 @@ export function useHRMSApp() {
   };
 
   const navigateToTab = (tabName: string) => {
+    resetAllBusyButtons();
     setActiveSidebarTab(tabName);
     if (window.innerWidth < 768) {
       setIsSidebarCollapsed(true);
     }
   };
+
+  useEffect(() => {
+    const prevTab = prevSidebarTabRef.current;
+    prevSidebarTabRef.current = activeSidebarTab;
+
+    if (isMonitorTab(activeSidebarTab)) {
+      setIsSidebarCollapsed(true);
+    } else if (isMonitorTab(prevTab) && typeof window !== "undefined" && window.innerWidth >= 768) {
+      setIsSidebarCollapsed(false);
+    }
+  }, [activeSidebarTab]);
 
 
   return {
@@ -7762,6 +7894,11 @@ export function useHRMSApp() {
     activeMonthName,
     activeCalendarYear,
     activeFYRange,
+    availableFYRanges,
+    financialYearConfig,
+    financialYearsWithData,
+    fetchFinancialYearsWithData,
+    handleToggleFinancialYear,
     MONTHS_LIST,
     ledgerUniqueLocations,
     ledgerUniqueSkills,
@@ -7774,6 +7911,7 @@ export function useHRMSApp() {
     existingCodes,
     salaryUniqueLocations,
     filteredSalaryEmployees,
+    selectedMonthHasMarkedAttendance,
     profileDropdownRef,
     mobileProfileDropdownRef,
     activeSidebarTab,

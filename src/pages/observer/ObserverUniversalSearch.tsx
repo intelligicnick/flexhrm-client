@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Search, X, Calendar } from "lucide-react";
+import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import {
@@ -72,12 +73,26 @@ export default function ObserverUniversalSearch({
     locationPtEnabled,
   } = useHRMS();
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [detail, setDetail] = useState<DetailState | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    if (!detail) return undefined;
+    return registerObserverBackHandler(() => {
+      setDetail(null);
+      return true;
+    });
+  }, [detail]);
 
   const results = useMemo(
     () =>
       runUniversalSearch({
-        query,
+        query: debouncedQuery,
         canView: stats.canView,
         employees,
         supervisors: stats.rawSchoolSupervisors,
@@ -94,7 +109,7 @@ export default function ObserverUniversalSearch({
         locationCompliance,
         locationPtEnabled,
       }),
-    [query, stats, employees, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled],
+    [debouncedQuery, stats, employees, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled],
   );
 
   const groupedResults = useMemo(() => groupUniversalSearchResults(results), [results]);
@@ -200,7 +215,7 @@ export default function ObserverUniversalSearch({
       {open && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#f4f6f9] max-w-lg mx-auto w-full">
           <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-4 safe-area-top shadow-lg">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mt-[20px]">
               <div className="flex-1 flex items-center gap-2 bg-white/10 border border-white/20 rounded-xl px-3 py-2.5">
                 <Search size={16} className="text-orange-300/90 shrink-0" />
                 <input

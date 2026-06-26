@@ -24,17 +24,21 @@ The Android app does **not** duplicate business logic — it hosts the productio
 
 ## Build APK
 
+From the frontend root (recommended — bundles the latest web UI into the APK):
+
+```bash
+cd frontend
+npm run build:android-apk          # Field Team
+npm run build:android-observer-apk # Observer Admin
+```
+
+Output APKs are copied to `frontend/FlexHRM-FieldTeam-v*.apk` and `frontend/FlexHRM-ObserverAdmin-v*.apk`.
+
+Gradle-only build (uses whatever is already in `app/src/main/assets/www/`):
+
 ```bash
 cd frontend/android-supervisor-app
-
-# Generate wrapper (first time only, if gradlew is missing)
-gradle wrapper
-
-# Debug APK (~5 MB)
 ./gradlew assembleDebug
-
-# Release APK (unsigned)
-./gradlew assembleRelease
 ```
 
 Output: `app/build/outputs/apk/debug/app-debug.apk`
@@ -53,21 +57,16 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## Configuration
 
-Change the loaded URL in `app/build.gradle`:
+Entry URL and API hosts are set in `app/build.gradle`:
 
 ```gradle
 buildConfigField 'String', 'SUPERVISOR_URL',
-    '"https://your-frontend-host.com/supervisor/login"'
+    '"https://appassets.androidplatform.net/supervisor/login"'
+buildConfigField 'String', 'API_BASE',
+    '"https://your-api-host.com/api"'
 ```
 
-For local development against `npm run dev`:
-
-```gradle
-buildConfigField 'String', 'SUPERVISOR_URL',
-    '"http://10.0.2.2:3000/supervisor/login"'  // emulator → host machine
-```
-
-Also update `SUPERVISOR_HOST` in `MainActivity.java` if you use a custom domain (keeps navigation inside the WebView).
+`MainActivity` reads `BuildConfig.SUPERVISOR_URL` for the bundled login route. The production web bundle is copied into `app/src/main/assets/www/` by `npm run build:android-apk` — do not edit those assets by hand.
 
 ## Native bridge (`window.FlexHrmAndroid`)
 
@@ -105,6 +104,7 @@ Also update `SUPERVISOR_HOST` in `MainActivity.java` if you use a custom domain 
 
 ## Notes
 
-- APK size is small because UI lives on the server (online-only).
+- The APK bundles the production web UI (~7 MB) for offline shell loading; API calls still require internet.
+- `app/src/main/assets/www/` is regenerated on each `npm run build:android-apk` and is gitignored.
 - Clearing app data resets WebView `localStorage` but device ID comes from Android ID when using this app.
 - For Play Store distribution, sign the release APK and review `QUERY_ALL_PACKAGES` policy (may need justification for enterprise/internal use).

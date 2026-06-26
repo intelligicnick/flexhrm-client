@@ -1,7 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Home, Map, LayoutGrid, LogOut, Eye, Bell, Search, ArrowLeft } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
+import { registerObserverBackHandler, handleObserverBack } from "../../lib/observer-back-handler";
 import { useObserverStats } from "./useObserverStats";
 import ObserverMonthPicker from "./ObserverMonthPicker";
 import ObserverUniversalSearch from "./ObserverUniversalSearch";
@@ -51,12 +52,21 @@ function ObserverLayoutInner() {
   const showBack = showNav && !ROOT_PATHS.has(location.pathname);
 
   const goBack = () => {
+    if (handleObserverBack()) return;
     if (window.history.length > 1) {
       navigate(-1);
       return;
     }
     navigate("/observer/menu");
   };
+
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    return registerObserverBackHandler(() => {
+      setSearchOpen(false);
+      return true;
+    });
+  }, [searchOpen]);
 
   const logout = async () => {
     try {
@@ -145,11 +155,9 @@ function ObserverLayoutInner() {
             </div>
           </div>
 
-          {!isMapPage && (
-            <div className="mt-2.5">
-              <ObserverMonthPicker compact />
-            </div>
-          )}
+          <div className="mt-2.5">
+            <ObserverMonthPicker compact />
+          </div>
         </div>
       </header>
 

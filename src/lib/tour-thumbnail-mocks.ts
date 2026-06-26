@@ -50,6 +50,7 @@ const FULL_SIDEBAR = [
   "Bids ▾",
   "Renewals ▾",
   "BG & DD",
+  "Monitor",
 ];
 
 function mock(

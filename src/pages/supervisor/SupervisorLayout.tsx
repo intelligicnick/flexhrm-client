@@ -9,6 +9,7 @@ import {
   User,
   Bell,
 } from "lucide-react";
+import { isSupervisorWebDevHost } from "../../env";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
 import { supervisorFetch } from "../../lib/supervisor-fetch";
 import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
@@ -100,7 +101,12 @@ function SupervisorLayoutInner() {
       }
 
       const localDeviceId = getSupervisorDeviceId();
-      if (!isImpersonated && data.registeredDeviceId && data.registeredDeviceId !== localDeviceId) {
+      if (
+        !isImpersonated &&
+        !isSupervisorWebDevHost() &&
+        data.registeredDeviceId &&
+        data.registeredDeviceId !== localDeviceId
+      ) {
         clearSupervisorSession();
         clearSupervisorImpersonatedFlag();
         navigate("/supervisor/login?reason=device_mismatch", { replace: true });
@@ -203,7 +209,9 @@ function SupervisorLayoutInner() {
   const hideNav = location.pathname.includes("/visit/");
 
   return (
-    <SupervisorPermissionsGate skipPermissions={impersonated || isFlexHrmNativeApp()}>
+    <SupervisorPermissionsGate
+      skipPermissions={impersonated || isFlexHrmNativeApp() || isSupervisorWebDevHost()}
+    >
       <div className="min-h-[100dvh] bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
         <header className="sticky top-0 z-30 safe-area-top">
           <div className="bg-gradient-to-br from-[#0C1E4A] via-[#152a5c] to-[#1a3568] px-4 pt-3 pb-4 shadow-lg">

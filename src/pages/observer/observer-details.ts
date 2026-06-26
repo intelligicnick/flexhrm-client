@@ -1,8 +1,8 @@
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { expiryBand } from "../../lib/renewal-helpers";
-import { parseFlexibleDateMs } from "../../lib/date-helpers";
+import { MONTH_NAME_LIST, normalizeMonthKey, parseFlexibleDateMs } from "../../lib/date-helpers";
 import { resolveGemBidPdfUrl, resolveGemContractPdfUrl, resolveGemContractNoLabel } from "../../lib/gem-helpers";
-import { resolvePhotoSrc } from "../../lib/media-url";
+import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
 import { buildAllExpenseRecords, type ExpenseRecordRow } from "../../lib/school-work-helpers";
 import type {
   CommitmentDiary,
@@ -24,6 +24,7 @@ export type DetailField = {
   shareUrl?: string;
   shareTitle?: string;
   imageSrc?: string;
+  imageThumbSrc?: string;
   tone?: "green" | "amber" | "red" | "blue" | "slate";
   hideLabel?: boolean;
 };
@@ -67,6 +68,31 @@ function contractWorksite(contract: Contract): string {
   return contract.linkedLocations?.filter(Boolean).join(", ") || contract.officeName || contract.correspondingOffice || "—";
 }
 
+function monthKeySortValue(monthKey: string): number {
+  const normalized = normalizeMonthKey(monthKey);
+  const parts = normalized.split(" ");
+  const monthIndex = MONTH_NAME_LIST.indexOf(parts[0]);
+  const year = parseInt(parts[1], 10);
+  if (monthIndex < 0 || !Number.isFinite(year)) return 0;
+  return year * 12 + monthIndex;
+}
+
+/** Last month/year when salary was marked Paid, for observer payment status display. */
+export function getLastPaidSalaryLabel(emp: Employee): { label: string; tone: DetailField["tone"] } {
+  const ledger = emp.monthlyLedger || {};
+  const paidMonths = Object.entries(ledger)
+    .filter(([, entry]) => entry?.paymentStatus === "Paid")
+    .map(([month]) => month)
+    .sort((a, b) => monthKeySortValue(a) - monthKeySortValue(b));
+
+  if (paidMonths.length === 0) {
+    return { label: "Not paid yet", tone: "red" };
+  }
+
+  const lastPaid = paidMonths[paidMonths.length - 1];
+  return { label: formatMonthLabel(lastPaid), tone: "green" };
+}
+
 function salaryPaymentStatus(emp: Employee, selectedMonth: string): "Paid" | "Unpaid" | "Hold" {
   return emp.monthlyLedger?.[selectedMonth]?.paymentStatus || "Unpaid";
 }
@@ -97,14 +123,15 @@ export function buildEmployeeDetails(
         locationPtEnabled,
       ),
     ) || 0;
-  const payStatus = salaryPaymentStatus(emp, selectedMonth);
+  const payStatus = getLastPaidSalaryLabel(emp);
 
   return [
     { label: "Name", value: emp.nameAsPerAadhar || "—" },
     { label: "Employee Code", value: emp.employeeCode || "—" },
     { label: "Role", value: emp.role || "—" },
     { label: "Location", value: emp.location || "—" },
-    { label: "Payment Status", value: payStatus, tone: paymentTone(payStatus) },
+    { label: "Payment Status", value: payStatus.label, tone: payStatus.tone },
+    { label: "This Month", value: salaryPaymentStatus(emp, selectedMonth), tone: paymentTone(salaryPaymentStatus(emp, selectedMonth)) },
     { label: "Net Payable", value: formatInr(net) },
     { label: "Month", value: formatMonthLabel(selectedMonth) },
     { label: "Skill Category", value: emp.skillCategory || "—" },
@@ -165,12 +192,14 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
 
   const photos = visit.photos || [];
   photos.forEach((photo, index) => {
-    const src = resolvePhotoSrc(photo);
-    if (!src) return;
+    const thumbSrc = resolvePhotoThumbnailSrc(photo);
+    const fullSrc = resolvePhotoSrc(photo);
+    if (!thumbSrc && !fullSrc) return;
     fields.push({
       label: photos.length > 1 ? `Stamped Photo ${index + 1}` : "Stamped Photo",
       value: photo.caption || formatDate(visit.visitDate),
-      imageSrc: src,
+      imageThumbSrc: thumbSrc || fullSrc,
+      imageSrc: fullSrc || thumbSrc,
     });
   });
 

@@ -1,6 +1,7 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { HRMSProvider } from "../../context/HRMSContext";
+import { installObserverBackBridge } from "../../lib/observer-back-handler";
 import ObserverLayout from "./ObserverLayout";
 import ObserverLoginPage from "./ObserverLoginPage";
 
@@ -19,6 +20,10 @@ function ObserverFallback() {
 }
 
 export default function ObserverApp() {
+  useEffect(() => {
+    installObserverBackBridge();
+  }, []);
+
   return (
     <HRMSProvider>
       <Routes>

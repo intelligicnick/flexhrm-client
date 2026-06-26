@@ -1,11 +1,12 @@
 /**
  * HRMS Configuration panel — payroll rules, office locations, job roles, and school geography.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Briefcase,
   Building,
+  Calendar,
   Check,
   CreditCard,
   Edit2,
@@ -35,6 +36,12 @@ import BackupAndRestorePanel from "./BackupAndRestorePanel";
 import DeleteAllDataPanel from "./DeleteAllDataPanel";
 import { BASIC_SALARY_OPTIONS } from "../lib/hrms-config";
 import {
+  getConfigurablePreviousYears,
+  getConfigurableUpcomingYears,
+  getCurrentFYRange,
+  financialYearHasData,
+} from "../lib/date-helpers";
+import {
   addBulkPayBankAccount,
   deleteBulkPayBankAccounts,
   loadBulkPayBankAccounts,
@@ -49,6 +56,7 @@ import {
 
 type ConfigSection =
   | "payroll"
+  | "financialYears"
   | "bankAccounts"
   | "locations"
   | "roles"
@@ -59,6 +67,7 @@ type ConfigSection =
 
 const SECTIONS: { id: ConfigSection; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: "payroll", label: "Payroll Rules", icon: IndianRupee },
+  { id: "financialYears", label: "Financial Years", icon: Calendar },
   { id: "bankAccounts", label: "Bank Accounts", icon: CreditCard },
   { id: "locations", label: "Office Locations", icon: Map },
   { id: "roles", label: "Job Roles", icon: Briefcase },
@@ -155,6 +164,11 @@ export default function ConfigurationPanel() {
     updateLocationPtEnabled,
     handleSavePayrollConfig,
     handleResetPayrollConfig,
+    financialYearConfig,
+    availableFYRanges,
+    financialYearsWithData,
+    fetchFinancialYearsWithData,
+    handleToggleFinancialYear,
     schoolDistricts,
     schoolBlocks,
     isSchoolGeographyLoading,
@@ -205,6 +219,118 @@ export default function ConfigurationPanel() {
     const gross = 30000;
     return Math.round((gross * basicSalaryPercentage) / 100);
   }, [basicSalaryPercentage]);
+
+  const configurablePreviousYears = useMemo(() => getConfigurablePreviousYears(), []);
+  const configurableUpcomingYears = useMemo(() => getConfigurableUpcomingYears(), []);
+  const currentFYRange = useMemo(() => getCurrentFYRange(), []);
+
+  useEffect(() => {
+    if (activeSection === "financialYears") {
+      void fetchFinancialYearsWithData();
+    }
+  }, [activeSection, fetchFinancialYearsWithData]);
+
+  const renderYearToggle = (
+    fy: string,
+    category: "previous" | "upcoming",
+    enabled: boolean,
+  ) => {
+    const hasData = financialYearHasData(fy, financialYearsWithData);
+    const isChecked = enabled || hasData;
+    const isLocked = hasData;
+
+    return (
+      <label
+        key={fy}
+        className={[
+          "flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold transition",
+          isLocked
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900 cursor-default"
+            : isChecked
+              ? "border-[#ff791a] bg-orange-50 text-orange-900 cursor-pointer"
+              : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 cursor-pointer",
+        ].join(" ")}
+        title={
+          isLocked
+            ? "This year has data and cannot be disabled."
+            : isChecked
+              ? "Disable this year in the header dropdown"
+              : "Enable this year in the header dropdown"
+        }
+      >
+        <input
+          type="checkbox"
+          className="accent-[#ff791a]"
+          checked={isChecked}
+          disabled={isLocked}
+          onChange={(e) => handleToggleFinancialYear(fy, category, e.target.checked)}
+        />
+        <span>{fy}</span>
+        {isLocked && (
+          <span className="ml-auto text-[10px] font-bold uppercase text-emerald-700">Has data</span>
+        )}
+      </label>
+    );
+  };
+
+  const renderFinancialYearsSection = () => (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-2.5 text-xs text-blue-900">
+        <p>
+          The orange header <span className="font-bold">Year</span> dropdown always includes the
+          current financial year ({currentFYRange}). Older years appear only when you enable them
+          here or when they already contain attendance, payroll, or billing data. Years with data
+          cannot be disabled.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h4 className="text-sm font-bold text-slate-800">Active year dropdown</h4>
+        <p className="text-xs text-slate-500">
+          Currently available: {availableFYRanges.join(", ") || "—"}
+        </p>
+        {financialYearsWithData.length > 0 && (
+          <p className="text-xs text-slate-500">
+            Years with data: {financialYearsWithData.join(", ")}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h4 className="text-sm font-bold text-slate-800">Previous years</h4>
+        <p className="text-xs text-slate-500">
+          Enable older financial years for historical attendance and payroll review. Years that already
+          have data stay visible automatically.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {configurablePreviousYears.map((fy) =>
+            renderYearToggle(
+              fy,
+              "previous",
+              financialYearConfig.enabledPreviousYears.includes(fy),
+            ),
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h4 className="text-sm font-bold text-slate-800">Upcoming years</h4>
+        <p className="text-xs text-slate-500">
+          Enable future financial years before April if you need to plan ahead. Each new year is added
+          automatically when the financial year starts.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {configurableUpcomingYears.map((fy) =>
+            renderYearToggle(
+              fy,
+              "upcoming",
+              financialYearConfig.enabledUpcomingYears.includes(fy),
+            ),
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   const addLocation = () => {
     const val = newLocNameInput.trim();
@@ -1128,7 +1254,7 @@ export default function ConfigurationPanel() {
           <div>
             <h3 className="text-base font-extrabold text-slate-800 tracking-tight">System Configuration</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-              Manage payroll rules, bulk pay debit accounts, office locations, job roles, districts/blocks, and supervisor blocked apps. Location, role, bank account, school geography, and blocked app changes sync immediately; payroll rules require an explicit save.
+              Manage payroll rules, financial year visibility, bulk pay debit accounts, office locations, job roles, districts/blocks, and supervisor blocked apps. Location, role, bank account, financial year, school geography, and blocked app changes sync immediately; payroll rules require an explicit save.
             </p>
           </div>
           {configHasUnsavedChanges && activeSection !== "payroll" && (
@@ -1182,6 +1308,7 @@ export default function ConfigurationPanel() {
 
         <div className="flex-1 p-4 lg:p-5 min-w-0">
           {activeSection === "payroll" && renderPayrollSection()}
+          {activeSection === "financialYears" && renderFinancialYearsSection()}
           {activeSection === "bankAccounts" && renderBankAccountsSection()}
           {activeSection === "locations" && renderLocationsSection()}
           {activeSection === "roles" && renderRolesSection()}

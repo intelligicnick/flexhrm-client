@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useOutletContext } from "react-router-dom";
 import { ArrowLeft, Camera, CheckCircle2, ImagePlus, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SchoolWork, SCHOOL_MATERIAL_ITEMS, SchoolVisit } from "../../types";
@@ -8,6 +9,7 @@ import {
   hasValidVisitGps,
   probeGpsLocation,
   requireGpsLocationForStamp,
+  revokeStampedVisitPhotoUrls,
   stampVisitPhoto,
   StampedVisitPhoto,
   startGpsWarmup,
@@ -23,17 +25,24 @@ import {
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
-import { resolvePhotoSrc } from "../../lib/media-url";
+import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
+import { useSupervisorOverlayBack, useSupervisorUnsavedBackGuard } from "../../lib/supervisor-back-handler";
 import { SupervisorActionButton, SupervisorLoadingScreen } from "./SupervisorUI";
+import SupervisorToast from "./SupervisorToast";
 
 function photoSrc(photo: StampedVisitPhoto) {
   return resolvePhotoSrc(photo);
+}
+
+function photoThumbSrc(photo: StampedVisitPhoto) {
+  return resolvePhotoThumbnailSrc(photo);
 }
 
 export default function SupervisorVisitPage() {
   const { schoolId } = useParams<{ schoolId: string }>();
   const { supervisorFetch } = useOutletContext<{ supervisorFetch: typeof fetch }>();
   const { t, lang } = useSupervisorI18n();
+  const navigate = useNavigate();
   const [school, setSchool] = useState<SchoolWork | null>(null);
   const [schoolLoading, setSchoolLoading] = useState(true);
   const [schoolLoadFailed, setSchoolLoadFailed] = useState(false);
@@ -65,7 +74,15 @@ export default function SupervisorVisitPage() {
   const [earnedXp, setEarnedXp] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const backWarnedRef = useRef(false);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+  }, []);
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
 
@@ -147,22 +164,51 @@ export default function SupervisorVisitPage() {
   );
   const daysUntilAllowed = lastVisitDate ? daysUntilSchoolVisitAllowed(lastVisitDate) : 0;
 
-  const changeMaterial = (item: string, delta: number) => {
+  const changeMaterial = (item: string) => {
     setMaterials((prev) => {
-      const existing = prev.find((m) => m.item === item);
-      if (!existing) {
-        return delta > 0 ? [...prev, { item, qty: delta }] : prev;
-      }
-      const nextQty = existing.qty + delta;
-      if (nextQty <= 0) {
+      if (prev.some((m) => m.item === item)) {
         return prev.filter((m) => m.item !== item);
       }
-      return prev.map((m) => (m.item === item ? { ...m, qty: nextQty } : m));
+      return [...prev, { item, qty: 1 }];
     });
   };
 
+  const hasUnsavedData =
+    !success && (notes.trim().length > 0 || materials.length > 0 || photos.length > 0);
+
+  useSupervisorUnsavedBackGuard(
+    hasUnsavedData && lightboxIndex === null,
+    () => showToast(t("unsavedDataWarning")),
+  );
+
+  useSupervisorOverlayBack(success, () => setSuccess(false));
+
+  useEffect(() => {
+    return () => {
+      photosRef.current.forEach(revokeStampedVisitPhotoUrls);
+    };
+  }, []);
+
+  const handleBackToSchools = (e: React.MouseEvent) => {
+    if (!hasUnsavedData) return;
+    e.preventDefault();
+    showToast(t("unsavedDataWarning"));
+    if (backWarnedRef.current) {
+      navigate("/supervisor");
+      return;
+    }
+    backWarnedRef.current = true;
+    window.setTimeout(() => {
+      backWarnedRef.current = false;
+    }, 3000);
+  };
+
   const removePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setPhotos((prev) => {
+      const photo = prev[index];
+      if (photo) revokeStampedVisitPhotoUrls(photo);
+      return prev.filter((_, i) => i !== index);
+    });
     setLightboxIndex(null);
   };
 
@@ -211,7 +257,7 @@ export default function SupervisorVisitPage() {
           visitDate,
           notes,
           materialsGiven: materials,
-          photos,
+          photos: photos.map(({ previewUrl: _previewUrl, thumbPreviewUrl: _thumbPreviewUrl, ...photo }) => photo),
           gpsLocation: primary
             ? { lat: primary.lat, lng: primary.lng, locationLabel: primary.locationLabel }
             : undefined,
@@ -219,6 +265,7 @@ export default function SupervisorVisitPage() {
       });
       if (!res.ok) throw await parseApiError(res, t("requestSubmitFailed"));
       setEarnedXp(pointsForVisit(photos.length));
+      photos.forEach(revokeStampedVisitPhotoUrls);
       setSuccess(true);
       setNotes("");
       setMaterials([]);
@@ -231,7 +278,7 @@ export default function SupervisorVisitPage() {
     }
   };
 
-  const materialsCount = materials.reduce((sum, m) => sum + m.qty, 0);
+  const materialsCount = materials.length;
   const canSubmit = photos.length > 0 && !saving && !capturingPhoto && !visitBlocked && gpsReady === true;
 
   if (schoolLoading) {
@@ -257,8 +304,43 @@ export default function SupervisorVisitPage() {
 
   return (
     <div className="space-y-4 pb-28">
+      {toast && <SupervisorToast message={toast} onDone={() => setToast(null)} />}
+
+      {success &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[250] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="visit-success-title"
+          >
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+                <CheckCircle2 size={36} className="text-emerald-600" />
+              </div>
+              <h2 id="visit-success-title" className="text-lg font-black text-slate-900">
+                {t("visitSubmittedPopup")}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">{t("visitSubmitted")}</p>
+              <p className="mt-3 text-sm font-bold text-[#ff791a]">
+                {t("visitXpEarned").replace("{points}", String(earnedXp))}
+              </p>
+              <SupervisorActionButton
+                type="button"
+                onClick={() => navigate("/supervisor")}
+                fullWidth
+                className="mt-6 py-3.5"
+              >
+                {t("backToSchools")}
+              </SupervisorActionButton>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       {lightboxIndex !== null && photos[lightboxIndex] && (
         <SupervisorPhotoLightbox
+          thumbSrc={photoThumbSrc(photos[lightboxIndex])}
           src={photoSrc(photos[lightboxIndex])}
           alt={photos[lightboxIndex].caption}
           caption={photos[lightboxIndex].locationLabel}
@@ -268,6 +350,7 @@ export default function SupervisorVisitPage() {
 
       <Link
         to="/supervisor"
+        onClick={handleBackToSchools}
         className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-[#ff791a]"
       >
         <ArrowLeft size={16} /> {t("backToSchools")}
@@ -326,21 +409,6 @@ export default function SupervisorVisitPage() {
         </div>
       </div>
 
-      {success && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-2xl flex items-start gap-3">
-          <CheckCircle2 size={22} className="shrink-0 text-emerald-600" />
-          <div>
-            <p className="text-sm font-bold">{t("visitSubmitted")}</p>
-            <p className="text-xs font-semibold text-[#ff791a] mt-1">
-              {t("visitXpEarned").replace("{points}", String(earnedXp))}
-            </p>
-            <Link to="/supervisor" className="text-xs font-bold text-emerald-700 mt-2 inline-block">
-              {t("backToSchools")} →
-            </Link>
-          </div>
-        </div>
-      )}
-
       <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
         <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
           <h2 className="text-sm font-bold text-slate-800">{t("visitDetails")}</h2>
@@ -365,40 +433,22 @@ export default function SupervisorVisitPage() {
 
         <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
           <h2 className="text-sm font-bold text-slate-800">{t("materialsGiven")}</h2>
-          <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
             {SCHOOL_MATERIAL_ITEMS.map((item) => {
-              const qty = materials.find((m) => m.item === item)?.qty ?? 0;
+              const selected = materials.some((m) => m.item === item);
               return (
-                <div
+                <button
                   key={item}
-                  className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 border ${
-                    qty > 0 ? "bg-orange-50 border-orange-200" : "bg-slate-50 border-slate-100"
+                  type="button"
+                  onClick={() => changeMaterial(item)}
+                  className={`rounded-xl px-3 py-2.5 border text-left text-sm font-semibold transition cursor-pointer ${
+                    selected
+                      ? "bg-orange-50 border-orange-300 text-[#ff791a]"
+                      : "bg-slate-50 border-slate-100 text-slate-800"
                   }`}
                 >
-                  <span className="text-sm font-semibold text-slate-800 shrink-0">
-                    {getMaterialLabel(item, t)}
-                  </span>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => changeMaterial(item, -1)}
-                      disabled={qty === 0}
-                      className="w-9 h-9 flex items-center justify-center text-lg font-bold rounded-lg bg-white border border-slate-200 disabled:opacity-30 cursor-pointer"
-                      aria-label={`Decrease ${item}`}
-                    >
-                      −
-                    </button>
-                    <span className="w-6 text-center text-sm font-bold text-[#ff791a]">{qty}</span>
-                    <button
-                      type="button"
-                      onClick={() => changeMaterial(item, 1)}
-                      className="w-9 h-9 flex items-center justify-center text-lg font-bold rounded-lg bg-white border border-slate-200 cursor-pointer"
-                      aria-label={`Increase ${item}`}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
+                  {getMaterialLabel(item, t)}
+                </button>
               );
             })}
           </div>
@@ -436,8 +486,10 @@ export default function SupervisorVisitPage() {
                       className="block w-full cursor-pointer text-left"
                     >
                       <img
-                        src={photoSrc(photo)}
+                        src={photoThumbSrc(photo)}
                         alt={photo.caption}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full aspect-[4/3] object-cover"
                       />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8">

@@ -10,15 +10,15 @@ android {
         applicationId 'com.flexhrm.supervisor'
         minSdk 24
         targetSdk 35
-        versionCode 15
-        versionName '1.6.0'
+        versionCode 18
+        versionName '1.7.2'
 
         buildConfigField 'String', 'SUPERVISOR_URL',
                 '"https://appassets.androidplatform.net/supervisor/login"'
         buildConfigField 'String', 'API_ORIGIN',
-                '"https://midnightblue-partridge-476451.hostingersite.com"'
+                "\"${project.findProperty('API_ORIGIN') ?: 'https://midnightblue-partridge-476451.hostingersite.com'}\""
         buildConfigField 'String', 'API_BASE',
-                '"https://midnightblue-partridge-476451.hostingersite.com/api"'
+                "\"${project.findProperty('API_ORIGIN') ?: 'https://midnightblue-partridge-476451.hostingersite.com'}/api\""
     }
 
     buildTypes {

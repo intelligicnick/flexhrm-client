@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
-import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -30,17 +29,15 @@ import androidx.webkit.WebViewAssetLoader;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmObserver";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmObserver/1.0.1";
-  private static final String BUNDLED_LOGIN_URL =
-      "https://appassets.androidplatform.net/observer/login";
-  private static final String BUNDLED_HOME_URL =
-      "https://appassets.androidplatform.net/observer";
+  private static final String NATIVE_USER_AGENT_TOKEN =
+      "FlexHrmObserver/" + BuildConfig.VERSION_NAME;
 
   private WebView webView;
   private ProgressBar progressBar;
   private LinearLayout errorPanel;
   private TextView errorMessage;
   private WebViewAssetLoader assetLoader;
+  private boolean portalLoaded;
 
   @SuppressLint("SetJavaScriptEnabled")
   @Override
@@ -55,12 +52,7 @@ public class MainActivity extends AppCompatActivity {
     errorMessage = findViewById(R.id.errorMessage);
     Button retryButton = findViewById(R.id.retryButton);
 
-    LinearLayout securityCheckPanel = findViewById(R.id.securityCheckPanel);
-    if (securityCheckPanel != null) {
-      securityCheckPanel.setVisibility(View.GONE);
-    }
-
-    retryButton.setOnClickListener(v -> loadPortal());
+    retryButton.setOnClickListener(v -> openPortal());
 
     assetLoader =
         new WebViewAssetLoader.Builder()
@@ -69,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
             .build();
 
     configureWebView();
-    loadPortal();
+    openPortal();
 
     getOnBackPressedDispatcher()
         .addCallback(
@@ -77,12 +69,17 @@ public class MainActivity extends AppCompatActivity {
             new OnBackPressedCallback(true) {
               @Override
               public void handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                  webView.goBack();
-                } else {
-                  setEnabled(false);
-                  getOnBackPressedDispatcher().onBackPressed();
-                }
+                webView.evaluateJavascript(
+                    "(function(){return !!(window.__flexHrmHandleBack&&window.__flexHrmHandleBack());})()",
+                    value -> {
+                      if ("true".equals(value)) return;
+                      if (webView.canGoBack()) {
+                        webView.goBack();
+                      } else {
+                        setEnabled(false);
+                        getOnBackPressedDispatcher().onBackPressed();
+                      }
+                    });
               }
             });
   }
@@ -92,9 +89,8 @@ public class MainActivity extends AppCompatActivity {
     WebSettings settings = webView.getSettings();
     settings.setJavaScriptEnabled(true);
     settings.setDomStorageEnabled(true);
-    settings.setDatabaseEnabled(true);
-    settings.setGeolocationEnabled(true);
-    settings.setAllowFileAccess(true);
+    settings.setMediaPlaybackRequiresUserGesture(false);
+    settings.setAllowFileAccess(false);
     settings.setAllowContentAccess(true);
     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
     settings.setUseWideViewPort(true);
@@ -172,12 +168,6 @@ public class MainActivity extends AppCompatActivity {
     webView.setWebChromeClient(
         new WebChromeClient() {
           @Override
-          public void onGeolocationPermissionsShowPrompt(
-              String origin, GeolocationPermissions.Callback callback) {
-            callback.invoke(origin, true, true);
-          }
-
-          @Override
           public void onProgressChanged(WebView view, int newProgress) {
             progressBar.setProgress(newProgress);
           }
@@ -198,10 +188,15 @@ public class MainActivity extends AppCompatActivity {
         });
   }
 
-  private void loadPortal() {
+  private void openPortal() {
     errorPanel.setVisibility(View.GONE);
     webView.setVisibility(View.VISIBLE);
-    webView.loadUrl(BUNDLED_LOGIN_URL);
+    if (portalLoaded) {
+      webView.reload();
+      return;
+    }
+    portalLoaded = true;
+    webView.loadUrl(BuildConfig.OBSERVER_URL);
   }
 
   private void showError(@NonNull String message) {

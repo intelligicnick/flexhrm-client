@@ -23,7 +23,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // server.ts
 var import_config = require("dotenv/config");
+var import_compression = __toESM(require("compression"), 1);
 var import_express = __toESM(require("express"), 1);
+var import_fs = __toESM(require("fs"), 1);
 var import_http = __toESM(require("http"), 1);
 var import_https = __toESM(require("https"), 1);
 var import_os = __toESM(require("os"), 1);
@@ -116,10 +118,31 @@ function createApiProxy(backendUrl) {
     req.pipe(proxyReq);
   };
 }
+function resolveFaviconPath(distPath) {
+  const publicFavicon = import_path.default.join(process.cwd(), "public", "favicon.svg");
+  if (!isProd && import_fs.default.existsSync(publicFavicon)) return publicFavicon;
+  const distFavicon = import_path.default.join(distPath, "favicon.svg");
+  if (import_fs.default.existsSync(distFavicon)) return distFavicon;
+  return publicFavicon;
+}
+function staticCacheHeaders(res, filePath) {
+  if (filePath.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-cache");
+    return;
+  }
+  if (filePath.includes(`${import_path.default.sep}assets${import_path.default.sep}`)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+  }
+  res.setHeader("Cache-Control", "public, max-age=86400");
+}
 async function startServer() {
   const isDev = !isProd;
+  const distPath = import_path.default.join(process.cwd(), "dist");
+  app.use((0, import_compression.default)());
   app.get("/favicon.ico", (_req, res) => {
-    res.redirect(302, "/favicon.svg");
+    res.type("image/svg+xml");
+    res.sendFile(resolveFaviconPath(distPath));
   });
   if (BACKEND_URL) {
     app.use("/api", createApiProxy(BACKEND_URL));
@@ -145,9 +168,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     console.log("Starting Flex HRM frontend in production mode...");
-    const distPath = import_path.default.join(process.cwd(), "dist");
-    app.use(import_express.default.static(distPath, { index: "index.html" }));
+    app.use(
+      import_express.default.static(distPath, {
+        index: false,
+        setHeaders: staticCacheHeaders
+      })
+    );
     app.get(/^(?!\/api).*/, (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(import_path.default.join(distPath, "index.html"));
     });
   }

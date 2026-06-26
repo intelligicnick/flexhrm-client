@@ -62,27 +62,15 @@ public final class NativeGpsHelper {
               }
             });
 
-    com.google.android.gms.location.LocationRequest request =
-        new com.google.android.gms.location.LocationRequest.Builder(
-                Priority.PRIORITY_HIGH_ACCURACY, 2000L)
-            .setMinUpdateIntervalMillis(1000L)
-            .setWaitForAccurateLocation(false)
-            .build();
-
-    fused.requestLocationUpdates(
-        request,
-        new com.google.android.gms.location.LocationCallback() {
-          @Override
-          public void onLocationResult(
-              com.google.android.gms.location.LocationResult locationResult) {
-            if (locationResult == null) return;
-            Location location = locationResult.getLastLocation();
-            if (location != null) {
-              lastCachedLocation = location;
-            }
-          }
-        },
-        Looper.getMainLooper());
+    CancellationTokenSource tokenSource = new CancellationTokenSource();
+    fused
+        .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, tokenSource.getToken())
+        .addOnSuccessListener(
+            location -> {
+              if (location != null) {
+                lastCachedLocation = location;
+              }
+            });
   }
 
   @SuppressLint("MissingPermission")

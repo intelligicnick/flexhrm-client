@@ -6,7 +6,6 @@
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
 import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
-import "./index.css";
 import NotFoundPage from "./pages/NotFoundPage";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";

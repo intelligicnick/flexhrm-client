@@ -15,55 +15,49 @@ public final class BlockedAppsScanner {
   private static final String OWN_PACKAGE = "com.flexhrm.supervisor";
   private static final int MIN_PARTIAL_LABEL_LENGTH = 3;
 
-  private static final Map<String, String[]> KNOWN_APP_PACKAGES = new HashMap<>();
+  private static volatile Map<String, String[]> knownPackages;
 
-  static {
-    KNOWN_APP_PACKAGES.put("anyto", new String[] {"com.imyfone.anytoandroid", "com.tenorshare.ianygo"});
-    KNOWN_APP_PACKAGES.put("fake gps", new String[] {
-        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
-        "com.blogspot.newapphorizons.fakegps", "com.fakegps.mock",
-        "com.mobile.fakelocation"
-    });
-    KNOWN_APP_PACKAGES.put("fake gps location", new String[] {
-        "com.lexa.fakegps", "com.incorporateapps.fakegps.fre",
-        "com.mobile.fakelocation"
-    });
-    KNOWN_APP_PACKAGES.put("locaedit", new String[] {"com.mobile.fakelocation"});
-    KNOWN_APP_PACKAGES.put("fake gps location-locaedit", new String[] {"com.mobile.fakelocation"});
-    KNOWN_APP_PACKAGES.put("gps emulator", new String[] {"com.rosteam.gpsemulator"});
-    KNOWN_APP_PACKAGES.put("lexa fake gps", new String[] {"com.lexa.fakegps"});
-    KNOWN_APP_PACKAGES.put("mock locations", new String[] {"com.lexa.fakegps"});
-    KNOWN_APP_PACKAGES.put("location changer", new String[] {"com.lexa.fakegps"});
-    KNOWN_APP_PACKAGES.put("gps joystick", new String[] {"com.theappninjas.gpsjoystick"});
-    KNOWN_APP_PACKAGES.put("fly gps", new String[] {"com.fakegps.mock"});
-    KNOWN_APP_PACKAGES.put("anydesk", new String[] {"com.anydesk.anydeskandroid"});
-    KNOWN_APP_PACKAGES.put("teamviewer", new String[] {"com.teamviewer.teamviewer.market.mobile"});
-    KNOWN_APP_PACKAGES.put("whatsapp", new String[] {"com.whatsapp", "com.whatsapp.w4b"});
-    KNOWN_APP_PACKAGES.put("telegram", new String[] {"org.telegram.messenger", "org.telegram.messenger.web"});
-    KNOWN_APP_PACKAGES.put("facebook", new String[] {"com.facebook.katana", "com.facebook.lite"});
-    KNOWN_APP_PACKAGES.put("instagram", new String[] {"com.instagram.android"});
-    KNOWN_APP_PACKAGES.put("snapchat", new String[] {"com.snapchat.android"});
-    KNOWN_APP_PACKAGES.put("tiktok", new String[] {"com.zhiliaoapp.musically", "com.ss.android.ugc.trill"});
-    KNOWN_APP_PACKAGES.put("twitter", new String[] {"com.twitter.android"});
-    KNOWN_APP_PACKAGES.put("x", new String[] {"com.twitter.android"});
-    KNOWN_APP_PACKAGES.put("zoom", new String[] {"us.zoom.videomeetings"});
-    KNOWN_APP_PACKAGES.put("teams", new String[] {"com.microsoft.teams"});
-    KNOWN_APP_PACKAGES.put("discord", new String[] {"com.discord"});
-    KNOWN_APP_PACKAGES.put("signal", new String[] {"org.thoughtcrime.securesms"});
-    KNOWN_APP_PACKAGES.put("viber", new String[] {"com.viber.voip"});
-    KNOWN_APP_PACKAGES.put("wechat", new String[] {"com.tencent.mm"});
-    KNOWN_APP_PACKAGES.put("truecaller", new String[] {"com.truecaller"});
-    KNOWN_APP_PACKAGES.put("shareit", new String[] {"com.lenovo.anyshare.gps"});
-    KNOWN_APP_PACKAGES.put("pubg", new String[] {"com.tencent.ig", "com.pubg.imobile"});
-    KNOWN_APP_PACKAGES.put("free fire", new String[] {"com.dts.freefireth", "com.dts.freefiremax"});
-    KNOWN_APP_PACKAGES.put("unicool tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
-    KNOWN_APP_PACKAGES.put("tailorgo", new String[] {"com.unictool.tailorgo", "com.tailorgo.virtual"});
-    KNOWN_APP_PACKAGES.put("virtual location", new String[] {"com.lexa.fakegps", "com.imyfone.anytoandroid"});
-    KNOWN_APP_PACKAGES.put("locationsimulator", new String[] {"com.lexa.fakegps", "com.incorporateapps.fakegps.fre"});
-    KNOWN_APP_PACKAGES.put("dr.fone virtual location", new String[] {"com.wondershare.drfonevirtuallocation"});
-    KNOWN_APP_PACKAGES.put("3utools", new String[] {"com.3u.tools"});
-    KNOWN_APP_PACKAGES.put("easeus mobianygo", new String[] {"com.easeus.mobianygo"});
-    KNOWN_APP_PACKAGES.put("wootechy imovego", new String[] {"com.wootechy.imovego"});
+  private static Map<String, String[]> getKnownPackages(Context context) {
+    Map<String, String[]> cached = knownPackages;
+    if (cached != null) {
+      return cached;
+    }
+    synchronized (BlockedAppsScanner.class) {
+      if (knownPackages != null) {
+        return knownPackages;
+      }
+      knownPackages = loadKnownAppPackages(context.getApplicationContext());
+      return knownPackages;
+    }
+  }
+
+  private static Map<String, String[]> loadKnownAppPackages(Context context) {
+    Map<String, String[]> map = new HashMap<>();
+    try {
+      java.io.InputStream stream = context.getAssets().open("blocked-app-packages.json");
+      java.io.BufferedReader reader =
+          new java.io.BufferedReader(new java.io.InputStreamReader(stream));
+      StringBuilder json = new StringBuilder();
+      String line;
+      while ((line = reader.readLine()) != null) {
+        json.append(line);
+      }
+      reader.close();
+      org.json.JSONObject root = new org.json.JSONObject(json.toString());
+      java.util.Iterator<String> keys = root.keys();
+      while (keys.hasNext()) {
+        String key = keys.next();
+        org.json.JSONArray packages = root.getJSONArray(key);
+        String[] values = new String[packages.length()];
+        for (int i = 0; i < packages.length(); i++) {
+          values[i] = packages.getString(i);
+        }
+        map.put(key, values);
+      }
+    } catch (Exception ignored) {
+      map.put("whatsapp", new String[] {"com.whatsapp", "com.whatsapp.w4b"});
+    }
+    return map;
   }
 
   private BlockedAppsScanner() {}
@@ -94,7 +88,7 @@ public final class BlockedAppsScanner {
    * Scans every installed app and returns those that match any entry in the configured blocked list.
    */
   public static List<DetectedBlockedApp> findInstalledBlockedApps(
-      List<String> blockedEntries, List<InstalledApp> installedApps) {
+      Context context, List<String> blockedEntries, List<InstalledApp> installedApps) {
     List<DetectedBlockedApp> detected = new ArrayList<>();
     if (blockedEntries == null || blockedEntries.isEmpty()) {
       return detected;
@@ -102,6 +96,7 @@ public final class BlockedAppsScanner {
 
     Set<String> seen = new HashSet<>();
     String ownPackageNorm = normalize(OWN_PACKAGE);
+    Map<String, String[]> knownPackages = getKnownPackages(context);
 
     for (InstalledApp installed : installedApps) {
       String packageNorm = normalize(installed.packageName);
@@ -114,7 +109,7 @@ public final class BlockedAppsScanner {
         if (entry == null || entry.trim().isEmpty()) {
           continue;
         }
-        if (installedAppMatchesBlockedEntry(installed, entry.trim())) {
+        if (installedAppMatchesBlockedEntry(installed, entry.trim(), knownPackages)) {
           matchedEntry = entry.trim();
           break;
         }
@@ -139,8 +134,9 @@ public final class BlockedAppsScanner {
     return detected;
   }
 
-  private static boolean installedAppMatchesBlockedEntry(InstalledApp installed, String entry) {
-    ParsedEntry parsed = parseBlockedAppEntry(entry);
+  private static boolean installedAppMatchesBlockedEntry(
+      InstalledApp installed, String entry, Map<String, String[]> knownPackages) {
+    ParsedEntry parsed = parseBlockedAppEntry(entry, knownPackages);
     if (parsed.label.isEmpty()) {
       return false;
     }
@@ -193,7 +189,8 @@ public final class BlockedAppsScanner {
     return significant > 0 && matched == significant;
   }
 
-  private static ParsedEntry parseBlockedAppEntry(String entry) {
+  private static ParsedEntry parseBlockedAppEntry(
+      String entry, Map<String, String[]> knownPackages) {
     String trimmed = entry.trim();
     if (trimmed.isEmpty()) return new ParsedEntry("", new String[0]);
 
@@ -214,7 +211,7 @@ public final class BlockedAppsScanner {
       return new ParsedEntry(trimmed, new String[] {trimmed});
     }
 
-    String[] known = KNOWN_APP_PACKAGES.get(normalize(trimmed));
+    String[] known = knownPackages.get(normalize(trimmed));
     if (known != null) return new ParsedEntry(trimmed, known);
 
     return new ParsedEntry(trimmed, new String[0]);

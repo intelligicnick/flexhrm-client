@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Flex HRM Field Team</string>
-    <string name="loading">Loading…</string>
     <string name="error_no_internet">No internet connection. Check your network and try again.</string>
     <string name="error_page_load">Could not load the supervisor portal.</string>
     <string name="retry">Retry</string>
-    <string name="permission_rationale">Camera and location are required for school visits.</string>
     <string name="security_check_scanning">Scanning installed apps…</string>
     <string name="error_security_check">Could not verify device security. Check your internet and try again.</string>
     <string name="blocked_apps_title">Restricted app found</string>

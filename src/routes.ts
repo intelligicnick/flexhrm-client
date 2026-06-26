@@ -36,6 +36,14 @@ export function isBgDdTab(tab: string): tab is BgDdTab {
   return tab === BG_DD_TAB;
 }
 
+export const MONITOR_TAB = "Monitor" as const;
+
+export type MonitorTab = typeof MONITOR_TAB;
+
+export function isMonitorTab(tab: string): tab is MonitorTab {
+  return tab === MONITOR_TAB;
+}
+
 export const TAB_TO_PATH: Record<string, string> = {
   "Dashboard": "/dashboard",
   "Employees": "/employees",
@@ -58,6 +66,7 @@ export const TAB_TO_PATH: Record<string, string> = {
   "IT Renewals": "/renewals/it-renewals",
   "Licenses": "/renewals/licenses",
   "BG & DD": "/bg-dd",
+  "Monitor": "/monitor",
   "My Info": "/my-info",
 };
 
@@ -116,5 +125,6 @@ export const APP_ROUTES = [
   { path: "/renewals/it-renewals", tab: "IT Renewals" },
   { path: "/renewals/licenses", tab: "Licenses" },
   { path: "/bg-dd", tab: "BG & DD" },
+  { path: "/monitor", tab: "Monitor" },
   { path: "/my-info", tab: "My Info" },
 ] as const;

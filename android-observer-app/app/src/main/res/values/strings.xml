@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Observer Admin</string>
-    <string name="loading">Loading…</string>
-    <string name="error_no_internet">No internet connection. Check your network and try again.</string>
     <string name="error_page_load">Could not load Observer Admin.</string>
     <string name="retry">Retry</string>
-    <string name="security_check_scanning">Loading…</string>
 </resources>

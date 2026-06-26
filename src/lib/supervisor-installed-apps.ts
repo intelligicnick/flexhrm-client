@@ -1,4 +1,5 @@
 import { allSignificantTokensMatch } from "./supervisor-blocked-apps-defaults";
+import blockedAppPackagesJson from "../../shared/blocked-app-packages.json";
 
 export type InstalledApp = {
   packageName: string;
@@ -31,47 +32,7 @@ declare global {
 const OWN_PACKAGE = "com.flexhrm.supervisor";
 const MIN_PARTIAL_LABEL_LENGTH = 3;
 
-const KNOWN_APP_PACKAGES: Record<string, string[]> = {
-  whatsapp: ["com.whatsapp", "com.whatsapp.w4b"],
-  "whatsapp business": ["com.whatsapp.w4b"],
-  telegram: ["org.telegram.messenger", "org.telegram.messenger.web"],
-  facebook: ["com.facebook.katana", "com.facebook.lite"],
-  instagram: ["com.instagram.android"],
-  snapchat: ["com.snapchat.android"],
-  tiktok: ["com.zhiliaoapp.musically", "com.ss.android.ugc.trill"],
-  twitter: ["com.twitter.android"],
-  x: ["com.twitter.android"],
-  zoom: ["us.zoom.videomeetings"],
-  teams: ["com.microsoft.teams"],
-  discord: ["com.discord"],
-  signal: ["org.thoughtcrime.securesms"],
-  viber: ["com.viber.voip"],
-  wechat: ["com.tencent.mm"],
-  truecaller: ["com.truecaller"],
-  shareit: ["com.lenovo.anyshare.gps"],
-  pubg: ["com.tencent.ig", "com.pubg.imobile"],
-  "free fire": ["com.dts.freefireth", "com.dts.freefiremax"],
-  anyto: ["com.imyfone.anytoandroid", "com.tenorshare.ianygo"],
-  "imyfone anyto": ["com.imyfone.anytoandroid"],
-  "tenorshare ianygo": ["com.tenorshare.ianygo"],
-  "unicool tailorgo": ["com.unictool.tailorgo", "com.tailorgo.virtual"],
-  tailorgo: ["com.unictool.tailorgo", "com.tailorgo.virtual"],
-  "fake gps": [
-    "com.lexa.fakegps",
-    "com.incorporateapps.fakegps.fre",
-    "com.blogspot.newapphorizons.fakegps",
-    "com.mobile.fakelocation",
-  ],
-  "fake gps location": ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre", "com.mobile.fakelocation"],
-  locaedit: ["com.mobile.fakelocation"],
-  "fake gps location-locaedit": ["com.mobile.fakelocation"],
-  "virtual location": ["com.lexa.fakegps", "com.imyfone.anytoandroid"],
-  locationsimulator: ["com.lexa.fakegps", "com.incorporateapps.fakegps.fre"],
-  "dr.fone virtual location": ["com.wondershare.drfonevirtuallocation"],
-  "3utools": ["com.3u.tools"],
-  "easeus mobianygo": ["com.easeus.mobianygo"],
-  "wootechy imovego": ["com.wootechy.imovego"],
-};
+const KNOWN_APP_PACKAGES: Record<string, string[]> = blockedAppPackagesJson as Record<string, string[]>;
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();

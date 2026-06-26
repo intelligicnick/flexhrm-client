@@ -1,4 +1,10 @@
+import type { FinancialYearSelectionConfig } from "./date-helpers";
+import { parseFYRangeStartYear } from "./date-helpers";
+
+export type { FinancialYearSelectionConfig };
+
 export const HRMS_PAYROLL_CONFIG_KEY = "hrms_payroll_config";
+export const HRMS_FINANCIAL_YEAR_CONFIG_KEY = "hrms_financial_year_config";
 
 export type PayrollConfig = {
   esicEligibilityLimit: number;
@@ -37,6 +43,43 @@ export function loadPayrollConfig(): PayrollConfig {
 
 export function savePayrollConfig(config: PayrollConfig): void {
   localStorage.setItem(HRMS_PAYROLL_CONFIG_KEY, JSON.stringify(config));
+}
+
+export const DEFAULT_FINANCIAL_YEAR_CONFIG: FinancialYearSelectionConfig = {
+  enabledPreviousYears: [],
+  enabledUpcomingYears: [],
+};
+
+function normalizeFYRangeList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const item of value) {
+    const fy = String(item ?? "").trim();
+    if (!fy || seen.has(fy) || !Number.isFinite(parseFYRangeStartYear(fy))) continue;
+    seen.add(fy);
+    list.push(fy);
+  }
+  return list;
+}
+
+export function loadFinancialYearConfig(): FinancialYearSelectionConfig {
+  if (typeof window === "undefined") return { ...DEFAULT_FINANCIAL_YEAR_CONFIG };
+  try {
+    const saved = localStorage.getItem(HRMS_FINANCIAL_YEAR_CONFIG_KEY);
+    if (!saved) return { ...DEFAULT_FINANCIAL_YEAR_CONFIG };
+    const parsed = JSON.parse(saved);
+    return {
+      enabledPreviousYears: normalizeFYRangeList(parsed.enabledPreviousYears),
+      enabledUpcomingYears: normalizeFYRangeList(parsed.enabledUpcomingYears),
+    };
+  } catch {
+    return { ...DEFAULT_FINANCIAL_YEAR_CONFIG };
+  }
+}
+
+export function saveFinancialYearConfig(config: FinancialYearSelectionConfig): void {
+  localStorage.setItem(HRMS_FINANCIAL_YEAR_CONFIG_KEY, JSON.stringify(config));
 }
 
 export function validatePayrollConfig(config: PayrollConfig): string | null {

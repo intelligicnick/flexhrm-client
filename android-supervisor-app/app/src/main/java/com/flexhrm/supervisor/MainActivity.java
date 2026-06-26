@@ -57,14 +57,8 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
   private static final String TAG = "FlexHrmSupervisor";
-  private static final String NATIVE_USER_AGENT_TOKEN = "FlexHrmSupervisor/1.6.0";
-  private static final long SECURITY_RECHECK_MS = 5 * 60 * 1000L;
-  private static final String BUNDLED_LOGIN_URL =
-      "https://appassets.androidplatform.net/supervisor/login";
-  private static final String BUNDLED_PORTAL_URL =
-      "https://appassets.androidplatform.net/supervisor";
-  private static final String REMOTE_LOGIN_URL =
-      "https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login";
+  private static final String NATIVE_USER_AGENT_TOKEN =
+      "FlexHrmSupervisor/" + BuildConfig.VERSION_NAME;
 
   private WebView webView;
   private ProgressBar progressBar;
@@ -80,7 +74,6 @@ public class MainActivity extends AppCompatActivity {
   private String pendingGeoOrigin;
   private AlertDialog blockedAppsDialog;
   private boolean portalLoaded;
-  private boolean useBundledFallback;
   private boolean securityCheckPassed;
   private long lastSecurityPassAt;
   private boolean pendingNativeCameraAfterPermission;
@@ -153,7 +146,7 @@ public class MainActivity extends AppCompatActivity {
             .build();
 
     configureWebView();
-    preloadBundledPortal();
+    ensurePortalLoaded();
     requestStartupPermissions();
 
     getOnBackPressedDispatcher()
@@ -180,10 +173,8 @@ public class MainActivity extends AppCompatActivity {
       ensureLocationReady();
       return;
     }
-    if (securityCheckPassed
-        && portalLoaded
-        && System.currentTimeMillis() - lastSecurityPassAt < SECURITY_RECHECK_MS) {
-      openPortal();
+    if (securityCheckPassed && portalLoaded) {
+      runSecurityCheck();
       return;
     }
     runSecurityCheck();
@@ -239,7 +230,7 @@ public class MainActivity extends AppCompatActivity {
     List<BlockedAppsScanner.InstalledApp> installed =
         BlockedAppsScanner.getAllInstalledApps(MainActivity.this);
     List<DetectedBlockedApp> detected =
-        BlockedAppsScanner.findInstalledBlockedApps(blockedPolicy, installed);
+        BlockedAppsScanner.findInstalledBlockedApps(this, blockedPolicy, installed);
     Log.d(
         TAG,
         "Blocked app scan: policy="
@@ -409,17 +400,28 @@ public class MainActivity extends AppCompatActivity {
     startActivity(intent);
   }
 
-  private void preloadBundledPortal() {
+  private void ensurePortalLoaded() {
     if (portalLoaded || webView == null) {
       return;
     }
     portalLoaded = true;
+    webView.loadUrl(resolveEntryUrl());
+  }
+
+  private String resolveEntryUrl() {
     String sessionJson = SupervisorSessionCache.loadJson(this);
     if (sessionJson != null && !sessionJson.isEmpty()) {
-      webView.loadUrl(BUNDLED_PORTAL_URL);
-    } else {
-      webView.loadUrl(BUNDLED_LOGIN_URL);
+      return portalBaseUrl();
     }
+    return BuildConfig.SUPERVISOR_URL;
+  }
+
+  private String portalBaseUrl() {
+    String loginUrl = BuildConfig.SUPERVISOR_URL;
+    if (loginUrl.endsWith("/login")) {
+      return loginUrl.substring(0, loginUrl.length() - "/login".length());
+    }
+    return loginUrl;
   }
 
   private void openPortal() {
@@ -429,13 +431,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     securityCheckPanel.setVisibility(View.GONE);
-    if (portalLoaded) {
-      webView.setVisibility(View.VISIBLE);
-      return;
-    }
-    portalLoaded = true;
+    ensurePortalLoaded();
     webView.setVisibility(View.VISIBLE);
-    loadPortal();
   }
 
   @SuppressLint("SetJavaScriptEnabled")
@@ -471,7 +468,7 @@ public class MainActivity extends AppCompatActivity {
           @Override
           public WebResourceResponse shouldInterceptRequest(
               WebView view, WebResourceRequest request) {
-            if (useBundledFallback || request.getUrl() == null) {
+            if (request.getUrl() == null) {
               return super.shouldInterceptRequest(view, request);
             }
             return assetLoader.shouldInterceptRequest(request.getUrl());
@@ -494,13 +491,6 @@ public class MainActivity extends AppCompatActivity {
           public void onReceivedError(
               WebView view, WebResourceRequest request, WebResourceError error) {
             if (!request.isForMainFrame()) return;
-            if (!useBundledFallback) {
-              Log.w(TAG, "Remote UI failed, falling back to bundled login URL");
-              useBundledFallback = true;
-              portalLoaded = false;
-              webView.loadUrl(BUNDLED_LOGIN_URL);
-              return;
-            }
             showError(getString(R.string.error_page_load));
           }
 
@@ -804,20 +794,6 @@ public class MainActivity extends AppCompatActivity {
 
   private void cancelFileCallback() {
     deliverCapturedUriToFileCallback(null);
-  }
-
-  private void loadPortal() {
-    errorPanel.setVisibility(View.GONE);
-    if (portalLoaded) {
-      return;
-    }
-    portalLoaded = true;
-    String sessionJson = SupervisorSessionCache.loadJson(this);
-    if (sessionJson != null && !sessionJson.isEmpty()) {
-      webView.loadUrl(BUNDLED_PORTAL_URL);
-    } else {
-      webView.loadUrl(BUNDLED_LOGIN_URL);
-    }
   }
 
   private void restoreWebSessionIfNeeded() {

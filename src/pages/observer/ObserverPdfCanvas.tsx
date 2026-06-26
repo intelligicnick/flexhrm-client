@@ -10,6 +10,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
+const RENDER_BUFFER_PX = 400;
 
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
@@ -21,25 +22,115 @@ function touchDistance(touches: TouchList | React.TouchList): number {
   return Math.hypot(dx, dy);
 }
 
+function PdfPage({
+  pdf,
+  pageNum,
+  zoom,
+  containerWidth,
+  onHeight,
+}: {
+  pdf: pdfjsLib.PDFDocumentProxy;
+  pageNum: number;
+  zoom: number;
+  containerWidth: number;
+  onHeight: (pageNum: number, height: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [rendered, setRendered] = useState(false);
+
+  useEffect(() => {
+    const node = wrapRef.current;
+    if (!node) return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { rootMargin: `${RENDER_BUFFER_PX}px 0px` },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!visible || rendered) return undefined;
+
+    let cancelled = false;
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+
+    async function renderPage() {
+      try {
+        const pdfPage = await pdf.getPage(pageNum);
+        if (cancelled) return;
+
+        const baseViewport = pdfPage.getViewport({ scale: 1 });
+        const fitScale = containerWidth / baseViewport.width;
+        const viewport = pdfPage.getViewport({ scale: fitScale * zoom });
+
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        onHeight(pageNum, viewport.height);
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+        if (!cancelled) setRendered(true);
+      } catch {
+        if (!cancelled) setRendered(false);
+      }
+    }
+
+    void renderPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, rendered, pdf, pageNum, zoom, containerWidth, onHeight]);
+
+  return (
+    <div ref={wrapRef} className="bg-white shadow-md rounded-sm overflow-hidden min-h-[120px]">
+      {!rendered && (
+        <div className="flex items-center justify-center h-[120px] bg-slate-100">
+          <Loader2 size={18} className="animate-spin text-[#ff791a]" />
+        </div>
+      )}
+      <canvas
+        ref={canvasRef}
+        className={`block max-w-none h-auto w-full ${rendered ? "" : "hidden"}`}
+      />
+      <p className="text-[10px] font-semibold text-slate-400 px-2 py-1 border-t border-slate-100">
+        Page {pageNum}
+      </p>
+    </div>
+  );
+}
+
 export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
-  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const pinchStart = useRef<{ distance: number; zoom: number } | null>(null);
 
   const [pageCount, setPageCount] = useState(0);
+  const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [containerWidth, setContainerWidth] = useState(360);
 
   const changeZoom = useCallback((next: number | ((current: number) => number)) => {
     setZoom((current) => clampZoom(typeof next === "function" ? next(current) : next));
   }, []);
 
+  const handlePageHeight = useCallback((_pageNum: number, _height: number) => {
+    // placeholder for future virtual scroll height tracking
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     pdfRef.current = null;
+    setPdf(null);
     setPageCount(0);
     setZoom(1);
     setLoading(true);
@@ -50,8 +141,9 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
       .promise.then((pdf) => {
         if (cancelled) return;
         pdfRef.current = pdf;
+        setPdf(pdf);
         setPageCount(pdf.numPages);
-        canvasRefs.current = Array.from({ length: pdf.numPages }, () => null);
+        setLoading(false);
       })
       .catch(() => {
         if (!cancelled) {
@@ -64,61 +156,23 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
       cancelled = true;
       pdfRef.current?.destroy();
       pdfRef.current = null;
+      setPdf(null);
     };
   }, [data]);
 
-  useLayoutEffect(() => {
-    if (pageCount === 0) return;
+  useEffect(() => {
+    const el = wrapRef.current || scrollRef.current;
+    if (!el) return undefined;
 
-    let cancelled = false;
-
-    async function renderAllPages() {
-      setLoading(true);
-      setError(null);
-
-      const pdf = pdfRef.current;
-      if (!pdf) return;
-
-      try {
-        const containerWidth = Math.max(wrapRef.current?.clientWidth || scrollRef.current?.clientWidth || 360, 280);
-
-        for (let pageNum = 1; pageNum <= pageCount; pageNum += 1) {
-          if (cancelled) return;
-
-          const canvas = canvasRefs.current[pageNum - 1];
-          if (!canvas) continue;
-
-          const pdfPage = await pdf.getPage(pageNum);
-          if (cancelled) return;
-
-          const baseViewport = pdfPage.getViewport({ scale: 1 });
-          const fitScale = containerWidth / baseViewport.width;
-          const viewport = pdfPage.getViewport({ scale: fitScale * zoom });
-
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-
-          const ctx = canvas.getContext("2d");
-          if (!ctx) throw new Error("Unable to render PDF page.");
-
-          await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-        }
-
-        if (!cancelled) setLoading(false);
-      } catch {
-        if (!cancelled) {
-          setError("Could not render PDF in app.");
-          setLoading(false);
-        }
-      }
-    }
-
-    void renderAllPages();
-
-    return () => {
-      cancelled = true;
+    const updateWidth = () => {
+      setContainerWidth(Math.max(el.clientWidth - 16, 280));
     };
-  }, [pageCount, zoom]);
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pageCount]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -217,23 +271,20 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
             </div>
           )}
 
-          <div className={`mx-auto flex flex-col gap-3 w-fit ${loading ? "opacity-0" : "opacity-100"}`}>
-            {Array.from({ length: pageCount }, (_, index) => (
-              <div key={index} className="bg-white shadow-md rounded-sm overflow-hidden">
-                <canvas
-                  ref={(node) => {
-                    canvasRefs.current[index] = node;
-                  }}
-                  className="block max-w-none h-auto"
+          {pdf && pageCount > 0 && (
+            <div className="mx-auto flex flex-col gap-3 w-full max-w-full">
+              {Array.from({ length: pageCount }, (_, index) => (
+                <PdfPage
+                  key={`${index}-${zoom}-${containerWidth}`}
+                  pdf={pdf}
+                  pageNum={index + 1}
+                  zoom={zoom}
+                  containerWidth={containerWidth}
+                  onHeight={handlePageHeight}
                 />
-                {pageCount > 1 && (
-                  <p className="text-[10px] font-semibold text-slate-400 px-2 py-1 border-t border-slate-100">
-                    Page {index + 1}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

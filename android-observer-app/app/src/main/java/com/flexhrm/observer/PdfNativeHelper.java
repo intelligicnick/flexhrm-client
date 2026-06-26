@@ -107,6 +107,15 @@ final class PdfNativeHelper {
     activity.startActivity(chooser);
   }
 
+  static void printPdf(MainActivity activity, File file, String jobName) {
+    Intent view = new Intent(Intent.ACTION_VIEW);
+    Uri uri = fileUri(activity, file);
+    view.setDataAndType(uri, "application/pdf");
+    view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    String label = jobName != null && !jobName.trim().isEmpty() ? jobName.trim() : "Print PDF";
+    activity.startActivity(Intent.createChooser(view, label));
+  }
+
   static void notifyJs(WebView webView, String callbackName, boolean ok, String message) {
     if (webView == null) return;
     webView.post(

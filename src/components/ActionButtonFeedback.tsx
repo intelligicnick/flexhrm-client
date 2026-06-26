@@ -2,15 +2,48 @@ import { useEffect } from "react";
 import { inferLoadingLabel, normalizeButtonLabel } from "../lib/button-loading";
 
 function getButtonLabel(button: HTMLButtonElement): string {
-  return normalizeButtonLabel(button.dataset.busyLabel || button.textContent || "");
+  if (button.dataset.busyLabel) {
+    return normalizeButtonLabel(button.dataset.busyLabel);
+  }
+
+  const ariaLabel = button.getAttribute("aria-label");
+  if (ariaLabel?.trim()) {
+    return normalizeButtonLabel(ariaLabel);
+  }
+
+  const textSpans = Array.from(button.querySelectorAll("span"))
+    .map((el) => normalizeButtonLabel(el.textContent || ""))
+    .filter(Boolean);
+  if (textSpans.length > 0) {
+    return textSpans.reduce((longest, current) =>
+      current.length > longest.length ? current : longest,
+    );
+  }
+
+  return normalizeButtonLabel(button.textContent || "");
 }
 
 function isNavigationButton(button: HTMLButtonElement): boolean {
   return !!(
     button.closest("#sidebar-navigation") ||
     button.closest("#mobile-bottom-nav") ||
+    button.closest("#main-top-banner") ||
+    button.closest("#profile-dropdown-wrapper") ||
+    button.closest("#mobile-profile-dropdown-wrapper") ||
+    button.closest("#pim-sub-menu-band") ||
+    button.closest("#monitor-panel aside") ||
+    button.closest("[id$='-tab-headers']") ||
+    button.closest("[data-tab-nav]") ||
+    button.closest("[role='menu']") ||
+    button.closest("[role='tablist']") ||
+    button.id === "top-profile-selector" ||
+    button.id === "mobile-top-profile-selector" ||
+    button.id === "hamburger-btn" ||
+    button.id === "sidebar-toggle-overlay-btn" ||
     button.id.startsWith("sidebar-tab-") ||
-    button.id.startsWith("sidebar-subtab-")
+    button.id.startsWith("sidebar-subtab-") ||
+    button.id.startsWith("pim-subtab-btn-") ||
+    button.id.startsWith("tab-btn-")
   );
 }
 
@@ -18,7 +51,9 @@ function isActionButton(button: HTMLButtonElement): boolean {
   if (button.dataset.noBusy !== undefined) return false;
   if (isNavigationButton(button)) return false;
   if (button.dataset.busy !== undefined) return true;
-  if (button.type === "submit") return true;
+
+  const inForm = !!button.closest("form");
+  if (button.type === "submit" && inForm) return true;
 
   const className = button.className;
   return /bg-\[#ff791a\]|bg-primary|bg-rose-600|bg-\[#f57416\]|bg-gradient-to-r from-\[#ff791a\]/.test(
@@ -289,4 +324,12 @@ export function ActionButtonFeedback() {
 
 export function signalButtonBusyDone(button: HTMLButtonElement | null | undefined) {
   button?.dispatchEvent(new Event("flexhrm:busy-done", { bubbles: true }));
+}
+
+export function resetAllBusyButtons() {
+  document.querySelectorAll("button[data-flexhrm-busy-managed='1']").forEach((node) => {
+    if (node instanceof HTMLButtonElement) {
+      resetBusyState(node);
+    }
+  });
 }

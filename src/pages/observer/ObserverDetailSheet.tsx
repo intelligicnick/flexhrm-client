@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { ArrowLeft, ExternalLink, Share2, FileText, Loader2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { ArrowLeft, ExternalLink, Share2, FileText, Loader2, ZoomIn } from "lucide-react";
+import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import type { DetailField, ObserverDocumentLink } from "./observer-details";
 import { sharePdfUrl, type PdfActionStatus } from "./observer-share";
 import { ObserverPdfViewer } from "./ObserverPdfViewer";
@@ -14,6 +15,89 @@ const toneClasses: Record<NonNullable<DetailField["tone"]>, string> = {
 
 type PdfAction = { url: string; title: string; mode: "view" | "share" } | null;
 
+function LazyImageField({ field }: { field: DetailField }) {
+  const thumbSrc = field.imageThumbSrc || field.imageSrc;
+  const fullSrc = field.imageSrc || field.imageThumbSrc;
+  const [expanded, setExpanded] = useState(false);
+  const [fullLoaded, setFullLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return undefined;
+    return registerObserverBackHandler(() => {
+      setExpanded(false);
+      setFullLoaded(false);
+      return true;
+    });
+  }, [expanded]);
+
+  if (!thumbSrc) return null;
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => {
+          setExpanded(true);
+          if (fullSrc && fullSrc !== thumbSrc) {
+            const img = new Image();
+            img.onload = () => setFullLoaded(true);
+            img.src = fullSrc;
+          } else {
+            setFullLoaded(true);
+          }
+        }}
+        className="relative w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50 cursor-pointer group"
+      >
+        <img
+          src={thumbSrc}
+          alt={field.label}
+          loading="lazy"
+          decoding="async"
+          className="w-full max-h-40 object-contain bg-black/5 blur-[0.3px]"
+        />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/10 transition">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-black/50 text-white text-[10px] font-bold opacity-90">
+            <ZoomIn size={12} />
+            Tap to view full image
+          </span>
+        </div>
+      </button>
+      {field.value && field.value !== "—" && (
+        <p className="text-[10px] font-semibold text-slate-500 px-1 py-1.5">{field.value}</p>
+      )}
+
+      {expanded && (
+        <div className="fixed inset-0 z-[70] flex flex-col bg-black/95 max-w-lg mx-auto w-full">
+          <div className="flex items-center gap-2 px-3 py-2.5 safe-area-top shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(false);
+                setFullLoaded(false);
+              }}
+              className="p-2 rounded-xl text-white/90 hover:bg-white/10 cursor-pointer"
+              aria-label="Close image"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <p className="text-sm font-bold text-white truncate flex-1">{field.label}</p>
+          </div>
+          <div className="flex-1 flex items-center justify-center p-4 overflow-auto">
+            {!fullLoaded && <Loader2 size={28} className="animate-spin text-[#ff791a]" />}
+            {fullLoaded && fullSrc && (
+              <img
+                src={fullSrc}
+                alt={field.label}
+                className="max-w-full max-h-full object-contain"
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FieldValue({
   field,
   onPdfAction,
@@ -23,21 +107,8 @@ function FieldValue({
   onPdfAction: (action: PdfAction) => void;
   pdfBusy: boolean;
 }) {
-  if (field.imageSrc) {
-    return (
-      <div className="mt-2 rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-        <img
-          src={field.imageSrc}
-          alt={field.label}
-          className="w-full max-h-64 object-contain bg-black/5"
-        />
-        {field.value && field.value !== "—" && (
-          <p className="text-[10px] font-semibold text-slate-500 px-2 py-1.5 border-t border-slate-100">
-            {field.value}
-          </p>
-        )}
-      </div>
-    );
+  if (field.imageThumbSrc || field.imageSrc) {
+    return <LazyImageField field={field} />;
   }
 
   if (field.href) {
@@ -94,6 +165,13 @@ export function ObserverDetailSheet({
   const [pdfViewer, setPdfViewer] = useState<{ url: string; title: string } | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    return registerObserverBackHandler(() => {
+      onClose();
+      return true;
+    });
+  }, [onClose]);
 
   const handlePdfAction = async (action: PdfAction) => {
     if (!action) return;

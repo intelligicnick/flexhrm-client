@@ -39,6 +39,8 @@ export const getModuleKey = (tabName: string): string => {
       return "renewals";
     case "BG & DD":
       return "bids";
+    case "Monitor":
+      return "monitor";
     case "Salary": return "salary";
     case "Saved Bulk Pay": return "salary";
     case "Advance & Penalty": return "ledger";
@@ -54,7 +56,7 @@ export const isAdminModuleTab = (tabName: string): boolean =>
   getModuleKey(tabName) === "admin";
 
 export const PERMISSION_MODULES = [
-  "employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "admin",
+  "employees", "schoolWork", "bids", "renewals", "salary", "ledger", "attendance", "leave", "birthdays", "directory", "monitor", "admin",
 ] as const;
 
 export type PermissionModuleKey = (typeof PERMISSION_MODULES)[number];
@@ -119,6 +121,11 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
     includes: "Employee directory contacts",
   },
   {
+    key: "monitor",
+    name: "Employee Monitor",
+    includes: "Desktop agent monitoring, live activity, screenshots, productivity analytics, and alerts",
+  },
+  {
     key: "admin",
     name: "Role & Access",
     includes:
@@ -143,5 +150,6 @@ export const DEFAULT_NEW_ROLE_PERMISSIONS: Record<PermissionModuleKey, { view: b
   leave: { view: true, edit: true },
   birthdays: { view: true, edit: false },
   directory: { view: true, edit: false },
+  monitor: { view: true, edit: true },
   admin: { view: false, edit: false },
 };

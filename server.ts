@@ -4,7 +4,9 @@
  */
 
 import "dotenv/config";
+import compression from "compression";
 import express from "express";
+import fs from "fs";
 import http from "http";
 import https from "https";
 import os from "os";
@@ -108,11 +110,35 @@ function createApiProxy(backendUrl: string) {
   };
 }
 
+function resolveFaviconPath(distPath: string): string {
+  const publicFavicon = path.join(process.cwd(), "public", "favicon.svg");
+  if (!isProd && fs.existsSync(publicFavicon)) return publicFavicon;
+  const distFavicon = path.join(distPath, "favicon.svg");
+  if (fs.existsSync(distFavicon)) return distFavicon;
+  return publicFavicon;
+}
+
+function staticCacheHeaders(res: Response, filePath: string): void {
+  if (filePath.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-cache");
+    return;
+  }
+  if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+  }
+  res.setHeader("Cache-Control", "public, max-age=86400");
+}
+
 async function startServer() {
   const isDev = !isProd;
+  const distPath = path.join(process.cwd(), "dist");
+
+  app.use(compression());
 
   app.get("/favicon.ico", (_req, res) => {
-    res.redirect(302, "/favicon.svg");
+    res.type("image/svg+xml");
+    res.sendFile(resolveFaviconPath(distPath));
   });
 
   if (BACKEND_URL) {
@@ -143,9 +169,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     console.log("Starting Flex HRM frontend in production mode...");
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath, { index: "index.html" }));
+    app.use(
+      express.static(distPath, {
+        index: false,
+        setHeaders: staticCacheHeaders,
+      }),
+    );
     app.get(/^(?!\/api).*/, (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

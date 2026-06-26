@@ -5,11 +5,14 @@ import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'url';
-import { DEFAULT_PRODUCTION_API_BASE } from './src/api-config';
-import { PRODUCTION_ID_CARD_VERIFY_BASE } from './src/deploy-urls';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/** Read shared defaults without importing deploy-urls (import.meta.env is unavailable in vite.config). */
+const clientConfig = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../shared/client-config.json'), 'utf8'),
+) as { apiOrigin: string; frontendOrigin: string };
 
 /** Runs before Vite HMR scripts so extension rejections are caught early. */
 const EXTENSION_GUARD_BOOTSTRAP = fs.readFileSync(
@@ -49,14 +52,15 @@ function stripRemoteFontsForNativeBuild(disablePwa: boolean) {
 function resolveProductionApiBase(env: Record<string, string>): string {
   const fromEnv =
     env.FLEXHRM_API_BASE || env.PUBLIC_API_URL || env.VITE_API_BASE || "";
-  const apiBase = (fromEnv || DEFAULT_PRODUCTION_API_BASE).trim().replace(/\/$/, "");
+  const apiBase = (fromEnv || clientConfig.apiOrigin).trim().replace(/\/$/, "");
   return apiBase;
 }
 
 function resolveIdCardVerifyBase(env: Record<string, string>): string {
   const fromEnv =
     env.VITE_ID_CARD_VERIFY_BASE_URL || env.ID_CARD_VERIFY_BASE_URL || "";
-  return (fromEnv || PRODUCTION_ID_CARD_VERIFY_BASE).trim().replace(/\/$/, "");
+  const defaultBase = `${clientConfig.frontendOrigin}/employee`;
+  return (fromEnv || defaultBase).trim().replace(/\/$/, "");
 }
 
 export default defineConfig(({ mode }) => {
@@ -148,7 +152,21 @@ export default defineConfig(({ mode }) => {
           : {}),
       },
     },
+    // esbuild 0.28+ errors on destructuring for legacy browser targets during dep pre-bundling.
+    esbuild: {
+      supported: {
+        destructuring: true,
+      },
+    },
+    optimizeDeps: {
+      esbuildOptions: {
+        supported: {
+          destructuring: true,
+        },
+      },
+    },
     build: {
+      target: 'es2022',
       chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
@@ -159,6 +177,10 @@ export default defineConfig(({ mode }) => {
             if (id.includes('html2canvas')) return 'html2canvas';
             if (id.includes('leaflet')) return 'leaflet';
             if (id.includes('qrcode')) return 'qrcode';
+            if (id.includes('pdfjs-dist')) return 'pdfjs';
+            if (id.includes('jspdf')) return 'jspdf';
+            if (id.includes('lucide-react')) return 'icons';
+            if (id.includes('/motion/') || id.includes('motion/dist')) return 'motion';
             if (
               id.includes('react-dom') ||
               id.includes('react-router') ||

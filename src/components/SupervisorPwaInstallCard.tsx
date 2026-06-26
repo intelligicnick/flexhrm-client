@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { Check, ChevronDown, Copy, Download, ExternalLink, Share2, Smartphone } from "lucide-react";
 import { getSupervisorLoginUrl, getSupervisorPwaManifestUrl } from "./id-card/verify-url";
+import { FIELD_TEAM_APK_DOWNLOAD_URL } from "../lib/client-downloads";
 
 export default function SupervisorPwaInstallCard() {
   const installUrl = getSupervisorLoginUrl();
@@ -69,9 +70,9 @@ export default function SupervisorPwaInstallCard() {
           <Smartphone size={14} />
         </div>
         <div className="min-w-0 flex-1">
-          <span className="text-xs font-bold text-slate-800">Supervisor app install link</span>
+          <span className="text-xs font-bold text-slate-800">Field Team Android app</span>
           <span className="ml-2 hidden text-[11px] text-slate-500 sm:inline">
-            PWA for supervisor login — visits, requests, commitments
+            Install the APK for supervisors — visits, GPS photos, blocked-app security
           </span>
         </div>
         <button
@@ -96,12 +97,21 @@ export default function SupervisorPwaInstallCard() {
           <div className="min-w-0 flex-1 space-y-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <a
+                href={FIELD_TEAM_APK_DOWNLOAD_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md bg-[#ff791a] px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-[#e66d17]"
+              >
+                <Download size={11} />
+                Download Field Team APK
+              </a>
+              <a
                 href={installUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex min-w-0 items-center gap-1 break-all text-[11px] font-semibold text-[#ff791a] hover:underline"
               >
-                {installUrl}
+                Supervisor login (web)
                 <ExternalLink size={11} className="shrink-0" />
               </a>
               <button
@@ -116,11 +126,11 @@ export default function SupervisorPwaInstallCard() {
 
             <ul className="space-y-1 text-[10px] leading-relaxed text-slate-600">
               <li>
-                <span className="font-semibold text-slate-700">Android:</span> Chrome → menu → Install app / Add to
-                Home screen
+                <span className="font-semibold text-slate-700">Android:</span> Download and install the Field Team APK
+                (required for GPS, camera, and security checks)
               </li>
               <li>
-                <span className="font-semibold text-slate-700">iPhone:</span> Safari → Share → Add to Home Screen
+                <span className="font-semibold text-slate-700">Browser:</span> Limited — use the native app for field work
               </li>
             </ul>
 

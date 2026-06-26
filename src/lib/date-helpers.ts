@@ -18,17 +18,155 @@ export const getCurrentFY = (date: Date = new Date()) => {
   return `FY ${year - 1}-${String(year).slice(-2)}`;
 };
 
-export const getFinancialYears = () => {
-  const today = new Date();
-  const currentFY = getCurrentFY(today);
-  const currentStartYear = parseInt(currentFY.substring(3, 7));
-  const list = [];
-  const startYear = Math.min(2025, currentStartYear - 1);
-  const endYear = currentStartYear + 1;
-  for (let y = startYear; y <= endYear; y++) {
-    list.push(`FY ${y}-${String(y + 1).slice(-2)}`);
+/** First year in the default FY dropdown range (April–March). */
+export const DEFAULT_FY_START_YEAR = 2022;
+
+export const formatFYRange = (startYear: number): string =>
+  `${startYear}-${startYear + 1}`;
+
+export const parseFYRangeStartYear = (fyRange: string): number => {
+  const trimmed = (fyRange || "").trim();
+  const match = trimmed.match(/^(\d{4})-(\d{4})$/);
+  if (!match) return NaN;
+  const start = parseInt(match[1], 10);
+  const end = parseInt(match[2], 10);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end !== start + 1) return NaN;
+  return start;
+};
+
+/** Current financial year as `YYYY-YYYY` (e.g. `2025-2026`). */
+export const getCurrentFYRange = (date: Date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  if (month >= 3) return formatFYRange(year);
+  return formatFYRange(year - 1);
+};
+
+export type FinancialYearSelectionConfig = {
+  enabledPreviousYears: string[];
+  enabledUpcomingYears: string[];
+};
+
+const END_FY_MONTHS = new Set(["January", "February", "March"]);
+
+/** Map `January 2025` style month keys to `2024-2025` FY ranges. */
+export const monthKeyToFYRange = (monthKey: string): string | null => {
+  const trimmed = (monthKey || "").trim();
+  const parts = trimmed.split(/\s+/);
+  if (parts.length < 2) return null;
+
+  const monthName = parts[0];
+  const year = parseInt(parts[parts.length - 1], 10);
+  if (!MONTH_NAME_LIST.includes(monthName) || !Number.isFinite(year)) return null;
+
+  if (END_FY_MONTHS.has(monthName)) return formatFYRange(year - 1);
+  return formatFYRange(year);
+};
+
+/** Collect unique FY ranges from month keys and explicit FY strings. */
+export const collectFinancialYearsWithData = (
+  monthKeys: string[],
+  explicitFYRanges: string[] = [],
+): string[] => {
+  const years = new Set<string>();
+  for (const monthKey of monthKeys) {
+    const fy = monthKeyToFYRange(monthKey);
+    if (fy) years.add(fy);
+  }
+  for (const fy of explicitFYRanges) {
+    const normalized = parseFYRangeStartYear(fy);
+    if (Number.isFinite(normalized)) years.add(formatFYRange(normalized));
+  }
+  return sortFYRanges(Array.from(years));
+};
+
+const sortFYRanges = (ranges: string[]): string[] =>
+  [...ranges].sort((a, b) => parseFYRangeStartYear(a) - parseFYRangeStartYear(b));
+
+/** Years before the current FY that can be enabled in Configuration. */
+export const getConfigurablePreviousYears = (
+  date: Date = new Date(),
+  yearsBack = 15,
+): string[] => {
+  const currentStart = parseFYRangeStartYear(getCurrentFYRange(date));
+  const list: string[] = [];
+  const earliest = currentStart - yearsBack;
+  for (let y = earliest; y < currentStart; y++) {
+    list.push(formatFYRange(y));
   }
   return list;
+};
+
+/** Future years (after current FY) that can be enabled in Configuration. */
+export const getConfigurableUpcomingYears = (
+  date: Date = new Date(),
+  yearsAhead = 8,
+): string[] => {
+  const currentStart = parseFYRangeStartYear(getCurrentFYRange(date));
+  const list: string[] = [];
+  for (let y = currentStart + 1; y <= currentStart + yearsAhead; y++) {
+    list.push(formatFYRange(y));
+  }
+  return list;
+};
+
+/**
+ * FY ranges shown in the header year dropdown.
+ * Current FY is always included. Previous years appear only when enabled or they
+ * contain data. Upcoming years appear when enabled, contain data, or become current.
+ */
+export const getSelectableFinancialYears = (
+  config: FinancialYearSelectionConfig = { enabledPreviousYears: [], enabledUpcomingYears: [] },
+  yearsWithData: string[] = [],
+  date: Date = new Date(),
+): string[] => {
+  const currentStart = parseFYRangeStartYear(getCurrentFYRange(date));
+  const years = new Set<string>([formatFYRange(currentStart)]);
+
+  const normalizeFY = (fy: string): string | null => {
+    const start = parseFYRangeStartYear(fy);
+    return Number.isFinite(start) ? formatFYRange(start) : null;
+  };
+
+  const dataYears = yearsWithData
+    .map(normalizeFY)
+    .filter((fy): fy is string => Boolean(fy));
+  const enabledPrevious = config.enabledPreviousYears
+    .map(normalizeFY)
+    .filter((fy): fy is string => Boolean(fy));
+  const enabledUpcoming = config.enabledUpcomingYears
+    .map(normalizeFY)
+    .filter((fy): fy is string => Boolean(fy));
+
+  for (const fy of [...new Set([...dataYears, ...enabledPrevious])]) {
+    if (parseFYRangeStartYear(fy) < currentStart) years.add(fy);
+  }
+
+  for (const fy of [...new Set([...dataYears, ...enabledUpcoming])]) {
+    if (parseFYRangeStartYear(fy) > currentStart) years.add(fy);
+  }
+
+  return sortFYRanges(Array.from(years));
+};
+
+export const financialYearHasData = (
+  fyRange: string,
+  yearsWithData: string[],
+): boolean => {
+  const start = parseFYRangeStartYear(fyRange);
+  if (!Number.isFinite(start)) return false;
+  return yearsWithData.some((fy) => parseFYRangeStartYear(fy) === start);
+};
+
+export const getFinancialYears = (date: Date = new Date()) => {
+  return getSelectableFinancialYears(
+    { enabledPreviousYears: [], enabledUpcomingYears: [] },
+    [],
+    date,
+  ).map((fy) => {
+    const start = parseFYRangeStartYear(fy);
+    return `FY ${start}-${String(start + 1).slice(-2)}`;
+  });
 };
 
 export const getMonthsForFY = (fyStr: string) => {

@@ -68,30 +68,68 @@ export default function SupervisorHomePage() {
   const today = toIsoDate(new Date());
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       setLoading(true);
-      const { toDate } = getWeekBounds();
-      const streakBounds = getStreakLookbackBounds();
       try {
-        const [schoolList, commitRes, visitsRes] = await Promise.all([
-          fetchSupervisorSchools(supervisorFetch),
+        const schoolList = await fetchSupervisorSchools(supervisorFetch);
+        if (!cancelled) {
+          setSchools(schoolList);
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setSchools([]);
+          setLoading(false);
+        }
+      }
+
+      const { fromDate: weekFrom, toDate } = getWeekBounds();
+      const streakBounds = getStreakLookbackBounds();
+
+      try {
+        const [commitRes, recentVisitsRes] = await Promise.all([
           supervisorFetch("/api/commitment-diary/supervisor/mine"),
           supervisorFetch(
-            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${toDate}&lite=1`,
+            `/api/school-visits/supervisor/mine?fromDate=${weekFrom}&toDate=${toDate}&lite=1`,
           ),
         ]);
-        setSchools(schoolList);
-        if (commitRes.ok) setCommitments(await commitRes.json());
-        if (visitsRes.ok) setAllVisits(await visitsRes.json());
-        else setAllVisits([]);
+        if (!cancelled) {
+          if (commitRes.ok) setCommitments(await commitRes.json());
+          if (recentVisitsRes.ok) setAllVisits(await recentVisitsRes.json());
+          else setAllVisits([]);
+        }
+
+        if (!cancelled && weekFrom > streakBounds.fromDate) {
+          const dayBeforeWeek = new Date(`${weekFrom}T12:00:00`);
+          dayBeforeWeek.setDate(dayBeforeWeek.getDate() - 1);
+          const oldToDate = toIsoDate(dayBeforeWeek);
+          const oldRes = await supervisorFetch(
+            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${oldToDate}&lite=1`,
+          );
+          if (oldRes.ok) {
+            const older: SchoolVisit[] = await oldRes.json();
+            if (!cancelled) {
+              setAllVisits((prev) => {
+                const ids = new Set(prev.map((v) => v.id));
+                const merged = [...prev, ...older.filter((v) => !ids.has(v.id))];
+                return merged.sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+              });
+            }
+          }
+        }
       } catch {
-        setSchools([]);
-        setCommitments([]);
-        setAllVisits([]);
-      } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setCommitments([]);
+          setAllVisits([]);
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [supervisorFetch]);
 
   const { fromDate: weekFrom, toDate: weekTo } = getWeekBounds();

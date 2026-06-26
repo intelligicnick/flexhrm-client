@@ -216,7 +216,7 @@ export default function SchoolWorkFormModal({
             </div>
           </div>
 
-          <div className="shrink-0 border-b border-slate-200 bg-slate-50/80 px-3 sm:px-4">
+          <div className="shrink-0 border-b border-slate-200 bg-slate-50/80 px-3 sm:px-4" id="school-form-tab-headers">
             <div className="flex gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {FORM_TABS.map((tab) => (
                 <button

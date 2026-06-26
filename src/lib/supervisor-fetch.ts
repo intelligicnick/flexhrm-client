@@ -13,5 +13,6 @@ export function supervisorFetch(input: string, init?: RequestInit): Promise<Resp
   const headers = new Headers(init?.headers || {});
   if (token) headers.set("Authorization", `Bearer ${token}`);
   headers.set("X-Supervisor-Device-Id", getSupervisorDeviceId());
-  return fetch(apiUrl(input), { ...init, headers });
+  // Omit admin session cookies so a parallel HRMS admin login cannot override the supervisor bearer token.
+  return fetch(apiUrl(input), { ...init, headers, credentials: init?.credentials ?? "omit" });
 }

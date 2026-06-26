@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ShieldAlert, Smartphone } from "lucide-react";
 import { apiUrl } from "../../api";
+import { isSupervisorWebDevHost } from "../../env";
 import {
   canScanInstalledApps,
   type DetectedBlockedApp,
@@ -39,11 +40,12 @@ function saveCachedBlockedApps(apps: string[]): void {
 export default function SupervisorBlockedAppsGate({ children }: { children: React.ReactNode }) {
   const { t } = useSupervisorI18n();
   const nativeApp = isFlexHrmNativeApp();
-  const [phase, setPhase] = useState<GatePhase>(nativeApp ? "clear" : "scanning");
+  const webDev = isSupervisorWebDevHost();
+  const [phase, setPhase] = useState<GatePhase>(nativeApp || webDev ? "clear" : "scanning");
   const [detected, setDetected] = useState<DetectedBlockedApp[]>([]);
 
   const runScan = useCallback(async () => {
-    if (nativeApp) {
+    if (nativeApp || webDev) {
       setDetected([]);
       setPhase("clear");
       return;
@@ -98,14 +100,14 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
       }
       setPhase("native_required");
     }
-  }, [nativeApp]);
+  }, [nativeApp, webDev]);
 
   useEffect(() => {
-    if (!nativeApp) void runScan();
-  }, [nativeApp, runScan]);
+    if (!nativeApp && !webDev) void runScan();
+  }, [nativeApp, webDev, runScan]);
 
   useEffect(() => {
-    if (nativeApp) return;
+    if (nativeApp || webDev) return;
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
         void runScan();
@@ -113,7 +115,7 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [nativeApp, runScan]);
+  }, [nativeApp, webDev, runScan]);
 
   if (phase === "scanning") {
     return (

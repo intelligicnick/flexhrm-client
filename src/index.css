@@ -4,7 +4,7 @@
   --color-primary: #ff791a;
   --color-primary-dark: #e4640c;
   --color-primary-light: #ff981a;
-  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 @keyframes fadeIn {

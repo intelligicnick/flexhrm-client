@@ -7,6 +7,8 @@ import {
   getBulkAttendanceDisabledDays,
   filterSelectableBulkDays,
   countMonthAttendance,
+  employeeHasMarkedAttendanceForMonth,
+  monthHasAnyMarkedAttendance,
   countWorkingDaysInMonth,
   resolveBulkAttendanceStatus,
 } from "./attendance-helpers";
@@ -162,5 +164,57 @@ describe("getBulkAttendanceDisabledDays", () => {
 
     expect(presents).toBe(2);
     expect(absents).toBe(1);
+  });
+});
+
+describe("employeeHasMarkedAttendanceForMonth", () => {
+  it("returns false when no days are explicitly marked", () => {
+    expect(
+      employeeHasMarkedAttendanceForMonth({}, 30, () => false),
+    ).toBe(false);
+  });
+
+  it("returns true when at least one day has a stored status", () => {
+    expect(
+      employeeHasMarkedAttendanceForMonth({ 5: "P" }, 30, () => false),
+    ).toBe(true);
+    expect(
+      employeeHasMarkedAttendanceForMonth({ 8: "A" }, 30, () => false),
+    ).toBe(true);
+    expect(
+      employeeHasMarkedAttendanceForMonth({ 9: "WO" }, 30, () => false),
+    ).toBe(true);
+  });
+
+  it("ignores exited days when checking for marks", () => {
+    expect(
+      employeeHasMarkedAttendanceForMonth(
+        { 3: "P" },
+        30,
+        (day) => day === 3,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("monthHasAnyMarkedAttendance", () => {
+  it("returns true when any employee has marked attendance", () => {
+    const employees = [
+      baseEmployee({ id: "emp-1" }),
+      baseEmployee({ id: "emp-2", employeeCode: "E002" }),
+    ];
+    const monthData = {
+      "emp-2": { 4: "P" },
+    };
+
+    expect(
+      monthHasAnyMarkedAttendance(
+        monthData,
+        employees,
+        "June 2026",
+        () => false,
+        () => false,
+      ),
+    ).toBe(true);
   });
 });

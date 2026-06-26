@@ -92,7 +92,7 @@ import SchoolWorkFormModal from "../components/SchoolWorkFormModal";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { parseApiError } from "../api";
 import {
-  getCurrentFY, getFinancialYears, MONTH_NAME_LIST, FISCAL_MONTH_NAME_LIST, getMonthsForFY,
+  getCurrentFY, MONTH_NAME_LIST, FISCAL_MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
   getCurrentMonthName, getTodayBirthdayLabel, getOrdinalDay, parseDateOfBirth,
   formatEmployeeBirthDate,
@@ -451,6 +451,7 @@ export default function DashboardLayout() {
     activeMonthName,
     activeCalendarYear,
     activeFYRange,
+    availableFYRanges,
     MONTHS_LIST,
     ledgerUniqueLocations,
     ledgerUniqueSkills,
@@ -684,6 +685,7 @@ export default function DashboardLayout() {
                   >
                     {/* Collapse arrow toggle overlay */}
                     <button
+                      type="button"
                       onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                       className="absolute top-1/2 -right-3 transform -translate-y-1/2 bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-full p-0.5 border border-white cursor-pointer shadow z-40 hidden md:block"
                       id="sidebar-toggle-overlay-btn"
@@ -862,7 +864,8 @@ export default function DashboardLayout() {
                       <div className="flex items-center justify-between w-full md:w-auto gap-3">
                         <div className="flex items-center gap-2.5">
                           {/* Hamburger button for mobile drawer or trigger toggle (hidden on desktop) */}
-                          <button 
+                          <button
+                            type="button"
                             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
                             className="md:hidden p-1.5 bg-white/10 hover:bg-white/20 rounded text-white mr-1 transition cursor-pointer"
                             id="hamburger-btn"
@@ -883,9 +886,11 @@ export default function DashboardLayout() {
                         {/* Mobile Profile Dropdown (visible only on mobile) */}
                         <div className="md:hidden relative shrink-0" ref={mobileProfileDropdownRef}>
                           <button
+                            type="button"
                             onClick={() => setIsMobileProfileOpen(!isMobileProfileOpen)}
                             className="flex items-center gap-1.5 p-1 px-2.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 transition cursor-pointer"
                             id="mobile-top-profile-selector"
+                            aria-label={sessionUser}
                           >
                             <div className="w-6 h-6 rounded-full bg-orange-100 text-[#ff791a] flex items-center justify-center font-bold text-xs ring-2 ring-white/20 shrink-0">
                               {sessionUser.charAt(0).toUpperCase()}
@@ -900,6 +905,7 @@ export default function DashboardLayout() {
                                 <p className="text-xs font-bold text-slate-800 truncate mt-0.5">{sessionUser}</p>
                               </div>
                               <button
+                                type="button"
                                 onClick={() => {
                                   setIsMobileProfileOpen(false);
                                   setMyInfoTab("account");
@@ -913,6 +919,7 @@ export default function DashboardLayout() {
                                 My Account Profile
                               </button>
                               <button
+                                type="button"
                                 onClick={() => {
                                   triggerSuccess("Opened configuration mappings.");
                                   setIsMobileProfileOpen(false);
@@ -927,6 +934,7 @@ export default function DashboardLayout() {
                               </button>
                               <div className="border-t border-slate-100 my-1"></div>
                               <button
+                                type="button"
                                 onClick={() => {
                                   setIsMobileProfileOpen(false);
                                   setMyInfoTab("tour");
@@ -946,6 +954,7 @@ export default function DashboardLayout() {
                                 }}
                               />
                               <button
+                                type="button"
                                 onClick={handleLogout}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 font-bold transition"
                                 id="mobile-logout-dropdown-btn"
@@ -995,7 +1004,7 @@ export default function DashboardLayout() {
                               className="min-w-0 flex-1 bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer border-0"
                               title="Select Active Year"
                             >
-                              {["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027", "2027-2028", "2028-2029", "2029-2030"].map(fy => (
+                              {availableFYRanges.map(fy => (
                                 <option key={fy} value={fy} className="text-slate-800 font-bold">{fy}</option>
                               ))}
                             </select>
@@ -1017,9 +1026,11 @@ export default function DashboardLayout() {
                           )}
                         <div className="relative" ref={profileDropdownRef}>
                           <button
+                            type="button"
                             onClick={() => setIsProfileOpen(!isProfileOpen)}
                             className="flex items-center gap-2.5 p-1 px-2.5 bg-white/10 hover:bg-white/20 rounded-full border border-white/15 transition cursor-pointer"
                             id="top-profile-selector"
+                            aria-label={sessionUser}
                           >
                             <div className="w-7 h-7 rounded-full bg-orange-100 text-[#ff791a] flex items-center justify-center font-bold text-xs ring-2 ring-white/20 shrink-0">
                               {sessionUser.charAt(0).toUpperCase()}
@@ -1037,6 +1048,7 @@ export default function DashboardLayout() {
                                 <p className="text-xs font-bold text-slate-800 truncate mt-0.5">{sessionUser}</p>
                               </div>
                               <button
+                                type="button"
                                 onClick={() => {
                                   setIsProfileOpen(false);
                                   setMyInfoTab("account");
@@ -1052,6 +1064,7 @@ export default function DashboardLayout() {
                                 My Account Profile
                               </button>
                               <button
+                                type="button"
                                 onClick={() => {
                                   triggerSuccess("Opened configuration mappings.");
                                   setIsProfileOpen(false);
@@ -1068,6 +1081,7 @@ export default function DashboardLayout() {
                               </button>
                               <div className="border-t border-slate-100 my-1"></div>
                               <button
+                                type="button"
                                 onClick={() => {
                                   setIsProfileOpen(false);
                                   setMyInfoTab("tour");
@@ -1089,6 +1103,7 @@ export default function DashboardLayout() {
                                 }}
                               />
                               <button
+                                type="button"
                                 onClick={handleLogout}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 transition font-bold"
                                 id="logout-dropdown-btn"
@@ -1111,6 +1126,7 @@ export default function DashboardLayout() {
                           return (
                             <button
                               key={tab}
+                              type="button"
                               onClick={() => handlePimSubTabClick(tab)}
                               className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                                 isActive 

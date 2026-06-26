@@ -27,6 +27,11 @@ function isLocalUiHost(): boolean {
   );
 }
 
+/** Supervisor portal may be used in a desktop browser during local dev (not production). */
+export function isSupervisorWebDevHost(): boolean {
+  return import.meta.env.DEV || isLocalUiHost();
+}
+
 function isBundledNativeShellHost(): boolean {
   if (typeof window === "undefined") return false;
   return window.location.hostname.toLowerCase().endsWith("appassets.androidplatform.net");

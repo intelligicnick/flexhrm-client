@@ -6,7 +6,6 @@ import {
   Languages,
   Phone,
   Lock,
-  Smartphone,
 } from "lucide-react";
 import PasswordInput from "../../components/PasswordInput";
 import { apiUrl, formatNetworkFetchError } from "../../api";
@@ -36,11 +35,6 @@ function LoginForm() {
   const [restoringSession, setRestoringSession] = useState(false);
   const [needsDeviceOtp, setNeedsDeviceOtp] = useState(
     () => searchParams.get("reason") === "device_mismatch",
-  );
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installingApp, setInstallingApp] = useState(false);
-  const [appInstalled, setAppInstalled] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches,
   );
 
   const deviceId = getSupervisorDeviceId();
@@ -84,38 +78,6 @@ function LoginForm() {
       cancelled = true;
     };
   }, [navigate]);
-
-  useEffect(() => {
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    };
-    const onAppInstalled = () => {
-      setAppInstalled(true);
-      setInstallPromptEvent(null);
-    };
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onAppInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onAppInstalled);
-    };
-  }, []);
-
-  const handleInstallApp = async () => {
-    if (!installPromptEvent) return;
-    setInstallingApp(true);
-    try {
-      await installPromptEvent.prompt();
-      const choice = await installPromptEvent.userChoice;
-      if (choice.outcome === "accepted") {
-        setAppInstalled(true);
-      }
-      setInstallPromptEvent(null);
-    } finally {
-      setInstallingApp(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,21 +253,6 @@ function LoginForm() {
             </SupervisorActionButton>
           </form>
         </div>
-
-        {!appInstalled && installPromptEvent && (
-          <SupervisorActionButton
-            type="button"
-            onClick={() => void handleInstallApp()}
-            loading={installingApp}
-            loadingText={t("loading")}
-            variant="outline"
-            fullWidth
-            className="mt-4 rounded-2xl px-4 py-3 text-sm shadow-sm"
-            icon={<Smartphone size={16} />}
-          >
-            {t("installFieldTeamApp")}
-          </SupervisorActionButton>
-        )}
 
         <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">
           {t("adminLoginHint")}

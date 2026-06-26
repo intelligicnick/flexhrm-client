@@ -104,4 +104,43 @@ public class FlexHrmAndroidBridge {
           }
         });
   }
+
+  @JavascriptInterface
+  public void printPdfFromUrl(String url, String bearerToken, String filename) {
+    if (url == null || url.trim().isEmpty()) {
+      PdfNativeHelper.notifyJs(
+          webView, "__flexHrmOnPdfPrintDone", false, "Missing PDF URL");
+      return;
+    }
+
+    PdfNativeHelper.downloadPdf(
+        activity,
+        url.trim(),
+        bearerToken,
+        filename,
+        new PdfNativeHelper.ResultCallback() {
+          @Override
+          public void onSuccess(java.io.File file) {
+            activity.runOnUiThread(
+                () -> {
+                  try {
+                    PdfNativeHelper.printPdf(activity, file, filename);
+                    PdfNativeHelper.notifyJs(
+                        webView, "__flexHrmOnPdfPrintDone", true, "");
+                  } catch (Exception ex) {
+                    PdfNativeHelper.notifyJs(
+                        webView,
+                        "__flexHrmOnPdfPrintDone",
+                        false,
+                        ex.getMessage() != null ? ex.getMessage() : "Print failed");
+                  }
+                });
+          }
+
+          @Override
+          public void onError(String message) {
+            PdfNativeHelper.notifyJs(webView, "__flexHrmOnPdfPrintDone", false, message);
+          }
+        });
+  }
 }

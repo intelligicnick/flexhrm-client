@@ -28,6 +28,7 @@ type SupervisorMapPanelProps = {
   onOpenFieldTeam?: () => void;
   layoutRevision?: string;
   variant?: "default" | "embedded";
+  mapVariant?: "default" | "trajectory";
   mapHeightClass?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
@@ -104,32 +105,12 @@ function createStepIcon(color: string, step: number, isStart: boolean): L.DivIco
   });
 }
 
-function midpoint(a: L.LatLngExpression, b: L.LatLngExpression): L.LatLngExpression {
-  const aa = L.latLng(a);
-  const bb = L.latLng(b);
-  return [(aa.lat + bb.lat) / 2, (aa.lng + bb.lng) / 2];
-}
-
-function segmentBearing(a: L.LatLngExpression, b: L.LatLngExpression): number {
-  const aa = L.latLng(a);
-  const bb = L.latLng(b);
-  const dy = bb.lat - aa.lat;
-  const dx = bb.lng - aa.lng;
-  return (Math.atan2(dx, dy) * 180) / Math.PI;
-}
-
-function createArrowIcon(color: string, rotationDeg: number): L.DivIcon {
-  return L.divIcon({
-    className: "",
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-    html: `
-      <div style="width:14px;height:14px;display:flex;align-items:center;justify-content:center;transform:rotate(${rotationDeg}deg)">
-        <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:10px solid ${color};opacity:0.85"></div>
-      </div>
-    `,
-  });
-}
+const PATH_LINE_OPTIONS = {
+  smoothFactor: 0,
+  noClip: true,
+  lineCap: "round" as const,
+  lineJoin: "round" as const,
+};
 
 export default function SupervisorMapPanel({
   supervisors,
@@ -137,15 +118,19 @@ export default function SupervisorMapPanel({
   onOpenFieldTeam,
   layoutRevision,
   variant = "default",
+  mapVariant = "default",
   mapHeightClass,
   isFullscreen = false,
   onToggleFullscreen,
 }: SupervisorMapPanelProps) {
   const embedded = variant === "embedded";
+  const trajectory = mapVariant === "trajectory";
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const pathRendererRef = useRef<L.Canvas | null>(null);
   const pathsLayerRef = useRef<L.LayerGroup | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const lastFitKeyRef = useRef<string>("");
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
   const [mapWheelActive, setMapWheelActive] = useState(false);
@@ -209,21 +194,22 @@ export default function SupervisorMapPanel({
       center: INDIA_CENTER,
       zoom: DEFAULT_ZOOM,
       scrollWheelZoom: false,
+      preferCanvas: true,
     });
 
     L.tileLayer(
-      embedded
-        ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      trajectory
+        ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
       {
-        attribution: embedded
-          ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
         maxZoom: 19,
-        subdomains: embedded ? "abcd" : "abc",
+        subdomains: "abcd",
       },
     ).addTo(map);
 
+    pathRendererRef.current = L.canvas({ padding: 0.5 });
     pathsLayerRef.current = L.layerGroup().addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
@@ -256,10 +242,12 @@ export default function SupervisorMapPanel({
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
       map.remove();
       mapRef.current = null;
+      pathRendererRef.current = null;
       pathsLayerRef.current = null;
       markersLayerRef.current = null;
+      lastFitKeyRef.current = "";
     };
-  }, [embedded]);
+  }, [trajectory]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -268,49 +256,54 @@ export default function SupervisorMapPanel({
     return () => window.clearTimeout(timer);
   }, [visiblePaths.length, showPaths, layoutRevision]);
 
+  const autoFitKey = useMemo(
+    () =>
+      `${period}:${selectedSupervisorId}:${visiblePaths.map((path) => path.supervisorId).join(",")}`,
+    [period, selectedSupervisorId, visiblePaths],
+  );
+
   useEffect(() => {
     const map = mapRef.current;
     const pathsLayer = pathsLayerRef.current;
     const markersLayer = markersLayerRef.current;
+    const pathRenderer = pathRendererRef.current;
     if (!map || !pathsLayer || !markersLayer) return;
 
     pathsLayer.clearLayers();
     markersLayer.clearLayers();
 
     if (visiblePaths.length === 0) {
-      map.setView(INDIA_CENTER, DEFAULT_ZOOM);
+      if (lastFitKeyRef.current !== autoFitKey) {
+        map.setView(INDIA_CENTER, DEFAULT_ZOOM);
+        lastFitKeyRef.current = autoFitKey;
+      }
       return;
     }
 
     const bounds = L.latLngBounds([]);
 
     visiblePaths.forEach((path) => {
-      path.segments.forEach((segment) => {
-        const latLngs = segment.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
+      const latLngs = path.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
+      latLngs.forEach((latLng) => bounds.extend(latLng));
 
-        latLngs.forEach((latLng) => bounds.extend(latLng));
+      if (showPaths && latLngs.length > 1) {
+        const renderer = pathRenderer ?? undefined;
+        L.polyline(latLngs, {
+          ...PATH_LINE_OPTIONS,
+          color: trajectory ? "#ffffff" : "#0f172a",
+          weight: trajectory ? 9 : 7,
+          opacity: trajectory ? 0.35 : 0.22,
+          renderer,
+        }).addTo(pathsLayer);
 
-        if (showPaths && latLngs.length > 1) {
-          L.polyline(latLngs, {
-            color: path.color,
-            weight: 4,
-            opacity: 0.82,
-            lineCap: "round",
-            lineJoin: "round",
-          }).addTo(pathsLayer);
-
-          for (let i = 0; i < latLngs.length - 1; i += 1) {
-            const from = latLngs[i];
-            const to = latLngs[i + 1];
-            const arrowPoint = midpoint(from, to);
-            const rotation = segmentBearing(from, to);
-            L.marker(arrowPoint, {
-              icon: createArrowIcon(path.color, rotation),
-              interactive: false,
-            }).addTo(pathsLayer);
-          }
-        }
-      });
+        L.polyline(latLngs, {
+          ...PATH_LINE_OPTIONS,
+          color: path.color,
+          weight: trajectory ? 5 : 4,
+          opacity: trajectory ? 0.95 : 0.88,
+          renderer,
+        }).addTo(pathsLayer);
+      }
 
       path.points.forEach((point, index) => {
         const isLatest = index === path.points.length - 1;
@@ -335,10 +328,11 @@ export default function SupervisorMapPanel({
       });
     });
 
-    if (bounds.isValid()) {
+    if (bounds.isValid() && lastFitKeyRef.current !== autoFitKey) {
       map.fitBounds(bounds, { padding: [48, 48], maxZoom: 14 });
+      lastFitKeyRef.current = autoFitKey;
     }
-  }, [visiblePaths, showPaths]);
+  }, [visiblePaths, showPaths, trajectory, autoFitKey]);
 
   const resolvedMapHeight =
     mapHeightClass || (embedded ? "h-[calc(100dvh-11rem)]" : "h-80 md:h-[28rem]");
@@ -525,8 +519,8 @@ export default function SupervisorMapPanel({
       ) : (
         !embedded && (
         <p className="text-[10px] text-slate-400 mt-3">
-          S = journey start · numbered stops = visit checkpoints · person icon = latest position in period · arrows
-          show travel direction · distance is straight-line estimate between GPS points (actual road distance may differ)
+          S = journey start · numbered stops = visit checkpoints · person icon = latest position in period · lines
+          connect every GPS checkpoint in visit order · distance is straight-line estimate between GPS points (actual road distance may differ)
         </p>
         )
       )}

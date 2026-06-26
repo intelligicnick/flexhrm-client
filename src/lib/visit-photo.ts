@@ -3,6 +3,7 @@ import {
   requestFreshNativeGpsCoordinates,
   warmupNativeGps,
 } from "./native-android-bridge";
+import { FIELD_TEAM_APP_VERSION } from "./native-app-version";
 import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
 
 export interface VisitGpsCoords {
@@ -17,10 +18,39 @@ export interface StampedVisitPhoto {
   mimeType: string;
   filename: string;
   photoDataBase64: string;
+  thumbnailBase64?: string;
+  /** Blob URL for in-app preview — not sent to the API. */
+  previewUrl?: string;
+  /** Blob URL for thumbnail preview — not sent to the API. */
+  thumbPreviewUrl?: string;
   takenAt: string;
   lat: number;
   lng: number;
   locationLabel: string;
+}
+
+function parseDataUrl(dataUrl: string): { mime: string; rawBase64: string } {
+  const trimmed = dataUrl.trim();
+  const match = trimmed.match(/^data:([^;]+);base64,(.+)$/);
+  if (match) {
+    return { mime: match[1], rawBase64: match[2] };
+  }
+  return { mime: "image/jpeg", rawBase64: trimmed };
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const { mime, rawBase64 } = parseDataUrl(dataUrl);
+  const binary = atob(rawBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+export function revokeStampedVisitPhotoUrls(photo: StampedVisitPhoto): void {
+  if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
+  if (photo.thumbPreviewUrl) URL.revokeObjectURL(photo.thumbPreviewUrl);
 }
 
 type PlaceNameResolver = (lat: number, lng: number) => Promise<string>;
@@ -96,7 +126,7 @@ async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string
       headers: {
         Accept: "application/json",
         "Accept-Language": "en",
-        "User-Agent": "FlexHRM-Supervisor/1.6",
+        "User-Agent": `FlexHRM-Supervisor/${FIELD_TEAM_APP_VERSION}`,
       },
     });
     if (!res.ok) return "";
@@ -372,13 +402,32 @@ export async function stampVisitPhoto(
     ctx.fillText(line, padding, canvas.height - barHeight + padding + i * lineHeight);
   });
 
-  const stampedDataUrl = canvas.toDataURL(file.type || "image/jpeg", 0.92);
+  const mimeType = file.type || "image/jpeg";
+  const stampedDataUrl = canvas.toDataURL(mimeType, 0.92);
+  const { rawBase64: photoDataBase64 } = parseDataUrl(stampedDataUrl);
+  const previewUrl = URL.createObjectURL(dataUrlToBlob(stampedDataUrl));
+
+  const thumbW = 120;
+  const thumbH = Math.max(1, Math.round(thumbW * (canvas.height / canvas.width)));
+  const thumbCanvas = document.createElement("canvas");
+  thumbCanvas.width = thumbW;
+  thumbCanvas.height = thumbH;
+  const thumbCtx = thumbCanvas.getContext("2d");
+  if (thumbCtx) {
+    thumbCtx.drawImage(canvas, 0, 0, thumbW, thumbH);
+  }
+  const thumbDataUrl = thumbCtx ? thumbCanvas.toDataURL("image/jpeg", 0.5) : undefined;
+  const thumbnailBase64 = thumbDataUrl ? parseDataUrl(thumbDataUrl).rawBase64 : undefined;
+  const thumbPreviewUrl = thumbDataUrl ? URL.createObjectURL(dataUrlToBlob(thumbDataUrl)) : undefined;
 
   return {
     caption: `Field visit photo ${index}`,
-    mimeType: file.type || "image/jpeg",
+    mimeType,
     filename: file.name || `visit-${index}.jpg`,
-    photoDataBase64: stampedDataUrl,
+    photoDataBase64,
+    thumbnailBase64,
+    previewUrl,
+    thumbPreviewUrl,
     takenAt: iso,
     lat: location.lat,
     lng: location.lng,

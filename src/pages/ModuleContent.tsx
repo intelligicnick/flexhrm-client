@@ -106,10 +106,11 @@ import TendersPanel from "../components/TendersPanel";
 import ContractsPanel from "../components/ContractsPanel";
 import RenewalsPanel from "../components/RenewalsPanel";
 import BgDdPanel from "../components/BgDdPanel";
+import MonitorPanel from "../components/MonitorPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
-import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab } from "../routes";
+import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab } from "../routes";
 import { RENEWAL_TAB_TO_CATEGORY } from "../lib/renewals";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -608,6 +609,7 @@ export default function ModuleContent() {
     existingCodes,
     salaryUniqueLocations,
     filteredSalaryEmployees,
+    selectedMonthHasMarkedAttendance,
     profileDropdownRef,
     mobileProfileDropdownRef,
     activeSidebarTab,
@@ -1969,7 +1971,9 @@ export default function ModuleContent() {
                                       Payroll Calculation Sheet — {selectedMonth}
                                     </h4>
                                     <p className="text-[11px] text-slate-400 mt-0.5">
-                                      Live computations based on active filters ({filteredSalaryEmployees.length} shown). Double-click or select perks to edit values dynamically.
+                                      {selectedMonthHasMarkedAttendance
+                                        ? `Live computations for employees with attendance marked in ${selectedMonth} (${filteredSalaryEmployees.length} shown). Double-click or select perks to edit values dynamically.`
+                                        : `No attendance marked for ${selectedMonth} yet. Mark attendance in the Attendance tab to populate this sheet.`}
                                     </p>
                                     {selectedSalaryEmployeeIds.length > 0 && (
                                       <div className="flex items-center gap-2 mt-1.5 animate-fade-in">
@@ -2646,7 +2650,9 @@ export default function ModuleContent() {
                                             } 
                                             className="p-8 text-center text-xs text-slate-400 font-medium"
                                           >
-                                            No employee calculation data available matching filters.
+                                            {selectedMonthHasMarkedAttendance
+                                              ? "No employee salary data matches the current filters."
+                                              : `No attendance has been marked for ${selectedMonth}. Mark employee attendance in the Attendance tab to view salary calculations.`}
                                           </td>
                                         </tr>
                                       ) : (
@@ -5421,6 +5427,8 @@ export default function ModuleContent() {
                               onUpdate={handleUpdateBgDdRecord}
                               onDelete={handleDeleteBgDdRecord}
                             />
+                          ) : isMonitorTab(activeSidebarTab) ? (
+                            <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
                            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">
