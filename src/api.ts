@@ -119,7 +119,10 @@ export function setupFetchInterceptor(): void {
 
     if (isApiCall) {
       const headers = new Headers(resolvedInit.headers ?? {});
-      const tenantId = getStoredTenantId();
+      const skipTenantHeader =
+        urlStr.includes("/api/auth/forgot-password") ||
+        urlStr.includes("/api/auth/reset-password");
+      const tenantId = skipTenantHeader ? "" : getStoredTenantId();
       if (tenantId) headers.set("x-tenant-id", tenantId);
       const employeeToken = getEmployeePortalToken();
       if (

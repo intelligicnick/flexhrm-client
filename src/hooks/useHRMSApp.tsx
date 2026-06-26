@@ -4753,17 +4753,22 @@ export function useHRMSApp() {
       setResetSuccess(null);
       setResetNewPassword("");
       setResetConfirmPassword("");
-      if (data.resetToken) {
-        setIssuedResetToken(data.resetToken);
-        setResetTokenInput(data.resetToken);
+      const genericNotFoundMessage =
+        "If an account with that username or email exists, a reset code has been sent to the registered email address.";
+      const resetIssued =
+        !!data.resetToken ||
+        !!data.username ||
+        (data.success && data.message && data.message !== genericNotFoundMessage);
+      if (resetIssued) {
+        if (data.resetToken) {
+          setIssuedResetToken(data.resetToken);
+          setResetTokenInput(data.resetToken);
+        } else {
+          setIssuedResetToken(null);
+          setResetTokenInput("");
+        }
         setForgotUsername(data.username || cleanUser);
         setUsernameInput(data.username || cleanUser);
-        setLoginView("reset");
-      } else if (data.username) {
-        setForgotUsername(data.username);
-        setUsernameInput(data.username);
-        setResetTokenInput("");
-        setIssuedResetToken(null);
         setLoginView("reset");
       }
     } catch (err: any) {
