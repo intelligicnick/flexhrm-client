@@ -6,17 +6,27 @@
 import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
 import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
+import "./index.css";
+import { HRMSProvider, useHRMS } from "./context/HRMSContext";
+import LoginPage from "./components/auth/LoginPage";
+import DashboardLayout from "./layouts/DashboardLayout";
+import EmployeeVerifyPage from "./pages/EmployeeVerifyPage";
+import EmployeeDataGatherPage from "./pages/EmployeeDataGatherPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import SupervisorLoginPage from "./pages/supervisor/SupervisorLoginPage";
+import SupervisorLayout from "./pages/supervisor/SupervisorLayout";
+import RegisterPage from "./pages/RegisterPage";
+import EmployeePortalLoginPage from "./pages/employee-portal/EmployeePortalLoginPage";
+import EmployeePortalHomePage from "./pages/employee-portal/EmployeePortalHomePage";
+import PlatformLoginPage from "./pages/platform/PlatformLoginPage";
+import PlatformApp from "./pages/platform/PlatformApp";
+import ObserverApp from "./pages/observer/ObserverApp";
+import { useTenantBranding } from "./hooks/useTenantBranding";
+import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import { ActionButtonFeedback } from "./components/ActionButtonFeedback";
 
-const AdminPortal = lazy(() => import("./AdminPortal"));
-const EmployeeVerifyPage = lazy(() => import("./pages/EmployeeVerifyPage"));
-const EmployeeDataGatherPage = lazy(() => import("./pages/EmployeeDataGatherPage"));
-const ObserverApp = lazy(() => import("./pages/observer/ObserverApp"));
-const SupervisorLoginPage = lazy(() => import("./pages/supervisor/SupervisorLoginPage"));
-const SupervisorLayout = lazy(() => import("./pages/supervisor/SupervisorLayout"));
 const SupervisorHomePage = lazy(() => import("./pages/supervisor/SupervisorHomePage"));
 const SupervisorVisitPage = lazy(() => import("./pages/supervisor/SupervisorVisitPage"));
 const SupervisorCalendarPage = lazy(() => import("./pages/supervisor/SupervisorCalendarPage"));
@@ -32,12 +42,30 @@ function SupervisorRouteFallback() {
   );
 }
 
-function RouteFallback() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm text-slate-500">
-      <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
-    </div>
-  );
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isLoggedIn, authBootstrapping } = useHRMS();
+  if (authBootstrapping) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm text-slate-500">
+        Checking session…
+      </div>
+    );
+  }
+  if (!isLoggedIn) return <Navigate to={LOGIN_PATH} replace />;
+  return <>{children}</>;
+}
+
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { isLoggedIn, authBootstrapping } = useHRMS();
+  if (authBootstrapping) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm text-slate-500">
+        Checking session…
+      </div>
+    );
+  }
+  if (isLoggedIn) return <Navigate to={DEFAULT_PATH} replace />;
+  return <>{children}</>;
 }
 
 function VerifyByQuery() {
@@ -45,11 +73,7 @@ function VerifyByQuery() {
   const idParam = searchParams.get("id") ?? searchParams.get("idCard");
   const tokenParam = searchParams.get("token");
   if (!idParam?.trim()) {
-    return (
-      <Suspense fallback={<RouteFallback />}>
-        <EmployeeVerifyPage idOverride="" verifyTokenOverride="" />
-      </Suspense>
-    );
+    return <EmployeeVerifyPage idOverride="" verifyTokenOverride="" />;
   }
   const id = parseIdCardFromVerifyParam(idParam);
   const token = tokenParam?.trim() || parseVerifyTokenFromParam(idParam, searchParams.toString());
@@ -61,21 +85,22 @@ function VerifyByQuery() {
       />
     );
   }
-  return (
-    <Suspense fallback={<RouteFallback />}>
-      <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />
-    </Suspense>
-  );
+  return <EmployeeVerifyPage idOverride={id} verifyTokenOverride="" />;
 }
 
-export default function App() {
+function PortalRoutes() {
   return (
-    <AppErrorBoundary>
-      <BrowserRouter>
-        <ActionButtonFeedback />
-        <AppRoutes />
-      </BrowserRouter>
-    </AppErrorBoundary>
+    <Routes>
+      <Route path={LOGIN_PATH} element={<PublicRoute><LoginPage /></PublicRoute>} />
+      <Route
+        path="*"
+        element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   );
 }
 
@@ -87,63 +112,13 @@ function AppRoutes() {
     <>
       {!isSupervisor && <GlobalHorizontalScroll />}
       <Routes>
-        <Route
-          path="/verify/:idNo/:verifyToken"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <EmployeeVerifyPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/verify/:idNo"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <EmployeeVerifyPage />
-            </Suspense>
-          }
-        />
+        <Route path="/verify/:idNo/:verifyToken" element={<EmployeeVerifyPage />} />
+        <Route path="/verify/:idNo" element={<EmployeeVerifyPage />} />
         <Route path="/verify" element={<VerifyByQuery />} />
-        <Route
-          path="/employee/update/:token"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <EmployeeDataGatherPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/employee/:idNo"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <EmployeeVerifyPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/supervisor/login"
-          element={
-            <Suspense fallback={<SupervisorRouteFallback />}>
-              <SupervisorLoginPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/observer/*"
-          element={
-            <Suspense fallback={<RouteFallback />}>
-              <ObserverApp />
-            </Suspense>
-          }
-        />
-        <Route
-          path="/supervisor"
-          element={
-            <Suspense fallback={<SupervisorRouteFallback />}>
-              <SupervisorLayout />
-            </Suspense>
-          }
-        >
+        <Route path="/employee/update/:token" element={<EmployeeDataGatherPage />} />
+        <Route path="/employee/:idNo" element={<EmployeeVerifyPage />} />
+        <Route path="/supervisor/login" element={<SupervisorLoginPage />} />
+        <Route path="/supervisor" element={<SupervisorLayout />}>
           <Route
             index
             element={
@@ -193,17 +168,35 @@ function AppRoutes() {
             }
           />
         </Route>
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/employee-portal/login" element={<EmployeePortalLoginPage />} />
+        <Route path="/employee-portal" element={<EmployeePortalHomePage />} />
+        <Route path="/platform/login" element={<PlatformLoginPage />} />
+        <Route path="/platform/*" element={<PlatformApp />} />
+        <Route path="/observer/*" element={<ObserverApp />} />
         <Route path="/" element={<NotFoundPage />} />
-        <Route path="/login" element={<NotFoundPage />} />
+        <Route path="/login" element={<Navigate to={LOGIN_PATH} replace />} />
         <Route
           path="/*"
           element={
-            <Suspense fallback={<RouteFallback />}>
-              <AdminPortal />
-            </Suspense>
+            <HRMSProvider>
+              <PortalRoutes />
+            </HRMSProvider>
           }
         />
-        </Routes>
+      </Routes>
     </>
+  );
+}
+
+export default function App() {
+  useTenantBranding();
+  return (
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <ActionButtonFeedback />
+        <AppRoutes />
+      </BrowserRouter>
+    </AppErrorBoundary>
   );
 }
