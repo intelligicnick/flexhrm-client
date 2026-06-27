@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl, parseApiError } from "../api";
+import { clearCsrfToken, setCsrfToken } from "../lib/csrf";
 import { PERMISSION_MODULES } from "../lib/permissions";
 import type { RoleUiRestrictions } from "../lib/role-ui-restrictions";
 import { clearObserverToken } from "../lib/observer-session";
@@ -45,7 +46,11 @@ export function useAuth() {
       locations?: string[];
       permissions?: Record<string, { view?: boolean; edit?: boolean }>;
       uiRestrictions?: RoleUiRestrictions;
+      csrfToken?: string;
     }) => {
+      if (typeof data.csrfToken === "string" && data.csrfToken.trim()) {
+        setCsrfToken(data.csrfToken);
+      }
       if (data.username) {
         setSessionUser(data.username);
         localStorage.setItem("hrms_username", data.username);
@@ -74,6 +79,7 @@ export function useAuth() {
   );
 
   const clearLocalSession = useCallback(() => {
+    clearCsrfToken();
     localStorage.removeItem("hrms_logged_in");
     localStorage.removeItem("hrms_username");
     localStorage.removeItem("hrms_role");

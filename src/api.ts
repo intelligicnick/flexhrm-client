@@ -1,4 +1,5 @@
 import { getApiBase } from "./env";
+import { clearCsrfToken, getCsrfToken } from "./lib/csrf";
 import { getObserverToken, isObserverNativeClient } from "./lib/observer-session";
 
 export function apiUrl(endpoint: string): string {
@@ -94,12 +95,6 @@ function getEmployeePortalToken(): string {
   return localStorage.getItem("flexhrm_employee_token")?.trim() ?? "";
 }
 
-function getCsrfTokenFromCookie(): string {
-  if (typeof document === "undefined") return "";
-  const match = document.cookie.match(/(?:^|;\s*)flexhrm_csrf=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 /** Install global fetch interceptor before React mounts for API URL resolution and cookies. */
 export function setupFetchInterceptor(): void {
   if (typeof window === "undefined") return;
@@ -148,7 +143,7 @@ export function setupFetchInterceptor(): void {
 
     const method = (resolvedInit.method ?? "GET").toUpperCase();
     if (isApiCall && !isPublicApi && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-      const csrf = getCsrfTokenFromCookie();
+      const csrf = getCsrfToken();
       if (csrf) {
         const headers = new Headers(resolvedInit.headers ?? {});
         headers.set("x-csrf-token", csrf);
@@ -176,6 +171,7 @@ export function setupFetchInterceptor(): void {
         localStorage.removeItem("hrms_role");
         localStorage.removeItem("hrms_locations");
         localStorage.removeItem("hrms_observer_token");
+        clearCsrfToken();
         if (isObserverNativeClient()) {
           window.location.replace("/observer/login");
         } else {
