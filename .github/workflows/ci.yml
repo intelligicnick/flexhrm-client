@@ -21,6 +21,8 @@ jobs:
       - run: npm run lint
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-      - run: npm run build
+      - run: npm run build:hostinger:static
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          VITE_DISABLE_PWA: "true"
+      - run: npm run verify:hostinger

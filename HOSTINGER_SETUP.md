@@ -67,7 +67,7 @@ In **hPanel → Websites → greenyellow app → Git** (or Deployments), connect
 |---------|-------|
 | **Branch** | `main` |
 | **Root directory** | `/` |
-| **Build command** | `npm install && npm run build:static` |
+| **Build command** | `npm install && npm run build:hostinger:static && npm run verify:hostinger` |
 | **Output / publish directory** | `dist` |
 
 Add build env var in hPanel if builds fail with memory errors:

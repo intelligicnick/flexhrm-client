@@ -9,19 +9,16 @@ STAMP=$(date +%Y%m%d-%H%M)
 ZIP_NAME="flexhrm-frontend-static-${STAMP}.zip"
 ZIP_PATH="${ROOT}/${ZIP_NAME}"
 
-echo "==> Building production static bundle..."
+echo "==> Building production static bundle (PWA disabled for Hostinger reliability)..."
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
-npm run build:static
+npm run build:hostinger:static
 
 if [[ ! -f dist/index.html ]]; then
   echo "ERROR: dist/index.html missing — build failed." >&2
   exit 1
 fi
 
-if [[ ! -f dist/.htaccess ]]; then
-  echo "ERROR: dist/.htaccess missing — SPA routes like /hrmlogin will 404." >&2
-  exit 1
-fi
+npm run verify:hostinger
 
 echo "==> Creating upload ZIP (static files only)..."
 rm -f "$ZIP_PATH"
