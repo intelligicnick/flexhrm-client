@@ -43,8 +43,8 @@ export default function MonitorEmployeeAgentsPanel({
   }, [loadCredentials]);
 
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
+    if (!searchQuery.trim() || selectedEmployee) {
+      if (!searchQuery.trim()) setSearchResults([]);
       return;
     }
     const timer = setTimeout(async () => {
@@ -59,7 +59,7 @@ export default function MonitorEmployeeAgentsPanel({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, selectedEmployee]);
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
