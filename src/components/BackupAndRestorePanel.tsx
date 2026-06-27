@@ -270,10 +270,10 @@ export default function BackupAndRestorePanel({
       if (!res.ok) throw await parseApiError(res, "Restore failed.");
       const result = await res.json();
       onSuccess?.(
-        `Restore completed — ${result.restoredDocuments ?? 0} document(s) across ${result.restoredCollections?.length ?? 0} table(s).`,
+        `Restore completed — ${result.restoredDocuments ?? 0} document(s) across ${result.restoredCollections?.length ?? 0} table(s). Reloading…`,
       );
       setPendingRestore(null);
-      await loadSummary();
+      window.setTimeout(() => window.location.reload(), 800);
     } catch (err) {
       onError?.(err instanceof Error ? err.message : "Restore failed.");
     } finally {

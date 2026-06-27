@@ -47,9 +47,16 @@ export function useAuth() {
       permissions?: Record<string, { view?: boolean; edit?: boolean }>;
       uiRestrictions?: RoleUiRestrictions;
       csrfToken?: string;
+      tenantId?: string;
     }) => {
       if (typeof data.csrfToken === "string" && data.csrfToken.trim()) {
         setCsrfToken(data.csrfToken);
+      }
+      const tenantId = data.tenantId?.trim();
+      if (tenantId && tenantId !== "default") {
+        localStorage.setItem("flexhrm_tenant_id", tenantId);
+      } else {
+        localStorage.removeItem("flexhrm_tenant_id");
       }
       if (data.username) {
         setSessionUser(data.username);
