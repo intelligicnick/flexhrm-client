@@ -956,7 +956,7 @@ export default function DashboardLayout() {
                               />
                               <button
                                 type="button"
-                                onClick={handleLogout}
+                                onClick={() => { void handleLogout(); }}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 font-bold transition"
                                 id="mobile-logout-dropdown-btn"
                               >
@@ -1019,7 +1019,7 @@ export default function DashboardLayout() {
                               unreadCount={adminNotificationUnreadCount}
                               notifications={adminNotifications}
                               loading={isFetchingAdminNotifications}
-                              onRefresh={fetchAdminNotifications}
+                              onRefresh={async () => { await fetchAdminNotifications(); }}
                               onMarkRead={handleMarkAdminNotificationRead}
                               onMarkAllRead={handleMarkAllAdminNotificationsRead}
                               onNavigate={handleAdminNotificationNavigate}
@@ -1105,7 +1105,7 @@ export default function DashboardLayout() {
                               />
                               <button
                                 type="button"
-                                onClick={handleLogout}
+                                onClick={() => { void handleLogout(); }}
                                 className="w-full flex items-center gap-2.5 px-4 py-2 hover:bg-red-50 text-left text-xs text-rose-600 transition font-bold"
                                 id="logout-dropdown-btn"
                               >

@@ -89,7 +89,9 @@ async function readJsonBody<T>(res: Response): Promise<T> {
 }
 
 async function readApiErrorMessage(res: Response, fallback: string): Promise<string> {
-  const err = await readJsonBody<Record<string, unknown>>(res).catch(() => ({}));
+  const err = await readJsonBody<Record<string, unknown>>(res).catch(
+    () => ({} as Record<string, unknown>),
+  );
   if (typeof err?.message === "string") return err.message;
   if (Array.isArray(err?.message)) return err.message.join(", ");
   return fallback;

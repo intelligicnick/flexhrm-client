@@ -143,7 +143,7 @@ export function applyWageModeSwitch(
         basicPercent,
         esicLimit,
       );
-      anchorValue = getAnchorValue(interim, anchor);
+      anchorValue = getAnchorValue(toSalaryFieldValues(interim), anchor);
     }
   }
 

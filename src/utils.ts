@@ -503,7 +503,8 @@ export function resolveEmployeeDailyWage(
 }
 
 export function resolveSalaryWageMode(
-  emp: Pick<Employee, "salaryWageMode" | "grossSalary" | "dailyWage" | "basicSalary" | "workingDaysType">,
+  emp: Pick<Employee, "salaryWageMode" | "grossSalary" | "dailyWage" | "workingDaysType"> &
+    Partial<Pick<Employee, "basicSalary">>,
 ): SalaryWageMode {
   return inferSalaryWageMode(emp);
 }
@@ -559,7 +560,8 @@ export function computeProratedGrossAndBasic(
 
 /** Full-month salary before attendance proration. Daily: daily wage × working days in month; monthly: stored gross. */
 export function resolveFullMonthSalary(
-  emp: Pick<Employee, "grossSalary" | "dailyWage" | "workingDaysType" | "salaryWageMode">,
+  emp: Pick<Employee, "grossSalary" | "dailyWage" | "workingDaysType" | "salaryWageMode"> &
+    Partial<Pick<Employee, "basicSalary">>,
   month: string,
 ): number {
   if (resolveSalaryWageMode(emp) === "daily") {
@@ -845,7 +847,7 @@ export function validateEmployee(emp: Partial<Employee>): Record<string, string>
   ];
 
   for (const { key, label } of salaryFields) {
-    if (emp[key] !== undefined && emp[key] !== null && emp[key] !== "") {
+    if (emp[key] !== undefined && emp[key] !== null && String(emp[key]) !== "") {
       const err = validateNonNegativeNumberField(emp[key], label);
       if (err) errors[key] = err;
     }

@@ -43,6 +43,8 @@ interface SchoolWorkTableProps {
   onDiscardBulkEdit?: () => void;
   onApplyBulkEdit?: () => Promise<void>;
   isApplyingBulkEdit?: boolean;
+  districtFilter?: string;
+  onDistrictFilterChange?: (value: string) => void;
 }
 
 const COLUMNS: { key: keyof SchoolWork; label: string }[] = [

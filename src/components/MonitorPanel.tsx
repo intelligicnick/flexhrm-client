@@ -67,8 +67,8 @@ type MonitorTab =
   | "devices"
   | "settings";
 
-type NavItem = { id: MonitorTab; label: string; icon: React.ComponentType<{ size?: number }> };
-type NavSection = { id: string; label: string; icon: React.ComponentType<{ size?: number }>; items: NavItem[] };
+type NavItem = { id: MonitorTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> };
+type NavSection = { id: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; items: NavItem[] };
 
 const NAV_SECTIONS: NavSection[] = [
   {

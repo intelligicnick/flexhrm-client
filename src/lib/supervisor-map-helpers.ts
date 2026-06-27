@@ -265,7 +265,7 @@ export function buildSupervisorPaths(
         latest: numbered.length > 0 ? numbered[numbered.length - 1] : null,
       } satisfies SupervisorPath;
     })
-    .filter((path): path is SupervisorPath => path !== null);
+    .filter((path) => path !== null);
 }
 
 export function buildSupervisorMapPins(

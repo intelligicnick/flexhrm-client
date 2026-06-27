@@ -61,6 +61,7 @@ interface RenewalsPanelProps {
   tabLabel: string;
   renewals: Renewal[];
   readOnly?: boolean;
+  initialExpiryFilter?: "all" | "active" | "expiring_soon" | "expired" | "no_expiry" | "alert";
   onRefresh: () => Promise<void>;
   onCreate: (payload: CreateRenewalInput) => Promise<Renewal>;
   onUpdate: (id: string, payload: Partial<CreateRenewalInput>) => Promise<void>;

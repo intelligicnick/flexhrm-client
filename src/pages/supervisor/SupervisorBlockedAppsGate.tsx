@@ -184,7 +184,7 @@ export default function SupervisorBlockedAppsGate({ children }: { children: Reac
             <SupervisorActionButton
               type="button"
               onClick={() => void runScan()}
-              loading={phase === "scanning"}
+              loading={false}
               loadingText={t("loading")}
               fullWidth
               className="py-3.5 text-sm font-black"

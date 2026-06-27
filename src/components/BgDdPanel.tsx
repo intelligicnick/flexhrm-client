@@ -37,6 +37,8 @@ interface BgDdPanelProps {
   records: BgDdRecord[];
   contracts: Contract[];
   readOnly?: boolean;
+  initialExpiryFilter?: "all" | "active" | "expiring_soon" | "expired" | "alert";
+  initialTypeFilter?: "" | "bg" | "dd";
   onRefresh: () => Promise<void>;
   onCreate: (payload: CreateBgDdInput) => Promise<BgDdRecord>;
   onUpdate: (id: string, payload: Partial<CreateBgDdInput>) => Promise<void>;

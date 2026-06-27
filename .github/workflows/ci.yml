@@ -18,6 +18,9 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm test
+      - run: npm run lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
       - run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=4096

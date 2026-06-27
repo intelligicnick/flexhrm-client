@@ -1672,7 +1672,7 @@ export function useHRMSApp() {
   const [attendanceDb, setAttendanceDb] = useState<Record<string, Record<string, Record<number, string>>>>({});
   const [isFetchingAttendance, setIsFetchingAttendance] = useState(false);
   const [exitEligibleEmployees, setExitEligibleEmployees] = useState<ExitEligibleEmployee[]>([]);
-  const exitEligibilityTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const exitEligibilityTimerRef = useRef<number | null>(null);
   const employeesFetchInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const [exitEligibilityCheckedMonths, setExitEligibilityCheckedMonths] = useState<string[]>([]);
   const [exitedEmployeesCount, setExitedEmployeesCount] = useState(0);

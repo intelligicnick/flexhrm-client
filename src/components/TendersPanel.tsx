@@ -859,6 +859,11 @@ async function parseTendersWorkbook(
         status,
         outcome,
         notes: "",
+        description: "",
+        entryDate: "",
+        preBidVenue: "",
+        gemDocUrl: "",
+        gemCurrentStage: "",
       });
     }
   }

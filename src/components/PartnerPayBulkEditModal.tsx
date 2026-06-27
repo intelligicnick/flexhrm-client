@@ -103,7 +103,10 @@ export default function PartnerPayBulkEditModal({
   if (!isOpen) return null;
 
   const selectedField = columnSelection?.field;
-  const isNumericField = selectedField ? isPartnerPayNumericField(selectedField) : false;
+  const isNumericField =
+    selectedField && selectedField !== "paymentStatus"
+      ? isPartnerPayNumericField(selectedField)
+      : false;
   const isStatusField = selectedField === "paymentStatus";
 
   const handleCellMouseDown = (

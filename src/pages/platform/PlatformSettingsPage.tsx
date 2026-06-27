@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { apiUrl, parseApiError } from "../../api";
 import { ErrorBanner, LoadingSpinner, PageHeader } from "./PlatformShared";
 import { platformPost, usePlatformApi } from "../../hooks/usePlatformApi";

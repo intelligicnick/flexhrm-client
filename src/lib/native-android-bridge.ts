@@ -24,7 +24,11 @@ declare global {
 
 function getBridge(): NativeAndroidBridge | undefined {
   if (typeof window === "undefined") return undefined;
-  return window.FlexHrmAndroid || window.Android;
+  const w = window as Window & {
+    FlexHrmAndroid?: NativeAndroidBridge;
+    Android?: NativeAndroidBridge;
+  };
+  return w.FlexHrmAndroid || w.Android;
 }
 
 function parseGpsJson(raw: string): NativeGpsCoordinates | null {

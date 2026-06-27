@@ -395,7 +395,7 @@ export function matchesSearch(query: string, ...parts: (string | number | undefi
   return parts.some((part) => String(part ?? "").toLowerCase().includes(q));
 }
 
-export function getSalaryStatusTone(status: string): "green" | "amber" | "red" {
+export function getSalaryStatusTone(status: string): "green" | "amber" | "red" | "blue" | "slate" {
   return paymentTone(status) || "red";
 }
 

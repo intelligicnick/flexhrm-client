@@ -407,6 +407,12 @@ export interface Tender {
   outcome: string;
   notes: string;
   description: string;
+  /** GeM / procurement metadata */
+  ministry?: string;
+  organisation?: string;
+  consigneeOfficer?: string;
+  additionalRequirements?: string;
+  startDate?: string;
   entryDate: string;
   gemDocUrl: string;
   gemCurrentStage: string;
@@ -625,7 +631,7 @@ export interface SchoolVisit {
   photos?: SchoolVisitPhoto[];
   photoCount?: number;
   gpsLocation?: { lat: number; lng: number; locationLabel?: string };
-  status: "submitted" | "approved" | "rejected";
+  status: "submitted" | "approved" | "rejected" | "pending";
   visitType?: "commitment" | "adhoc";
   commitmentId?: string;
 }

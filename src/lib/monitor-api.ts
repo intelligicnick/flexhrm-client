@@ -317,7 +317,8 @@ export const monitorApi = {
   },
   resolveAlert: (alertId: string, status: "resolved" | "ignored") =>
     monitorFetch(`/alerts/${alertId}`, { method: "PUT", body: JSON.stringify({ status }) }),
-  getEmployeeProfile: (employeeId: string) => monitorFetch(`/employees/${employeeId}/profile`),
+  getEmployeeProfile: (employeeId: string) =>
+    monitorFetch<Record<string, unknown>>(`/employees/${employeeId}/profile`),
   getAgentCredentials: () => monitorFetch<EmployeeAgentCredential[]>("/agent-credentials"),
   createAgentCredential: (employeeId: string) =>
     monitorFetch<{ employeeId: string; employeeCode: string; employeeName: string; key: string; hash: string }>(

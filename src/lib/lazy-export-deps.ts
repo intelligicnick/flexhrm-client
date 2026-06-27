@@ -1,4 +1,4 @@
-type ExcelJSModule = typeof import("exceljs").default;
+type ExcelJSModule = typeof import("exceljs");
 
 let excelPromise: Promise<ExcelJSModule> | null = null;
 let pdfPromise: Promise<{

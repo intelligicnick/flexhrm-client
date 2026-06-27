@@ -248,7 +248,10 @@ const supervisorActionVariants = {
     "bg-gradient-to-r from-[#ff791a] to-[#ff981a] text-white shadow-lg shadow-orange-200/60 disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none",
 } as const;
 
-export type SupervisorActionButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+export type SupervisorActionButtonProps = Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "onClick"
+> & {
   loading?: boolean;
   loadingText?: string;
   variant?: keyof typeof supervisorActionVariants;
