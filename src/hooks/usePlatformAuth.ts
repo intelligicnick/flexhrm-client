@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "../api";
+import { setCsrfToken } from "../lib/csrf";
 
 interface PlatformAdmin {
   username: string;
@@ -22,6 +23,7 @@ export function usePlatformAuth() {
         return false;
       }
       const data = await res.json();
+      if (typeof data.csrfToken === "string") setCsrfToken(data.csrfToken);
       setAdmin(data);
       return true;
     } catch {

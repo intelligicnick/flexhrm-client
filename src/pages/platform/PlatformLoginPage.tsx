@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Shield } from "lucide-react";
 import { apiUrl, parseApiError } from "../../api";
+import { setCsrfToken } from "../../lib/csrf";
 
 export default function PlatformLoginPage() {
   const navigate = useNavigate();
@@ -28,6 +29,8 @@ export default function PlatformLoginPage() {
         body: JSON.stringify({ username, password }),
       });
       if (!res.ok) throw await parseApiError(res, "Login failed");
+      const data = await res.json();
+      if (typeof data.csrfToken === "string") setCsrfToken(data.csrfToken);
       navigate("/platform/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
