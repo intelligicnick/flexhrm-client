@@ -37,6 +37,7 @@ Thumbs.db
 
 # Deploy artifacts
 flex-hrm-deploy-*.zip
+flexhrm-frontend-static-*.zip
 
 # PM2
 .pm2/

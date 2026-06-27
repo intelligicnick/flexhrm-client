@@ -47,7 +47,7 @@ Start the [backend](https://github.com/intelligicnick/flexhrm-server) first (`np
 
 | App | Hostinger URL | Setup guide |
 |-----|---------------|-------------|
-| **Frontend (this repo)** | https://greenyellow-woodpecker-750354.hostingersite.com | Build with `npm run build`, deploy `dist/` |
+| **Frontend (this repo)** | https://greenyellow-woodpecker-750354.hostingersite.com | [HOSTINGER_SETUP.md](./HOSTINGER_SETUP.md) — `npm run build:hostinger` then upload ZIP to `public_html` |
 | **Backend API** | https://midnightblue-partridge-476451.hostingersite.com/api | [flexhrm-server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md) |
 
 Verify the API after deploy:
