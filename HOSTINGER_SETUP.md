@@ -17,7 +17,18 @@ Repository: https://github.com/intelligicnick/flexhrm-client
 
 ## 403 Forbidden — fix this first
 
+**Pushing to GitHub does not deploy files to Hostinger.** A 403 means `public_html` is empty (frontend) or the API site is not a running Node.js app (backend).
+
 If the site shows **403 Forbidden** (including `/hrmlogin`), the web server has **no files to serve**. The Node API returning 403 at the same time usually means **both Hostinger apps need to be redeployed**.
+
+### Quick diagnosis
+
+```bash
+curl -sI https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin | head -1
+curl -sI https://midnightblue-partridge-476451.hostingersite.com/api/health | head -1
+```
+
+Both showing `403` = nothing deployed yet. Fix frontend (below) and backend ([server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md)).
 
 ### Frontend (greenyellow) — static website
 
@@ -56,6 +67,29 @@ In **hPanel → File Manager → public_html**:
 2. **Upload** the ZIP → **Extract**.
 3. Verify `public_html/index.html` and `public_html/.htaccess` exist.
 4. Visit https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin
+
+---
+
+## Option C — GitHub Actions FTP (recommended after one-time setup)
+
+Use this when manual ZIP upload is tedious. The workflow builds `dist/` and uploads to `public_html` on every push to `main`.
+
+### One-time setup
+
+1. **hPanel → Files → FTP Accounts** — note **Host**, **Username**, **Password**
+2. **GitHub → flexhrm-client → Settings → Secrets and variables → Actions**
+   - Secrets: `HOSTINGER_FTP_SERVER`, `HOSTINGER_FTP_USERNAME`, `HOSTINGER_FTP_PASSWORD`
+   - Variables: `HOSTINGER_DEPLOY_ENABLED` = `true`
+3. **Actions → Deploy to Hostinger → Run workflow**
+4. Verify:
+
+   ```bash
+   curl -sI https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin | head -1
+   ```
+
+Expected: `HTTP/2 200`
+
+If FTP path differs on your account, edit `server-dir` in `.github/workflows/deploy-hostinger.yml` (check File Manager — path shown at top when inside `public_html`).
 
 ---
 

@@ -1,0 +1,50 @@
+# Deploy static frontend to Hostinger public_html via FTP.
+#
+# One-time setup:
+# 1. hPanel → Files → FTP Accounts → copy host, username, password
+# 2. GitHub repo → Settings → Secrets → Actions → add:
+#      HOSTINGER_FTP_SERVER
+#      HOSTINGER_FTP_USERNAME
+#      HOSTINGER_FTP_PASSWORD
+# 3. GitHub repo → Settings → Variables → Actions → add:
+#      HOSTINGER_DEPLOY_ENABLED = true
+# 4. Actions → Deploy to Hostinger → Run workflow (or push to main)
+
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: vars.HOSTINGER_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Build static bundle for Hostinger
+        run: npm ci && npm run build:hostinger:static && npm run verify:hostinger
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          VITE_DISABLE_PWA: "true"
+
+      - name: Deploy dist/ to Hostinger public_html
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_SERVER }}
+          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./dist/
+          server-dir: /domains/greenyellow-woodpecker-750354.hostingersite.com/public_html/
+          dangerous-clean-slate: true
+          log-level: verbose
