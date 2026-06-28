@@ -62,8 +62,10 @@ function isSupervisorNativeOrProduction(): boolean {
 
 export function formatNetworkFetchError(err: unknown, fallback?: string): Error {
   if (isNetworkFetchError(err)) {
-    const productionMessage =
-      "Cannot reach the Flex HRM API server. Check your mobile data or Wi-Fi connection and try again.";
+    const apiBase = getApiBase();
+    const productionMessage = apiBase
+      ? `Cannot reach the Flex HRM API at ${apiBase}. The backend server may be stopped or still deploying on Hostinger — not a Wi‑Fi issue.`
+      : "Cannot reach the Flex HRM API server. The backend may be stopped or still deploying.";
     const devMessage =
       "Cannot reach the API server. Ensure the NestJS backend is running (port 3001) and reload this page.";
     return new Error(
