@@ -8,8 +8,8 @@ Deploy the React UI to **Hostinger Website** hosting (not Node.js). The browser 
 |---------|-----|
 | **UI (this guide)** | https://greenyellow-woodpecker-750354.hostingersite.com |
 | **Login** | https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin |
-| **API** | https://midnightblue-partridge-476451.hostingersite.com/api |
-| **Health check** | https://midnightblue-partridge-476451.hostingersite.com/api/health |
+| **API** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api |
+| **Health check** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health |
 
 Repository: https://github.com/intelligicnick/flexhrm-client
 
@@ -25,7 +25,7 @@ If the site shows **403 Forbidden** (including `/hrmlogin`), the web server has 
 
 ```bash
 curl -sI https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin | head -1
-curl -sI https://midnightblue-partridge-476451.hostingersite.com/api/health | head -1
+curl -sI https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | head -1
 ```
 
 Both showing `403` = nothing deployed yet. Fix frontend (below) and backend ([server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md)).
@@ -37,14 +37,14 @@ Both showing `403` = nothing deployed yet. Fix frontend (below) and backend ([se
 3. If the folder is empty or only has a failed Git deploy artifact, upload a fresh build (see below).
 4. File permissions: folders **755**, files **644** (File Manager → right‑click → Permissions).
 
-### Backend (midnightblue) — Node.js Web App
+### Backend (mediumseagreen-chimpanzee) — Node.js Web App
 
 The API must be a **Node.js Web App**, not a static website. See [flexhrm-server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md).
 
 Until this returns JSON, login will not work:
 
 ```bash
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health
 ```
 
 ---
@@ -119,7 +119,7 @@ After deploy, confirm `public_html` contains `index.html` — not an empty folde
 The UI calls the API directly in production. Values live in `.env.production`:
 
 ```env
-PUBLIC_API_URL=https://midnightblue-partridge-476451.hostingersite.com
+PUBLIC_API_URL=https://mediumseagreen-chimpanzee-998149.hostingersite.com
 VITE_ID_CARD_VERIFY_BASE_URL=https://greenyellow-woodpecker-750354.hostingersite.com/employee
 ```
 
@@ -140,7 +140,7 @@ Change these before `npm run build:hostinger` if your Hostinger URLs change.
 curl -sI https://greenyellow-woodpecker-750354.hostingersite.com/hrmlogin | head -5
 
 # 2. API is healthy
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
 ```
 
 Expected: frontend `HTTP/2 200`, API `"ready": true`.

@@ -16,9 +16,9 @@ android {
         buildConfigField 'String', 'OBSERVER_URL',
                 '"https://appassets.androidplatform.net/observer/login"'
         buildConfigField 'String', 'API_ORIGIN',
-                "\"${project.findProperty('API_ORIGIN') ?: 'https://midnightblue-partridge-476451.hostingersite.com'}\""
+                "\"${project.findProperty('API_ORIGIN') ?: 'https://mediumseagreen-chimpanzee-998149.hostingersite.com'}\""
         buildConfigField 'String', 'API_BASE',
-                "\"${project.findProperty('API_ORIGIN') ?: 'https://midnightblue-partridge-476451.hostingersite.com'}/api\""
+                "\"${project.findProperty('API_ORIGIN') ?: 'https://mediumseagreen-chimpanzee-998149.hostingersite.com'}/api\""
     }
 
     buildTypes {

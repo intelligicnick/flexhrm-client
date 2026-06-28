@@ -11,7 +11,7 @@ Related repos: [flexhrm-server](https://github.com/intelligicnick/flexhrm-server
 | Service | URL |
 |---------|-----|
 | **UI** | https://greenyellow-woodpecker-750354.hostingersite.com |
-| **API** | https://midnightblue-partridge-476451.hostingersite.com/api |
+| **API** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api |
 | **Supervisor login** | https://greenyellow-woodpecker-750354.hostingersite.com/supervisor/login |
 
 Production URLs are defined in `src/deploy-urls.ts` and overridden via `.env.production`.
@@ -48,10 +48,10 @@ Start the [backend](https://github.com/intelligicnick/flexhrm-server) first (`np
 | App | Hostinger URL | Setup guide |
 |-----|---------------|-------------|
 | **Frontend (this repo)** | https://greenyellow-woodpecker-750354.hostingersite.com | [HOSTINGER_SETUP.md](./HOSTINGER_SETUP.md) — `npm run build:hostinger` then upload ZIP to `public_html` |
-| **Backend API** | https://midnightblue-partridge-476451.hostingersite.com/api | [flexhrm-server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md) |
+| **Backend API** | https://mediumseagreen-chimpanzee-998149.hostingersite.com/api | [flexhrm-server HOSTINGER_SETUP.md](https://github.com/intelligicnick/flexhrm-server/blob/main/HOSTINGER_SETUP.md) |
 
 Verify the API after deploy:
 
 ```bash
-curl -s https://midnightblue-partridge-476451.hostingersite.com/api/health | python3 -m json.tool
+curl -s https://mediumseagreen-chimpanzee-998149.hostingersite.com/api/health | python3 -m json.tool
 ```
