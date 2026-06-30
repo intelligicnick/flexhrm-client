@@ -15,7 +15,8 @@ export function DateInput({
   value,
   ...props
 }: DateInputProps) {
-  const inputId = id || props.name;
+  const generatedId = React.useId();
+  const inputId = id || props.name || generatedId;
   const isoValue =
     value === undefined || value === null
       ? undefined
@@ -33,7 +34,7 @@ export function DateInput({
 
   if (inlineLabel) {
     return (
-      <label className="flex items-center gap-1.5 text-xs text-slate-600">
+      <label htmlFor={inputId} className="flex items-center gap-1.5 text-xs text-slate-600">
         <span className="font-semibold whitespace-nowrap">{inlineLabel}</span>
         {input}
       </label>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { apiUrl } from "../../api";
 
 export interface LoginCaptchaValue {
   id: string;
@@ -24,7 +25,24 @@ export default function LoginCaptcha({ value, onChange, disabled, refreshKey = 0
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  const loadCaptcha = useCallback(() => {
+  const loadCaptcha = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl("/api/auth/captcha"), {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { id?: string; question?: string };
+        if (data.id && data.question) {
+          setQuestion(data.question);
+          onChangeRef.current({ id: data.id, answer: "" });
+          return;
+        }
+      }
+    } catch {
+      /* fall back to client-side challenge when API is unreachable */
+    }
+
     const challenge = generateMathChallenge();
     setQuestion(challenge.question);
     onChangeRef.current({ id: challenge.id, answer: "" });

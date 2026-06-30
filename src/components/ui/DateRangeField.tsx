@@ -54,6 +54,9 @@ export default function DateRangeField({
 
       {fieldOptions && fieldOptions.length > 0 && onFieldChange && (
         <select
+          id={`${field}-range-field`}
+          name={`${field}-range-field`}
+          aria-label="Date range field"
           value={field}
           onChange={(e) => onFieldChange(e.target.value)}
           className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
@@ -68,6 +71,8 @@ export default function DateRangeField({
 
       <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
         <DateInput
+          id={`${field}-range-from`}
+          name={`${field}From`}
           inlineLabel="From"
           value={from}
           max={to || maxDate}
@@ -76,6 +81,8 @@ export default function DateRangeField({
         />
         <span className="text-slate-400 text-xs font-semibold">to</span>
         <DateInput
+          id={`${field}-range-to`}
+          name={`${field}To`}
           inlineLabel="To"
           value={to}
           min={from}

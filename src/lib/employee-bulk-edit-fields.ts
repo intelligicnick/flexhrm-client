@@ -160,6 +160,9 @@ export function parseFieldValueForSubmit(
 ): unknown {
   if (field.type === "boolean") return raw === "Yes";
   if (field.key === "salaryWageMode") return raw === "daily" ? "daily" : "monthly";
+  if (field.key === "pfCalculationMode") {
+    return raw === "ceiling_15000" ? "ceiling_15000" : "gross";
+  }
   if (field.type === "number" || NUMBER_FIELDS.has(field.key)) {
     return Number(raw) || 0;
   }
@@ -362,7 +365,10 @@ export function buildSubmissionPayload(
     }
 
     if (Object.keys(changes).length > 0) {
-      updates.push({ employeeId: recordId, changes });
+      updates.push({
+        employeeId: String(emp.id || recordId).trim(),
+        changes,
+      });
     }
   }
 

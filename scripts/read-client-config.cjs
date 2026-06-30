@@ -5,7 +5,7 @@ const path = require('path');
 
 const field = process.argv[2];
 if (!field) {
-  console.error('usage: read-client-config.js <field>');
+  console.error('usage: read-client-config.cjs <field>');
   process.exit(1);
 }
 

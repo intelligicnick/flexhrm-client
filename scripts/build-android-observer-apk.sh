@@ -7,7 +7,10 @@ ANDROID_DIR="${ROOT}/android-observer-app"
 ASSETS_DIR="${ANDROID_DIR}/app/src/main/assets/www"
 VERSION="$("$(dirname "$0")/read-android-version.sh" "${ANDROID_DIR}/app/build.gradle")"
 VERSION_TS="${ROOT}/src/lib/native-app-version.ts"
-API_ORIGIN="$(node "$(dirname "$0")/read-client-config.js" apiOrigin)"
+API_ORIGIN="$(node "$(dirname "$0")/read-client-config.cjs" apiOrigin)"
+
+echo "==> Syncing shared client-config..."
+node "$(dirname "$0")/sync-client-config.mjs"
 
 echo "==> Syncing app version ${VERSION} into web bundle..."
 cat > "$VERSION_TS" <<EOF

@@ -15,8 +15,8 @@
     "build:android-apk": "bash scripts/build-android-apk.sh",
     "build:android-observer-apk": "bash scripts/build-android-observer-apk.sh",
     "install:server": "bash scripts/install-on-server.sh",
-    "sync:config": "node ../scripts/sync-client-config.mjs",
-  "clean": "rm -rf dist",
+    "sync:config": "node scripts/sync-client-config.mjs",
+    "clean": "rm -rf dist",
     "lint": "NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

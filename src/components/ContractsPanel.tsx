@@ -125,9 +125,9 @@ function normalizeAmountString(value: string | undefined | null): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return "";
   const cleaned = trimmed.replace(/[^0-9.-]/g, "");
-  if (!cleaned || cleaned === "-" || cleaned === ".") return trimmed;
+  if (!cleaned || cleaned === "-" || cleaned === ".") return "";
   const parsed = parseFloat(cleaned);
-  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : trimmed;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : "";
 }
 
 function mergeLinkedBgRecord(
@@ -916,10 +916,13 @@ export default function ContractsPanel({
           {!readOnly && (
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <input
+                id="contracts-import-file"
+                name="contracts-import-file"
                 ref={fileInputRef}
                 type="file"
                 accept=".xlsx,.xls"
                 className="hidden"
+                aria-label="Import contracts from Excel"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) void handleImportFile(file);
@@ -978,6 +981,10 @@ export default function ContractsPanel({
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              id="contracts-search"
+              name="contracts-search"
+              type="search"
+              aria-label="Search contracts"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search contract no, company, officer, DDO, BG…"
@@ -985,6 +992,9 @@ export default function ContractsPanel({
             />
           </div>
           <select
+            id="contracts-type-filter"
+            name="contracts-type-filter"
+            aria-label="Filter by contract type"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as "" | ContractType)}
             className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
@@ -994,6 +1004,9 @@ export default function ContractsPanel({
             <option value="travel">Travel Plus</option>
           </select>
           <select
+            id="contracts-status-filter"
+            name="contracts-status-filter"
+            aria-label="Filter by contract status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as "" | ContractStatus)}
             className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
@@ -1004,6 +1017,9 @@ export default function ContractsPanel({
             ))}
           </select>
           <select
+            id="contracts-expiry-filter"
+            name="contracts-expiry-filter"
+            aria-label="Filter by expiry"
             value={expiryFilter}
             onChange={(e) => setExpiryFilter(e.target.value as typeof expiryFilter)}
             className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
@@ -1015,7 +1031,10 @@ export default function ContractsPanel({
           </select>
           <label className="flex items-center gap-1.5 px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white cursor-pointer">
             <input
+              id="contracts-bg-due-filter"
+              name="contracts-bg-due-filter"
               type="checkbox"
+              aria-label="Show contracts with bank guarantee due soon"
               checked={bgDueOnly}
               onChange={(e) => setBgDueOnly(e.target.checked)}
               className="rounded"
@@ -1289,8 +1308,12 @@ export default function ContractsPanel({
             <div className="p-5 space-y-4">
               {wonTenders.length > 0 && !editingId && (
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-slate-400">Fill from won tender</label>
+                  <label className="text-[10px] font-bold uppercase text-slate-400" htmlFor="contract-form-won-tender">
+                    Fill from won tender
+                  </label>
                   <select
+                    id="contract-form-won-tender"
+                    name="wonTender"
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                     defaultValue=""
                     onChange={(e) => {
@@ -1307,58 +1330,82 @@ export default function ContractsPanel({
               )}
 
               <div className="grid sm:grid-cols-2 gap-3">
-                <label className="block">
+                <label className="block" htmlFor="contract-form-contractNo">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Contract No *</span>
                   <input
+                    id="contract-form-contractNo"
+                    name="contractNo"
                     value={form.contractNo}
                     onChange={(e) => setForm({ ...form, contractNo: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-companyName">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Company Name</span>
                   <input
+                    id="contract-form-companyName"
+                    name="companyName"
                     value={form.companyName}
                     onChange={(e) => setForm({ ...form, companyName: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                     placeholder="Travel Plus / Intelligic"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-officerName">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Officer Name</span>
                   <input
+                    id="contract-form-officerName"
+                    name="officerName"
                     value={form.officerName}
                     onChange={(e) => setForm({ ...form, officerName: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-officeName">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Office Name</span>
                   <input
+                    id="contract-form-officeName"
+                    name="officeName"
                     value={form.officeName}
                     onChange={(e) => setForm({ ...form, officeName: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-fromDate">
                   <span className="text-[10px] font-bold uppercase text-slate-400">From Date</span>
-                  <DateInput value={fromDateIso} onChange={(e) => setFromDateIso(e.target.value)} className="mt-1" />
+                  <DateInput
+                    id="contract-form-fromDate"
+                    name="fromDate"
+                    value={fromDateIso}
+                    onChange={(e) => setFromDateIso(e.target.value)}
+                    className="mt-1"
+                  />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-toDate">
                   <span className="text-[10px] font-bold uppercase text-slate-400">To Date</span>
-                  <DateInput value={toDateIso} onChange={(e) => setToDateIso(e.target.value)} className="mt-1" />
+                  <DateInput
+                    id="contract-form-toDate"
+                    name="toDate"
+                    value={toDateIso}
+                    onChange={(e) => setToDateIso(e.target.value)}
+                    className="mt-1"
+                  />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-category">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Category</span>
                   <input
+                    id="contract-form-category"
+                    name="category"
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-contractType">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Contract Type</span>
                   <select
+                    id="contract-form-contractType"
+                    name="contractType"
                     value={form.contractType}
                     onChange={(e) => setForm({ ...form, contractType: e.target.value as ContractType })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
@@ -1367,9 +1414,11 @@ export default function ContractsPanel({
                     <option value="travel">Travel Plus</option>
                   </select>
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-contractValue">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Contract Value</span>
                   <input
+                    id="contract-form-contractValue"
+                    name="contractValue"
                     type="number"
                     min={0}
                     step="any"
@@ -1378,9 +1427,11 @@ export default function ContractsPanel({
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-tenderBidNo">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Tender Bid No</span>
                   <input
+                    id="contract-form-tenderBidNo"
+                    name="tenderBidNo"
                     value={form.tenderBidNo}
                     onChange={(e) => setForm({ ...form, tenderBidNo: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
@@ -1401,6 +1452,9 @@ export default function ContractsPanel({
 
                 <div className="flex flex-col sm:flex-row gap-2">
                   <select
+                    id="contract-form-location-to-add"
+                    name="locationToAdd"
+                    aria-label="Select office location to link"
                     value={locationToAdd}
                     onChange={(e) => setLocationToAdd(e.target.value)}
                     className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
@@ -1479,8 +1533,10 @@ export default function ContractsPanel({
               </div>
 
               <div className="border border-slate-100 rounded-xl p-3 space-y-3">
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700" htmlFor="contract-form-hasExtension">
                   <input
+                    id="contract-form-hasExtension"
+                    name="hasExtension"
                     type="checkbox"
                     checked={form.hasExtension}
                     onChange={(e) => setForm({ ...form, hasExtension: e.target.checked })}
@@ -1488,16 +1544,24 @@ export default function ContractsPanel({
                   Extension granted
                 </label>
                 {form.hasExtension && (
-                  <label className="block">
+                  <label className="block" htmlFor="contract-form-extensionEndDate">
                     <span className="text-[10px] font-bold uppercase text-slate-400">Extension End Date</span>
-                    <DateInput value={extensionEndIso} onChange={(e) => setExtensionEndIso(e.target.value)} className="mt-1" />
+                    <DateInput
+                      id="contract-form-extensionEndDate"
+                      name="extensionEndDate"
+                      value={extensionEndIso}
+                      onChange={(e) => setExtensionEndIso(e.target.value)}
+                      className="mt-1"
+                    />
                   </label>
                 )}
               </div>
 
               <div className="border border-slate-100 rounded-xl p-3 space-y-3">
-                <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700" htmlFor="contract-form-bgApplicable">
                   <input
+                    id="contract-form-bgApplicable"
+                    name="bgApplicable"
                     type="checkbox"
                     checked={form.bgApplicable}
                     onChange={(e) => setForm({ ...form, bgApplicable: e.target.checked })}
@@ -1506,17 +1570,21 @@ export default function ContractsPanel({
                 </label>
                 {form.bgApplicable && (
                   <div className="grid sm:grid-cols-2 gap-3">
-                    <label className="block">
+                    <label className="block" htmlFor="contract-form-bgNumber">
                       <span className="text-[10px] font-bold uppercase text-slate-400">BG Number</span>
                       <input
+                        id="contract-form-bgNumber"
+                        name="bgNumber"
                         value={form.bgNumber}
                         onChange={(e) => setForm({ ...form, bgNumber: e.target.value })}
                         className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                       />
                     </label>
-                    <label className="block">
+                    <label className="block" htmlFor="contract-form-bgAmount">
                       <span className="text-[10px] font-bold uppercase text-slate-400">BG Amount</span>
                       <input
+                        id="contract-form-bgAmount"
+                        name="bgAmount"
                         type="number"
                         min={0}
                         step="any"
@@ -1525,21 +1593,31 @@ export default function ContractsPanel({
                         className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                       />
                     </label>
-                    <label className="block">
+                    <label className="block" htmlFor="contract-form-bgIssuingBank">
                       <span className="text-[10px] font-bold uppercase text-slate-400">Issuing Bank</span>
                       <input
+                        id="contract-form-bgIssuingBank"
+                        name="bgIssuingBank"
                         value={form.bgIssuingBank}
                         onChange={(e) => setForm({ ...form, bgIssuingBank: e.target.value })}
                         className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                       />
                     </label>
-                    <label className="block">
+                    <label className="block" htmlFor="contract-form-bgExpiryDate">
                       <span className="text-[10px] font-bold uppercase text-slate-400">BG Expiry</span>
-                      <DateInput value={bgExpiryIso} onChange={(e) => setBgExpiryIso(e.target.value)} className="mt-1" />
+                      <DateInput
+                        id="contract-form-bgExpiryDate"
+                        name="bgExpiryDate"
+                        value={bgExpiryIso}
+                        onChange={(e) => setBgExpiryIso(e.target.value)}
+                        className="mt-1"
+                      />
                     </label>
-                    <label className="block sm:col-span-2">
+                    <label className="block sm:col-span-2" htmlFor="contract-form-bgDetails">
                       <span className="text-[10px] font-bold uppercase text-slate-400">BG Details</span>
                       <textarea
+                        id="contract-form-bgDetails"
+                        name="bgDetails"
                         value={form.bgDetails}
                         onChange={(e) => setForm({ ...form, bgDetails: e.target.value })}
                         rows={2}
@@ -1552,17 +1630,21 @@ export default function ContractsPanel({
               </div>
 
               <div className="grid sm:grid-cols-2 gap-3">
-                <label className="block">
+                <label className="block" htmlFor="contract-form-ddoName">
                   <span className="text-[10px] font-bold uppercase text-slate-400">DDO Name</span>
                   <input
+                    id="contract-form-ddoName"
+                    name="ddoName"
                     value={form.ddoName}
                     onChange={(e) => setForm({ ...form, ddoName: e.target.value })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
-                <label className="block">
+                <label className="block" htmlFor="contract-form-status">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Status</span>
                   <select
+                    id="contract-form-status"
+                    name="status"
                     value={form.status}
                     onChange={(e) => setForm({ ...form, status: e.target.value as ContractStatus })}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
@@ -1572,9 +1654,11 @@ export default function ContractsPanel({
                     ))}
                   </select>
                 </label>
-                <label className="block sm:col-span-2">
+                <label className="block sm:col-span-2" htmlFor="contract-form-ddoIssuingDetails">
                   <span className="text-[10px] font-bold uppercase text-slate-400">DDO Issuing Details</span>
                   <textarea
+                    id="contract-form-ddoIssuingDetails"
+                    name="ddoIssuingDetails"
                     value={form.ddoIssuingDetails}
                     onChange={(e) => setForm({ ...form, ddoIssuingDetails: e.target.value })}
                     rows={2}
@@ -1582,9 +1666,11 @@ export default function ContractsPanel({
                     placeholder="Issuing authority, bank, etc."
                   />
                 </label>
-                <label className="block sm:col-span-2">
+                <label className="block sm:col-span-2" htmlFor="contract-form-notes">
                   <span className="text-[10px] font-bold uppercase text-slate-400">Notes</span>
                   <textarea
+                    id="contract-form-notes"
+                    name="notes"
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                     rows={2}

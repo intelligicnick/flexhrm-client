@@ -9,6 +9,9 @@ STAMP=$(date +%Y%m%d-%H%M)
 ZIP_NAME="flexhrm-frontend-static-${STAMP}.zip"
 ZIP_PATH="${ROOT}/${ZIP_NAME}"
 
+echo "==> Syncing shared client-config..."
+node "$(dirname "$0")/sync-client-config.mjs"
+
 echo "==> Building production static bundle (PWA disabled for Hostinger reliability)..."
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 npm run build:hostinger:static

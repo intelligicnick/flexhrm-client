@@ -317,16 +317,21 @@ function EditableCell({
     : "border-slate-200";
   const selectedClass = isSelected ? "ring-2 ring-blue-500 border-blue-400 bg-blue-50/60" : "";
 
-  const cellDataAttrs = {
+  const recordId = resolveEmployeeRecordId(emp);
+  const fieldName = `bulk-${recordId}-${String(field.key)}`;
+  const cellInputAttrs = {
+    id: fieldName,
+    name: fieldName,
+    "aria-label": `${field.label} (${emp.employeeCode || recordId})`,
     "data-bulk-cell": field.key,
-    "data-employee-id": resolveEmployeeRecordId(emp),
+    "data-employee-id": recordId,
   };
 
   if (field.type === "select" || field.type === "boolean" || field.dynamicOptions) {
     return (
       <select
         value={value}
-        {...cellDataAttrs}
+        {...cellInputAttrs}
         onKeyDown={onKeyNavigate}
         onChange={(e) => onChange(e.target.value)}
         className={`${baseClass} ${dirtyClass} ${selectedClass} cursor-pointer`}
@@ -349,7 +354,7 @@ function EditableCell({
     <input
       type={field.type === "number" ? "number" : "text"}
       value={value}
-      {...cellDataAttrs}
+      {...cellInputAttrs}
       onKeyDown={onKeyNavigate}
       onChange={(e) => onChange(e.target.value)}
       className={`${baseClass} ${dirtyClass} ${selectedClass}`}
@@ -820,7 +825,10 @@ export default function BulkEmployeeEditTable({
         <div className="relative flex-1">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
           <input
+            id="bulk-edit-search"
+            name="bulk-edit-search"
             type="text"
+            aria-label="Search employees by code, name, or aadhar"
             placeholder="Search by code, name, or aadhar..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -830,6 +838,9 @@ export default function BulkEmployeeEditTable({
         <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
           <MapPin size={16} className="text-slate-400 mr-1" />
           <select
+            id="bulk-edit-location-filter"
+            name="bulk-edit-location-filter"
+            aria-label="Filter by location"
             value={locationFilter}
             onChange={(e) => setLocationFilter(e.target.value)}
             className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
@@ -845,6 +856,9 @@ export default function BulkEmployeeEditTable({
         <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
           <Briefcase size={16} className="text-slate-400 mr-1" />
           <select
+            id="bulk-edit-role-filter"
+            name="bulk-edit-role-filter"
+            aria-label="Filter by job role"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
             className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
@@ -860,6 +874,9 @@ export default function BulkEmployeeEditTable({
         <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
           <Award size={16} className="text-slate-400 mr-1" />
           <select
+            id="bulk-edit-skill-filter"
+            name="bulk-edit-skill-filter"
+            aria-label="Filter by skill category"
             value={skillFilter}
             onChange={(e) => setSkillFilter(e.target.value)}
             className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
@@ -942,6 +959,7 @@ export default function BulkEmployeeEditTable({
               </label>
               <input
                 id="bulk-fill-text-input"
+                name="bulk-fill-text-input"
                 type={selectedFieldDef?.type === "number" ? "number" : "text"}
                 value={bulkFillText}
                 onChange={(e) => setBulkFillText(e.target.value)}
@@ -1133,6 +1151,7 @@ export default function BulkEmployeeEditTable({
                       const dirty = isCustomFieldDirty(emp, draft, name);
                       const value = getCustomFieldValue(emp, draft, name);
                       const selected = isCellSelected(recordId, columnId);
+                      const fieldInputId = `bulk-${recordId}-custom-${name}`;
                       return (
                         <td
                           key={`${recordId}-${name}`}
@@ -1140,7 +1159,10 @@ export default function BulkEmployeeEditTable({
                           className={`p-1 border-r border-violet-100 ${selected ? "bg-blue-50/40" : ""}`}
                         >
                           <input
+                            id={fieldInputId}
+                            name={fieldInputId}
                             type="text"
+                            aria-label={`${name} (${emp.employeeCode || recordId})`}
                             value={value}
                             data-bulk-cell={columnId}
                             data-employee-id={recordId}
