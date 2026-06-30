@@ -87,32 +87,36 @@ const EMPTY_FORM: CreateContractInput = {
   linkedLocations: [],
 };
 
+function coerceText(value: string | null | undefined): string {
+  return value == null ? "" : String(value);
+}
+
 function contractToFormInput(contract: Contract): CreateContractInput {
   return {
-    contractNo: contract.contractNo,
-    officerName: contract.officerName,
-    officeName: contract.officeName,
-    correspondingOffice: contract.correspondingOffice,
-    fromDate: contract.fromDate,
-    toDate: contract.toDate,
-    companyName: contract.companyName,
-    category: contract.category,
-    contractType: contract.contractType,
-    hasExtension: contract.hasExtension,
-    extensionEndDate: contract.extensionEndDate,
-    bgApplicable: contract.bgApplicable,
-    bgNumber: contract.bgNumber,
+    contractNo: coerceText(contract.contractNo),
+    officerName: coerceText(contract.officerName),
+    officeName: coerceText(contract.officeName),
+    correspondingOffice: coerceText(contract.correspondingOffice),
+    fromDate: coerceText(contract.fromDate),
+    toDate: coerceText(contract.toDate),
+    companyName: coerceText(contract.companyName),
+    category: coerceText(contract.category),
+    contractType: contract.contractType || "manpower",
+    hasExtension: Boolean(contract.hasExtension),
+    extensionEndDate: coerceText(contract.extensionEndDate),
+    bgApplicable: Boolean(contract.bgApplicable),
+    bgNumber: coerceText(contract.bgNumber),
     bgAmount: normalizeAmountString(contract.bgAmount),
-    bgIssuingBank: contract.bgIssuingBank,
-    bgExpiryDate: contract.bgExpiryDate,
-    bgDetails: contract.bgDetails,
-    ddoName: contract.ddoName,
-    ddoIssuingDetails: contract.ddoIssuingDetails,
-    tenderBidNo: contract.tenderBidNo,
+    bgIssuingBank: coerceText(contract.bgIssuingBank),
+    bgExpiryDate: coerceText(contract.bgExpiryDate),
+    bgDetails: coerceText(contract.bgDetails),
+    ddoName: coerceText(contract.ddoName),
+    ddoIssuingDetails: coerceText(contract.ddoIssuingDetails),
+    tenderBidNo: coerceText(contract.tenderBidNo),
     contractValue: normalizeAmountString(contract.contractValue),
-    status: contract.status,
-    notes: contract.notes,
-    entryDate: contract.entryDate,
+    status: contract.status || "active",
+    notes: coerceText(contract.notes),
+    entryDate: coerceText(contract.entryDate),
     linkedLocations: contract.linkedLocations || [],
   };
 }
