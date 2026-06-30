@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Copy, Plus, Search, Trash2, Users } from "lucide-react";
+import { Copy, Plus, RefreshCw, Search, Trash2, Users } from "lucide-react";
 import {
   EmployeeAgentCredential,
   EmployeeSearchResult,
@@ -28,6 +28,7 @@ export default function MonitorEmployeeAgentsPanel({
     hash: string;
   } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const loadCredentials = useCallback(async () => {
@@ -86,6 +87,35 @@ export default function MonitorEmployeeAgentsPanel({
       setError(e instanceof Error ? e.message : "Failed to create credentials");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleRegenerate = async (credential: EmployeeAgentCredential) => {
+    if (readOnly) return;
+    const label = `${credential.employeeName} (${credential.employeeCode})`;
+    if (
+      !confirm(
+        `Regenerate key and hash for ${label}? Monitoring history (screenshots, activity, etc.) will be kept. The desktop agent must reconnect with the new credentials.`,
+      )
+    ) {
+      return;
+    }
+    setRegeneratingId(credential.employeeId);
+    setError("");
+    try {
+      const creds = await monitorApi.createAgentCredential(credential.employeeId);
+      setCreatedCredentials({
+        employeeName: creds.employeeName,
+        employeeCode: creds.employeeCode,
+        key: creds.key,
+        hash: creds.hash,
+      });
+      await loadCredentials();
+      onCredentialsChanged?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to regenerate credentials");
+    } finally {
+      setRegeneratingId(null);
     }
   };
 
@@ -177,7 +207,7 @@ export default function MonitorEmployeeAgentsPanel({
                 <p className="font-semibold text-slate-800">{selectedEmployee.name}</p>
                 <p className="text-slate-500">{selectedEmployee.employeeCode}</p>
                 {selectedEmployee.hasCredential && (
-                  <p className="text-amber-600 mt-1">Existing credentials will be replaced.</p>
+                  <p className="text-amber-600 mt-1">Existing credentials will be replaced. Monitoring history is kept.</p>
                 )}
               </div>
               <button
@@ -220,7 +250,7 @@ export default function MonitorEmployeeAgentsPanel({
             </div>
           </div>
           <p className="text-[10px] text-emerald-700">
-            Install the Flex HRM desktop agent on the employee&apos;s PC and enter these credentials. The agent will automatically link to this employee.
+            Install the Flex HRM desktop agent on the employee&apos;s PC and enter these credentials. The agent will automatically link to this employee. Past screenshots and activity remain available in the monitor dashboard.
           </p>
         </div>
       )}
@@ -253,16 +283,29 @@ export default function MonitorEmployeeAgentsPanel({
                 <td className="px-4 py-2.5 capitalize">{c.status}</td>
                 {!readOnly && (
                   <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      data-no-busy
-                      onClick={() => handleRevoke(c.employeeId, c.employeeName)}
-                      className="inline-flex items-center gap-1 text-red-500 hover:text-red-700 text-[11px] font-semibold"
-                      title="Delete credentials"
-                    >
-                      <Trash2 size={13} />
-                      Delete
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-no-busy
+                        onClick={() => handleRegenerate(c)}
+                        disabled={regeneratingId === c.employeeId}
+                        className="inline-flex items-center gap-1 text-[#ff791a] hover:text-[#e66d17] text-[11px] font-semibold disabled:opacity-50"
+                        title="Regenerate key and hash"
+                      >
+                        <RefreshCw size={13} className={regeneratingId === c.employeeId ? "animate-spin" : ""} />
+                        {regeneratingId === c.employeeId ? "Regenerating..." : "Regenerate"}
+                      </button>
+                      <button
+                        type="button"
+                        data-no-busy
+                        onClick={() => handleRevoke(c.employeeId, c.employeeName)}
+                        className="inline-flex items-center gap-1 text-red-500 hover:text-red-700 text-[11px] font-semibold"
+                        title="Delete credentials"
+                      >
+                        <Trash2 size={13} />
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 )}
               </tr>
