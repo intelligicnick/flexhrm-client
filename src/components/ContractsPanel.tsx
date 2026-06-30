@@ -29,6 +29,7 @@ import {
 } from "../types";
 import {
   parseFlexibleDateMs,
+  parseFlexibleDateToIso,
   matchesIsoDateRange,
   formatAppDate,
 } from "../lib/date-helpers";
@@ -101,19 +102,28 @@ function contractToFormInput(contract: Contract): CreateContractInput {
     extensionEndDate: contract.extensionEndDate,
     bgApplicable: contract.bgApplicable,
     bgNumber: contract.bgNumber,
-    bgAmount: contract.bgAmount,
+    bgAmount: normalizeAmountString(contract.bgAmount),
     bgIssuingBank: contract.bgIssuingBank,
     bgExpiryDate: contract.bgExpiryDate,
     bgDetails: contract.bgDetails,
     ddoName: contract.ddoName,
     ddoIssuingDetails: contract.ddoIssuingDetails,
     tenderBidNo: contract.tenderBidNo,
-    contractValue: contract.contractValue,
+    contractValue: normalizeAmountString(contract.contractValue),
     status: contract.status,
     notes: contract.notes,
     entryDate: contract.entryDate,
     linkedLocations: contract.linkedLocations || [],
   };
+}
+
+function normalizeAmountString(value: string | undefined | null): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  const cleaned = trimmed.replace(/[^0-9.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return trimmed;
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : trimmed;
 }
 
 function mergeLinkedBgRecord(
@@ -146,7 +156,9 @@ function mergeLinkedBgRecord(
     bgNumber: bgRecord.number || form.bgNumber,
     bgAmount: bgRecord.amount || form.bgAmount,
     bgIssuingBank: bgRecord.issuingBank || form.bgIssuingBank,
-    bgExpiryDate: bgRecord.expiryDate || form.bgExpiryDate,
+    bgExpiryDate:
+      parseFlexibleDateToIso(bgRecord.expiryDate || "") ||
+      parseFlexibleDateToIso(form.bgExpiryDate || ""),
     bgDetails: bgRecord.notes || form.bgDetails,
   };
 }
@@ -671,10 +683,10 @@ export default function ContractsPanel({
 
       const formData = mergeLinkedBgRecord(contractToFormInput(freshContract), bgRecords);
       setForm(formData);
-      setFromDateIso(freshContract.fromDate || "");
-      setToDateIso(freshContract.toDate || "");
-      setExtensionEndIso(freshContract.extensionEndDate || "");
-      setBgExpiryIso(formData.bgExpiryDate || "");
+      setFromDateIso(parseFlexibleDateToIso(freshContract.fromDate || ""));
+      setToDateIso(parseFlexibleDateToIso(freshContract.toDate || ""));
+      setExtensionEndIso(parseFlexibleDateToIso(freshContract.extensionEndDate || ""));
+      setBgExpiryIso(parseFlexibleDateToIso(formData.bgExpiryDate || ""));
       setLocationToAdd("");
       setModalOpen(true);
     } catch {
@@ -716,11 +728,18 @@ export default function ContractsPanel({
 
   const buildPayload = (): CreateContractInput => ({
     ...form,
-    fromDate: fromDateIso || form.fromDate,
-    toDate: toDateIso || form.toDate,
-    extensionEndDate: form.hasExtension ? extensionEndIso || form.extensionEndDate : "",
-    bgExpiryDate: form.bgApplicable ? bgExpiryIso || form.bgExpiryDate : "",
-    entryDate: form.entryDate || new Date().toISOString().slice(0, 10),
+    fromDate: parseFlexibleDateToIso(fromDateIso || form.fromDate),
+    toDate: parseFlexibleDateToIso(toDateIso || form.toDate),
+    extensionEndDate: form.hasExtension
+      ? parseFlexibleDateToIso(extensionEndIso || form.extensionEndDate)
+      : "",
+    bgExpiryDate: form.bgApplicable
+      ? parseFlexibleDateToIso(bgExpiryIso || form.bgExpiryDate)
+      : "",
+    contractValue: normalizeAmountString(form.contractValue),
+    bgAmount: form.bgApplicable ? normalizeAmountString(form.bgAmount) : "",
+    entryDate:
+      parseFlexibleDateToIso(form.entryDate) || new Date().toISOString().slice(0, 10),
     linkedLocations: form.linkedLocations || [],
   });
 

@@ -573,7 +573,12 @@ export function composeTenderEndDateFromDateTimeLocal(value: string): string {
   return composeTenderEndDate(date, time.slice(0, 5));
 }
 
-export function parseTenderFiledDateToPicker(value: string): string {
+/** Parse flexible storage dates (DD/MM/YYYY, DD-MM-YYYY, ISO, embedded text) into YYYY-MM-DD for date inputs. */
+export function parseFlexibleDateToIso(value: string): string {
   const ms = parseFlexibleDateMs(value);
   return ms === null ? "" : toIsoDate(new Date(ms));
+}
+
+export function parseTenderFiledDateToPicker(value: string): string {
+  return parseFlexibleDateToIso(value);
 }

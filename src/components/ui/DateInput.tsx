@@ -1,5 +1,5 @@
 import React from "react";
-import { DATE_INPUT_CLASS } from "../../lib/date-helpers";
+import { DATE_INPUT_CLASS, parseFlexibleDateToIso } from "../../lib/date-helpers";
 
 export interface DateInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "type"> {
@@ -12,15 +12,21 @@ export function DateInput({
   inlineLabel,
   id,
   className = "",
+  value,
   ...props
 }: DateInputProps) {
   const inputId = id || props.name;
+  const isoValue =
+    value === undefined || value === null
+      ? undefined
+      : parseFlexibleDateToIso(String(value));
 
   const input = (
     <input
       id={inputId}
       type="date"
       className={[DATE_INPUT_CLASS, className].filter(Boolean).join(" ")}
+      value={isoValue}
       {...props}
     />
   );
