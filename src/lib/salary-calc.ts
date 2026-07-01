@@ -1,3 +1,5 @@
+import { getDaysInMonthStatic } from "./date-helpers";
+
 export type SalaryAnchor = "gross" | "daily" | "basic";
 
 export type SalaryWageMode = "monthly" | "daily";
@@ -33,14 +35,34 @@ export function isSalaryCascadeField(field: string): field is SalaryCascadeField
   return SALARY_CASCADE_FIELDS.has(field as SalaryCascadeField);
 }
 
+export function isCalendarMonthWorkingCycle(cycle: string | undefined): boolean {
+  if (!cycle) return false;
+  return cycle.includes("30") || cycle.includes("31") || /no off/i.test(cycle);
+}
+
 export function getWorkingDaysCount(cycle: string | undefined): number {
   if (!cycle) return 26;
-  if (cycle.includes("30") || cycle.includes("31")) return 30;
+  if (isCalendarMonthWorkingCycle(cycle)) return 30;
   const match = cycle.match(/(\d+)\s*Days?/i);
   if (match) return parseInt(match[1], 10);
   if (cycle.includes("22")) return 22;
   if (cycle.includes("26")) return 26;
   return 26;
+}
+
+/**
+ * Denominator for monthly-wage proration: fixed cycle days (22/26) or actual
+ * calendar days in the month for the 30/31 (no off) cycle.
+ */
+export function getMonthlySalaryProrationDays(
+  workingDaysType: string | undefined,
+  month: string,
+): number {
+  if (isCalendarMonthWorkingCycle(workingDaysType)) {
+    const days = getDaysInMonthStatic(month);
+    return days > 0 ? days : 30;
+  }
+  return getWorkingDaysCount(workingDaysType);
 }
 
 export function computeEsic(gross: number, esicLimit: number): string {

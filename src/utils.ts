@@ -8,6 +8,7 @@ import { Employee, EXCEL_ROW_HEADERS } from "./types";
 import { getDaysInMonthStatic } from "./lib/date-helpers";
 import { countWorkingDaysInMonth } from "./lib/attendance-helpers";
 import {
+  getMonthlySalaryProrationDays,
   getWorkingDaysCount,
   inferSalaryWageMode,
   type SalaryWageMode,
@@ -517,7 +518,8 @@ function hasRecordedAttendance(empMonthAttendance: Record<string | number, strin
 
 /**
  * Prorate gross and basic by attendance using the employee's wage mode.
- * Monthly: (monthly amount / calendar days in month) * present days.
+ * Monthly: (monthly amount / cycle days) * present days — 22/26 fixed cycles, or
+ * actual calendar days in the month for the 30/31 (no off) cycle.
  * Daily: present days * daily wage (basic keeps the gross/basic ratio).
  */
 export function computeProratedGrossAndBasic(
@@ -547,14 +549,14 @@ export function computeProratedGrossAndBasic(
     return { gross, basic };
   }
 
-  const calendarDays = getDaysInMonthStatic(month);
-  if (calendarDays <= 0) {
+  const prorationDays = getMonthlySalaryProrationDays(emp.workingDaysType, month);
+  if (prorationDays <= 0) {
     return { gross: rawGross, basic: rawBasic };
   }
 
   return {
-    gross: Math.round((rawGross / calendarDays) * presents),
-    basic: Math.round((rawBasic / calendarDays) * presents),
+    gross: Math.round((rawGross / prorationDays) * presents),
+    basic: Math.round((rawBasic / prorationDays) * presents),
   };
 }
 

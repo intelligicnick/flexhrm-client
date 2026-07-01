@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applySalaryFieldChange,
   deriveSalaryFromAnchor,
+  getMonthlySalaryProrationDays,
   getWorkingDaysCount,
   toSalaryFieldValues,
   applyWageModeSwitch,
@@ -22,6 +23,15 @@ describe("getWorkingDaysCount", () => {
     expect(getWorkingDaysCount("22 Days (Sat/Sun Off)")).toBe(22);
     expect(getWorkingDaysCount("26 Days (Sun Off)")).toBe(26);
     expect(getWorkingDaysCount("30/31 Days (No Off)")).toBe(30);
+  });
+});
+
+describe("getMonthlySalaryProrationDays", () => {
+  it("uses fixed cycle days for 22/26 and calendar days for 30/31", () => {
+    expect(getMonthlySalaryProrationDays("26 Days (Sun Off)", "June 2026")).toBe(26);
+    expect(getMonthlySalaryProrationDays("22 Days (Sat/Sun Off)", "June 2026")).toBe(22);
+    expect(getMonthlySalaryProrationDays("30/31 Days (No Off)", "April 2026")).toBe(30);
+    expect(getMonthlySalaryProrationDays("30/31 Days (No Off)", "May 2026")).toBe(31);
   });
 });
 

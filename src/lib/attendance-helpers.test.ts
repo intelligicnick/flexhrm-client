@@ -100,7 +100,8 @@ describe("getSalaryProrationDays", () => {
   it("maps working-days cycle to salary denominator", () => {
     expect(getSalaryProrationDays("26 Days (Sun Off)")).toBe(26);
     expect(getSalaryProrationDays("22 Days (Sat/Sun Off)")).toBe(22);
-    expect(getSalaryProrationDays("30/31 Days (No Off)")).toBe(30);
+    expect(getSalaryProrationDays("30/31 Days (No Off)", "April 2026")).toBe(30);
+    expect(getSalaryProrationDays("30/31 Days (No Off)", "May 2026")).toBe(31);
   });
 });
 

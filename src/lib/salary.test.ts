@@ -53,12 +53,48 @@ describe("computeProratedGrossAndBasic", () => {
     attendance25[d] = d <= 25 ? "P" : "A";
   }
 
-  it("prorates monthly wage by calendar days in the month", () => {
+  it("prorates monthly wage by 26-day working cycle", () => {
+    const emp = {
+      grossSalary: 16392,
+      basicSalary: 8196,
+      dailyWage: 630.46,
+      workingDaysType: "26 Days (Sun Off)",
+      salaryWageMode: "monthly" as const,
+    };
+    const attendance26: Record<number, string> = {};
+    for (let d = 1; d <= 30; d++) {
+      attendance26[d] = d <= 26 ? "P" : "A";
+    }
+    expect(
+      computeProratedGrossAndBasic(emp, 26, attendance26, "June 2026").gross,
+    ).toBe(16392);
+    expect(
+      computeProratedGrossAndBasic(emp, 10, attendance26, "June 2026").gross,
+    ).toBe(Math.round((16392 / 26) * 10));
+  });
+
+  it("prorates monthly wage by 22-day working cycle", () => {
+    const emp = {
+      grossSalary: 22000,
+      basicSalary: 11000,
+      dailyWage: 0,
+      workingDaysType: "22 Days (Sat/Sun Off)",
+      salaryWageMode: "monthly" as const,
+    };
+    expect(
+      computeProratedGrossAndBasic(emp, 22, attendance25, "January 2026").gross,
+    ).toBe(22000);
+    expect(
+      computeProratedGrossAndBasic(emp, 11, attendance25, "January 2026").gross,
+    ).toBe(Math.round((22000 / 22) * 11));
+  });
+
+  it("prorates monthly wage by calendar days for 30/31 cycle", () => {
     const emp = {
       grossSalary: 15000,
       basicSalary: 7500,
       dailyWage: 0,
-      workingDaysType: "26 Days (Sun Off)",
+      workingDaysType: "30/31 Days (No Off)",
       salaryWageMode: "monthly" as const,
     };
     expect(

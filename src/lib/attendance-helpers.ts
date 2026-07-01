@@ -1,7 +1,7 @@
 import { Employee } from "../types";
 import { getDaysInMonthStatic, MONTH_NAME_LIST } from "./date-helpers";
 import { isEmployeeExitedOnDayStatic } from "./employee-helpers";
-import { getWorkingDaysCount } from "./salary-calc";
+import { getMonthlySalaryProrationDays } from "./salary-calc";
 
 /** Day of week for a calendar day in "Month YYYY" (0 = Sunday). */
 export function getDayOfWeekForMonthDay(monthStr: string, dayNum: number): number {
@@ -141,9 +141,15 @@ export function employeeMatchesAttendanceRecordFilter(
   return true;
 }
 
-/** Working-days denominator for salary proration from the employee's cycle. */
-export function getSalaryProrationDays(workingDaysType: string | undefined): number {
-  return getWorkingDaysCount(workingDaysType);
+/** Working-days denominator for monthly salary proration from the employee's cycle. */
+export function getSalaryProrationDays(
+  workingDaysType: string | undefined,
+  month?: string,
+): number {
+  if (month) {
+    return getMonthlySalaryProrationDays(workingDaysType, month);
+  }
+  return getMonthlySalaryProrationDays(workingDaysType, "January 2026");
 }
 
 export type BulkAttendanceDayMeta = {
