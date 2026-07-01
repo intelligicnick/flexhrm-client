@@ -1150,7 +1150,7 @@ export default function EmployeeFormModal({
                         name="basicSalary"
                         value={formData.basicSalary || ""}
                         onChange={handleBasicSalaryChange}
-                        placeholder="Calculates as 50% automatically"
+                        placeholder={`Default ${basicSalaryPercent}% of gross — edit to override`}
                         className="w-full pl-9 pr-3 py-1.5 border border-slate-250 rounded hover:border-slate-350 focus:border-blue-500 focus:outline-none text-xs text-slate-800 transition"
                         id="field-basic-salary"
                       />
@@ -1265,8 +1265,10 @@ export default function EmployeeFormModal({
                     const isCompliant = isPfEsicCompliant(formData, locationCompliance);
                     const isPtEnabled = isProfessionalTaxApplicable(formData, locationPtEnabled);
                     const previewGross = Number(formData.grossSalary) || 0;
+                    const previewBasic = Number(formData.basicSalary) || 0;
                     const { pfWage, employeePf, employerPf } = calculatePfAmounts(previewGross, {
                       mode: formData.pfCalculationMode,
+                      monthlyBasic: previewBasic,
                       isCompliant,
                     });
                     const ptPreview = calculateProfessionalTax(previewGross, {
@@ -1276,7 +1278,7 @@ export default function EmployeeFormModal({
                     const modeLabel =
                       resolvePfCalculationMode(formData.pfCalculationMode) === "gross"
                         ? "PF wage = this month's gross salary"
-                        : "PF wage = gross if below ₹15,000, else ₹15,000";
+                        : "PF wage = basic if below ₹15,000, else ₹15,000";
                     return (
                       <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
                         <strong>{modeLabel}.</strong>

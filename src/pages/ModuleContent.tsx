@@ -2074,6 +2074,7 @@ export default function ModuleContent() {
           
                                           const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
                                             mode: e.pfCalculationMode,
+                                            monthlyBasic: basic,
                                             isCompliant,
                                           });
                                           const isEsicCovered = isEmployeeEsicCovered(gross, esicEligibilityLimit, isCompliant, e.esic);
@@ -2684,6 +2685,7 @@ export default function ModuleContent() {
           
                                            const { employeePf: empPf, employerPf: erPf } = calculatePfAmounts(gross, {
                                              mode: emp.pfCalculationMode,
+                                             monthlyBasic: basic,
                                              isCompliant,
                                            });
                                            const isEsicCovered = isEmployeeEsicCovered(gross, esicEligibilityLimit, isCompliant, emp.esic);

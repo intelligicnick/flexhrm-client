@@ -168,7 +168,27 @@ describe("calculatePfAmounts", () => {
     expect(employerPf).toBe(2600);
   });
 
-  it("caps PF wage at statutory ceiling", () => {
+  it("caps PF wage at statutory ceiling when basic is at or above ceiling", () => {
+    const { pfWage, employeePf } = calculatePfAmounts(25000, {
+      mode: "ceiling_15000",
+      monthlyBasic: 16000,
+      isCompliant: true,
+    });
+    expect(pfWage).toBe(PF_STATUTORY_CEILING);
+    expect(employeePf).toBe(1800);
+  });
+
+  it("uses basic for ceiling mode when basic is below ceiling", () => {
+    const { pfWage, employeePf } = calculatePfAmounts(25000, {
+      mode: "ceiling_15000",
+      monthlyBasic: 12000,
+      isCompliant: true,
+    });
+    expect(pfWage).toBe(12000);
+    expect(employeePf).toBe(1440);
+  });
+
+  it("falls back to gross for ceiling mode when basic is not provided", () => {
     const { pfWage, employeePf } = calculatePfAmounts(25000, {
       mode: "ceiling_15000",
       isCompliant: true,

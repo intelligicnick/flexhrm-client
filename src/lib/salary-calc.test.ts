@@ -165,6 +165,115 @@ describe("applySalaryFieldChange", () => {
     expect(values.basicSalary).toBe(12000);
   });
 
+  it("preserves manual basic when gross or working days change", () => {
+    let values = base();
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "grossSalary",
+      "26000",
+      50,
+      21000,
+    ));
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "basicSalary",
+      "12000",
+      50,
+      21000,
+    ));
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "grossSalary",
+      "30000",
+      50,
+      21000,
+    ));
+
+    expect(values.grossSalary).toBe(30000);
+    expect(values.basicSalary).toBe(12000);
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "workingDaysType",
+      "22 Days (Sat/Sun Off)",
+      50,
+      21000,
+    ));
+
+    expect(values.basicSalary).toBe(12000);
+    expect(values.dailyWage).toBeCloseTo(1363.64, 2);
+  });
+
+  it("allows overriding auto-calculated basic with a custom amount", () => {
+    let values = base();
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "grossSalary",
+      "14000",
+      50,
+      21000,
+    ));
+    expect(values.basicSalary).toBe(7000);
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "basicSalary",
+      "8000",
+      50,
+      21000,
+    ));
+    expect(values.basicSalary).toBe(8000);
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "grossSalary",
+      "15000",
+      50,
+      21000,
+    ));
+    expect(values.basicSalary).toBe(8000);
+
+    ({ values } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "basicSalary",
+      "9000",
+      50,
+      21000,
+    ));
+    expect(values.basicSalary).toBe(9000);
+  });
+
+  it("infers manual basic for existing records that differ from configured percent", () => {
+    const values = toSalaryFieldValues({
+      grossSalary: 26000,
+      basicSalary: 12000,
+      dailyWage: 1000,
+      workingDaysType: "26 Days (Sun Off)",
+      esic: "No",
+    });
+
+    const { values: next } = applySalaryFieldChange(
+      values,
+      "monthly",
+      "grossSalary",
+      "28000",
+      50,
+      21000,
+    );
+
+    expect(next.basicSalary).toBe(12000);
+  });
+
   it("preserves manual ESIC selection when salary fields are recalculated", () => {
     let values = toSalaryFieldValues({
       ...base(),

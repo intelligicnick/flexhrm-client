@@ -633,13 +633,21 @@ function toNonNegativeNumber(val: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Monthly PF wage from actual gross (already prorated for the pay month when applicable). */
-export function calculatePfWage(monthlyGross: number, mode?: string | null): number {
+/** Monthly PF wage. Ceiling mode uses basic (capped at ₹15,000); gross mode uses gross. */
+export function calculatePfWage(
+  monthlyGross: number,
+  mode?: string | null,
+  monthlyBasic?: number | null,
+): number {
   const gross = toNonNegativeNumber(monthlyGross);
   if (resolvePfCalculationMode(mode) === "gross") {
     return gross;
   }
-  return gross >= PF_STATUTORY_CEILING ? PF_STATUTORY_CEILING : gross;
+  const basic =
+    monthlyBasic !== undefined && monthlyBasic !== null
+      ? toNonNegativeNumber(monthlyBasic)
+      : gross;
+  return basic >= PF_STATUTORY_CEILING ? PF_STATUTORY_CEILING : basic;
 }
 
 export interface PfAmounts {
@@ -652,6 +660,7 @@ export function calculatePfAmounts(
   monthlyGross: number,
   options: {
     mode?: string | null;
+    monthlyBasic?: number | null;
     isCompliant?: boolean;
     employeePfRate?: number;
     employerPfRate?: number;
@@ -659,6 +668,7 @@ export function calculatePfAmounts(
 ): PfAmounts {
   const {
     mode,
+    monthlyBasic,
     isCompliant = true,
     employeePfRate = EMPLOYEE_PF_RATE,
     employerPfRate = EMPLOYER_PF_RATE,
@@ -668,7 +678,7 @@ export function calculatePfAmounts(
     return { pfWage: 0, employeePf: 0, employerPf: 0 };
   }
 
-  const pfWage = calculatePfWage(monthlyGross, mode);
+  const pfWage = calculatePfWage(monthlyGross, mode, monthlyBasic);
   return {
     pfWage,
     employeePf: Math.round(pfWage * employeePfRate),

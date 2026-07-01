@@ -127,14 +127,16 @@ export default function EmployeeViewModal({
     const isCompliant = isPfEsicCompliant(employee, complianceMap);
     const isPtEnabled = isProfessionalTaxApplicable(employee, ptMap);
     const gross = Number(employee.grossSalary) || 0;
+    const basic = Number(employee.basicSalary) || 0;
     const { pfWage, employeePf, employerPf } = calculatePfAmounts(gross, {
       mode: employee.pfCalculationMode,
+      monthlyBasic: basic,
       isCompliant,
     });
     const pfModeLabel =
       employee.pfCalculationMode === "gross"
         ? "PF on gross salary"
-        : "PF with ₹15,000 ceiling";
+        : "PF on basic salary (capped at ₹15,000)";
     return { isLocCompliant, isLocPt, isCompliant, isPtEnabled, gross, pfWage, employeePf, employerPf, pfModeLabel };
   }, [employee]);
 

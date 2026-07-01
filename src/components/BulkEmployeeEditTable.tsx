@@ -187,6 +187,7 @@ function isSalaryInputEditable(
   fieldKey: keyof Employee,
   wageMode: SalaryWageMode,
 ): boolean {
+  if (fieldKey === "basicSalary") return true;
   if (fieldKey === "grossSalary") return wageMode === "monthly";
   if (fieldKey === "dailyWage") return wageMode === "daily";
   return false;
