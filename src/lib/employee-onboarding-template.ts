@@ -20,7 +20,7 @@ function excelColumnLetter(col: number): string {
 }
 
 function workingDaysExcelExpr(cellRef: string): string {
-  return `IF(ISNUMBER(SEARCH("30",${cellRef})),30,IF(ISNUMBER(SEARCH("22",${cellRef})),22,26))`;
+  return `IF(${cellRef}="","",IF(ISNUMBER(SEARCH("30",${cellRef})),30,IF(ISNUMBER(SEARCH("22",${cellRef})),22,26)))`;
 }
 
 function applySalaryFormulas(
@@ -45,19 +45,22 @@ function applySalaryFormulas(
   const grossRef = `${excelColumnLetter(grossCol)}${row}`;
   const daysExpr = workingDaysExcelExpr(workingDaysRef);
   const basicRatio = basicSalaryPercent / 100;
-
-  ws.getCell(row, wageModeCol).value = "monthly";
+  const hasDays = `${daysExpr}<>""`;
+  const isMonthly = `LOWER(${wageModeRef})="monthly"`;
+  const isDaily = `LOWER(${wageModeRef})="daily"`;
+  const hasGross = `AND(ISNUMBER(${grossRef}),${grossRef}>0)`;
+  const hasDaily = `AND(ISNUMBER(${dailyRef}),${dailyRef}>0)`;
 
   ws.getCell(row, dailyCol).value = {
-    formula: `IF(OR(LOWER(${wageModeRef})="monthly",${wageModeRef}=""),IF(${grossRef}>0,ROUND(${grossRef}/(${daysExpr}),2),""),"")`,
+    formula: `IF(${wageModeRef}="","",IF(${isMonthly},IF(AND(${hasGross},${hasDays}),ROUND(${grossRef}/${daysExpr},2),""),IF(${isDaily},IF(${hasDaily},${dailyRef},""),"")))`,
   };
 
   ws.getCell(row, grossCol).value = {
-    formula: `IF(LOWER(${wageModeRef})="daily",IF(${dailyRef}>0,ROUND(${dailyRef}*(${daysExpr}),0),""),"")`,
+    formula: `IF(${wageModeRef}="","",IF(${isDaily},IF(AND(${hasDaily},${hasDays}),ROUND(${dailyRef}*${daysExpr},0),""),IF(${isMonthly},IF(${hasGross},${grossRef},""),"")))`,
   };
 
   ws.getCell(row, basicCol).value = {
-    formula: `IF(${grossRef}>0,ROUND(${grossRef}*${basicRatio},0),IF(${dailyRef}>0,ROUND(${dailyRef}*(${daysExpr})*${basicRatio},0),""))`,
+    formula: `IF(AND(${hasGross}),ROUND(${grossRef}*${basicRatio},0),IF(AND(${hasDaily},${hasDays}),ROUND(${dailyRef}*${daysExpr}*${basicRatio},0),""))`,
   };
 }
 

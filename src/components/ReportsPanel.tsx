@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useHRMS } from "../context/HRMSContext";
 import { Button } from "./ui/Button";
+import SearchableMultiSelect from "./ui/SearchableMultiSelect";
 import { getEmployeeHeaderValue } from "../utils";
 import {
   EXCEL_ROW_HEADERS,
@@ -119,9 +120,7 @@ export default function ReportsPanel() {
     reportEmploymentFilter,
     reportSkillFilters,
     reportRoleFilters,
-    isReportLocDropdownOpen,
     isSkillDropdownOpen,
-    isRoleDropdownOpen,
     reportSearchQuery,
     selectedReportEmployeeIds,
     reportLocationExportLabel,
@@ -149,9 +148,7 @@ export default function ReportsPanel() {
     setReportEmploymentFilter,
     setReportSkillFilters,
     setReportRoleFilters,
-    setIsReportLocDropdownOpen,
     setIsSkillDropdownOpen,
-    setIsRoleDropdownOpen,
     setReportSearchQuery,
     setSelectedReportEmployeeIds,
   } = useHRMS();
@@ -163,12 +160,6 @@ export default function ReportsPanel() {
     [registeredJobRoles, customRoles],
   );
 
-  const closeOtherDropdowns = (target: "location" | "skill" | "role") => {
-    if (target !== "location") setIsReportLocDropdownOpen(false);
-    if (target !== "skill") setIsSkillDropdownOpen(false);
-    if (target !== "role") setIsRoleDropdownOpen(false);
-  };
-
   const exportData =
     selectedReportEmployeeIds.length > 0
       ? filteredReportEmployees.filter((emp) => selectedReportEmployeeIds.includes(emp.id))
@@ -176,8 +167,7 @@ export default function ReportsPanel() {
 
   const canExport = filteredReportEmployees.length > 0 && selectedReportColumns.length > 0;
   const previewRows = filteredReportEmployees.slice(0, 50);
-  const isAnyReportDropdownOpen =
-    isReportLocDropdownOpen || isSkillDropdownOpen || isRoleDropdownOpen;
+  const isAnyReportDropdownOpen = isSkillDropdownOpen;
 
   const toggleColumnGroup = (groupHeaders: readonly string[], isAllChecked: boolean) => {
     if (isAllChecked) {
@@ -257,7 +247,6 @@ export default function ReportsPanel() {
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Filters — always visible */}
           <section
             className={[
               "rounded-xl border border-slate-200 bg-slate-50/60 relative",
@@ -326,22 +315,14 @@ export default function ReportsPanel() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <MultiSelectDropdown
+                <SearchableMultiSelect
                   label="Branch / Location"
                   placeholder="All locations"
                   options={customLocations}
                   selected={reportLocFilters}
-                  isOpen={isReportLocDropdownOpen}
-                  onToggle={() => {
-                    closeOtherDropdowns("location");
-                    setIsReportLocDropdownOpen(!isReportLocDropdownOpen);
-                  }}
-                  onClear={() => setReportLocFilters([])}
-                  onToggleOption={(loc) => {
-                    setReportLocFilters((prev) =>
-                      prev.includes(loc) ? prev.filter((item) => item !== loc) : [...prev, loc],
-                    );
-                  }}
+                  onChange={setReportLocFilters}
+                  containerId="report-location-filter"
+                  buttonClassName="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#ff791a]/30 focus:border-[#ff791a] text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
                 />
 
                 <div className="space-y-1.5">
@@ -368,10 +349,7 @@ export default function ReportsPanel() {
                   options={[...SKILL_FILTER_OPTIONS]}
                   selected={reportSkillFilters}
                   isOpen={isSkillDropdownOpen}
-                  onToggle={() => {
-                    closeOtherDropdowns("skill");
-                    setIsSkillDropdownOpen(!isSkillDropdownOpen);
-                  }}
+                  onToggle={() => setIsSkillDropdownOpen(!isSkillDropdownOpen)}
                   onClear={() => setReportSkillFilters([])}
                   onToggleOption={(cat) => {
                     setReportSkillFilters((prev) =>
@@ -380,22 +358,14 @@ export default function ReportsPanel() {
                   }}
                 />
 
-                <MultiSelectDropdown
+                <SearchableMultiSelect
                   label="Job role"
                   placeholder="All roles"
                   options={roleOptions}
                   selected={reportRoleFilters}
-                  isOpen={isRoleDropdownOpen}
-                  onToggle={() => {
-                    closeOtherDropdowns("role");
-                    setIsRoleDropdownOpen(!isRoleDropdownOpen);
-                  }}
-                  onClear={() => setReportRoleFilters([])}
-                  onToggleOption={(role) => {
-                    setReportRoleFilters((prev) =>
-                      prev.includes(role) ? prev.filter((item) => item !== role) : [...prev, role],
-                    );
-                  }}
+                  onChange={setReportRoleFilters}
+                  containerId="report-role-filter"
+                  buttonClassName="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#ff791a]/30 focus:border-[#ff791a] text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
                 />
               </div>
 
@@ -541,7 +511,6 @@ export default function ReportsPanel() {
             </div>
           </section>
 
-          {/* Columns + Preview side by side (preview can expand to full width) */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start min-w-0">
             {!isPreviewExpanded && (
             <section className="xl:col-span-4 rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col max-h-[560px]">

@@ -216,7 +216,7 @@ export default function AdminDashboardPage() {
     setTenderDeadlineFilter,
     setAttendanceRecordFilter,
     setAttendanceSubView,
-    setEmployeeListRoleFilter,
+    setEmployeeListRoleFilters,
     setEmployeeListStatusFilter,
     setActivePimSubTab,
     exitEligibleEmployees,
@@ -242,7 +242,7 @@ export default function AdminDashboardPage() {
   };
 
   const openEmployeesByRole = (role: string) => {
-    setEmployeeListRoleFilter(role);
+    setEmployeeListRoleFilters([role]);
     setActivePimSubTab("Employee List");
     navigateToTab("Employees");
   };
@@ -722,7 +722,7 @@ export default function AdminDashboardPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setEmployeeListRoleFilter("");
+                      setEmployeeListRoleFilters([]);
                       setActivePimSubTab("Employee List");
                       navigateToTab("Employees");
                     }}
@@ -734,7 +734,7 @@ export default function AdminDashboardPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setEmployeeListRoleFilter("");
+                      setEmployeeListRoleFilters([]);
                       setActivePimSubTab("Employee List");
                       navigateToTab("Employees");
                     }}

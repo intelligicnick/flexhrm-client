@@ -24,6 +24,8 @@ import {
   BulkEditReviewEntry,
 } from "../lib/employee-bulk-edit-fields";
 import { normalizeSkillCategory } from "../utils";
+import SearchableMultiSelect from "./ui/SearchableMultiSelect";
+import { matchesMultiSelectFilter } from "../lib/filter-helpers";
 import { inferSalaryWageMode, type SalaryWageMode } from "../lib/salary-calc";
 import {
   getEmployeeWageModeRowClassName,
@@ -377,8 +379,8 @@ export default function BulkEmployeeEditTable({
   isApplying = false,
 }: BulkEmployeeEditTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
+  const [locationFilters, setLocationFilters] = useState<string[]>([]);
+  const [roleFilters, setRoleFilters] = useState<string[]>([]);
   const [skillFilter, setSkillFilter] = useState("");
   const [showReviewDialog, setShowReviewDialog] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
@@ -430,11 +432,11 @@ export default function BulkEmployeeEditTable({
           e.aadharNo?.includes(q),
       );
     }
-    if (locationFilter) {
-      result = result.filter((e) => e.location === locationFilter);
+    if (locationFilters.length > 0) {
+      result = result.filter((e) => matchesMultiSelectFilter(e.location, locationFilters));
     }
-    if (roleFilter) {
-      result = result.filter((e) => (e.role || "") === roleFilter);
+    if (roleFilters.length > 0) {
+      result = result.filter((e) => matchesMultiSelectFilter(e.role, roleFilters));
     }
     if (skillFilter) {
       if (skillFilter === "__unassigned__") {
@@ -448,7 +450,7 @@ export default function BulkEmployeeEditTable({
       }
     }
     return result.sort((a, b) => a.srNo - b.srNo);
-  }, [employees, searchTerm, locationFilter, roleFilter, skillFilter]);
+  }, [employees, searchTerm, locationFilters, roleFilters, skillFilter]);
 
   const selectedEmployeeIds = useMemo(
     () =>
@@ -750,7 +752,7 @@ export default function BulkEmployeeEditTable({
 
   useEffect(() => {
     clearColumnSelection();
-  }, [locationFilter, roleFilter, skillFilter, searchTerm, clearColumnSelection]);
+  }, [locationFilters, roleFilters, skillFilter, searchTerm, clearColumnSelection]);
 
   const { employeeCount, fieldCount } = countDraftChanges(employees, draftChanges);
   const reviewEntries = useMemo(
@@ -836,41 +838,29 @@ export default function BulkEmployeeEditTable({
             className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
           />
         </div>
-        <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
-          <MapPin size={16} className="text-slate-400 mr-1" />
-          <select
-            id="bulk-edit-location-filter"
-            name="bulk-edit-location-filter"
-            aria-label="Filter by location"
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
-          >
-            <option value="">All Locations</option>
-            {locations.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 min-w-[150px]">
+          <MapPin size={16} className="text-slate-400 mr-1 shrink-0" />
+          <SearchableMultiSelect
+            compact
+            placeholder="All Locations"
+            options={locations}
+            selected={locationFilters}
+            onChange={setLocationFilters}
+            className="flex-1 min-w-0"
+            containerId="bulk-edit-location-filter"
+          />
         </div>
-        <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
-          <Briefcase size={16} className="text-slate-400 mr-1" />
-          <select
-            id="bulk-edit-role-filter"
-            name="bulk-edit-role-filter"
-            aria-label="Filter by job role"
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="py-2 pr-3 bg-transparent border-0 text-xs focus:outline-none cursor-pointer"
-          >
-            <option value="">All Job Roles</option>
-            {roles.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 min-w-[150px]">
+          <Briefcase size={16} className="text-slate-400 mr-1 shrink-0" />
+          <SearchableMultiSelect
+            compact
+            placeholder="All Job Roles"
+            options={roles}
+            selected={roleFilters}
+            onChange={setRoleFilters}
+            className="flex-1 min-w-0"
+            containerId="bulk-edit-role-filter"
+          />
         </div>
         <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2">
           <Award size={16} className="text-slate-400 mr-1" />

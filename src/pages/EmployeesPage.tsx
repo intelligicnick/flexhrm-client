@@ -149,7 +149,8 @@ export default function EmployeesPage() {
     roleError,
     roleSuccess,
     activePimSubTab,
-    employeeListRoleFilter,
+    employeeListRoleFilters,
+    employeeListLocationFilters,
     employeeListStatusFilter,
     exitEligibleEmployees,
     sidebarSearch,
@@ -212,7 +213,7 @@ export default function EmployeesPage() {
     isLedgerRoleDropdownOpen,
     tempLedgerEntries,
     salarySearchQuery,
-    salaryLocationFilter,
+    salaryLocationFilters,
     salaryFilterType,
     salaryJoinStartFilter,
     salaryJoinEndFilter,
@@ -240,10 +241,10 @@ export default function EmployeesPage() {
     newHelplineCategory,
     newHelplineLocation,
     helplineSearchQuery,
-    helplineLocationFilter,
+    helplineLocationFilters,
     attendanceDb,
     isFetchingAttendance,
-    attendanceLocationFilter,
+    attendanceLocationFilters,
     attendanceRoleFilters,
     attendanceSkillFilters,
     isAttendanceRoleDropdownOpen,
@@ -269,7 +270,7 @@ export default function EmployeesPage() {
     bulkConfirm2,
     activeDirectorySubTab,
     directorySearch,
-    directoryLocation,
+    directoryLocationFilters,
     directoryGender,
     activeDialerContact,
     activeDialerStatus,
@@ -539,7 +540,7 @@ export default function EmployeesPage() {
     setIsLedgerRoleDropdownOpen,
     setTempLedgerEntries,
     setSalarySearchQuery,
-    setSalaryLocationFilter,
+    setSalaryLocationFilters,
     setSalaryFilterType,
     setSalaryJoinStartFilter,
     setSalaryJoinEndFilter,
@@ -567,10 +568,10 @@ export default function EmployeesPage() {
     setNewHelplineCategory,
     setNewHelplineLocation,
     setHelplineSearchQuery,
-    setHelplineLocationFilter,
+    setHelplineLocationFilters,
     setAttendanceDb,
     setIsFetchingAttendance,
-    setAttendanceLocationFilter,
+    setAttendanceLocationFilters,
     setAttendanceRoleFilters,
     setAttendanceSkillFilters,
     setIsAttendanceRoleDropdownOpen,
@@ -595,7 +596,7 @@ export default function EmployeesPage() {
     setBulkConfirm2,
     setActiveDirectorySubTab,
     setDirectorySearch,
-    setDirectoryLocation,
+    setDirectoryLocationFilters,
     setDirectoryGender,
     setActiveDialerContact,
     setActiveDialerStatus,
@@ -624,7 +625,8 @@ export default function EmployeesPage() {
     setReportEsicFilter,
     setReportSkillFilters,
     setReportRoleFilters,
-    setEmployeeListRoleFilter,
+    setEmployeeListRoleFilters,
+    setEmployeeListLocationFilters,
     setEmployeeListStatusFilter,
     setIsReportLocDropdownOpen,
     setIsSkillDropdownOpen,
@@ -839,8 +841,10 @@ export default function EmployeesPage() {
                                         }
                                         onExportSelected={handleExportSelected}
                                         readOnly={!userPermissions.employees?.edit}
-                                        roleFilter={employeeListRoleFilter}
-                                        onRoleFilterChange={setEmployeeListRoleFilter}
+                                        roleFilters={employeeListRoleFilters}
+                                        onRoleFiltersChange={setEmployeeListRoleFilters}
+                                        locationFilters={employeeListLocationFilters}
+                                        onLocationFiltersChange={setEmployeeListLocationFilters}
                                         statusFilter={employeeListStatusFilter}
                                         onStatusFilterChange={setEmployeeListStatusFilter}
                                         exitEligibleLastPresent={Object.fromEntries(

@@ -154,6 +154,12 @@ import {
   defaultTempLedgerEntry,
   LEDGER_TYPE_LABELS,
 } from "../lib/ledger-helpers";
+import {
+  buildLabeledGrandTotalRow,
+  sumExportRows,
+} from "../lib/export-totals";
+import SearchableMultiSelect from "../components/ui/SearchableMultiSelect";
+import { matchesMultiSelectFilter } from "../lib/filter-helpers";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
 import AdminDashboardPage from "./AdminDashboardPage";
@@ -297,7 +303,7 @@ export default function ModuleContent() {
     isLedgerRoleDropdownOpen,
     tempLedgerEntries,
     salarySearchQuery,
-    salaryLocationFilter,
+    salaryLocationFilters,
     salaryFilterType,
     salaryJoinStartFilter,
     salaryJoinEndFilter,
@@ -327,10 +333,10 @@ export default function ModuleContent() {
     newHelplineCategory,
     newHelplineLocation,
     helplineSearchQuery,
-    helplineLocationFilter,
+    helplineLocationFilters,
     attendanceDb,
     isFetchingAttendance,
-    attendanceLocationFilter,
+    attendanceLocationFilters,
     attendanceRoleFilters,
     attendanceSkillFilters,
     isAttendanceRoleDropdownOpen,
@@ -340,6 +346,9 @@ export default function ModuleContent() {
     isBulkWizardRoleDropdownOpen,
     isBulkWizardSkillDropdownOpen,
     attendanceSearchQuery,
+    hideAttendanceAbsentColumn,
+    setHideAttendanceAbsentColumn,
+    promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
     bulkStatus,
@@ -356,7 +365,7 @@ export default function ModuleContent() {
     bulkConfirm2,
     activeDirectorySubTab,
     directorySearch,
-    directoryLocation,
+    directoryLocationFilters,
     directoryGender,
     activeDialerContact,
     activeDialerStatus,
@@ -723,7 +732,7 @@ export default function ModuleContent() {
     setIsLedgerRoleDropdownOpen,
     setTempLedgerEntries,
     setSalarySearchQuery,
-    setSalaryLocationFilter,
+    setSalaryLocationFilters,
     setSalaryFilterType,
     setSalaryJoinStartFilter,
     setSalaryJoinEndFilter,
@@ -753,10 +762,10 @@ export default function ModuleContent() {
     setNewHelplineCategory,
     setNewHelplineLocation,
     setHelplineSearchQuery,
-    setHelplineLocationFilter,
+    setHelplineLocationFilters,
     setAttendanceDb,
     setIsFetchingAttendance,
-    setAttendanceLocationFilter,
+    setAttendanceLocationFilters,
     setAttendanceRoleFilters,
     setAttendanceSkillFilters,
     setIsAttendanceRoleDropdownOpen,
@@ -782,7 +791,7 @@ export default function ModuleContent() {
     setBulkConfirm2,
     setActiveDirectorySubTab,
     setDirectorySearch,
-    setDirectoryLocation,
+    setDirectoryLocationFilters,
     setDirectoryGender,
     setActiveDialerContact,
     setActiveDialerStatus,
@@ -1363,7 +1372,7 @@ export default function ModuleContent() {
                                     <thead className="bg-[#fbfbfb] text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
                                       <tr>
                                         <th className="px-4 py-4 font-black w-[72px]">Event ID</th>
-                                        <th className="px-4 py-4 font-black w-[100px]">Time</th>
+                                        <th className="px-4 py-4 font-black w-[120px]">Time</th>
                                         <th className="px-4 py-4 font-black w-[96px]">Performer</th>
                                         <th className="px-4 py-4 font-black w-[128px]">Action</th>
                                         <th className="px-4 py-4 font-black">Task Description</th>
@@ -1606,18 +1615,15 @@ export default function ModuleContent() {
 
                                   {showSalaryFilter("location") && (
                                   <div className="space-y-1.5">
-                                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Branch/Work Location</label>
-                                    <select id="salary-location-filter" name="salaryLocationFilter"
-                                      value={salaryLocationFilter}
-                                      onChange={(e) => setSalaryLocationFilter(e.target.value)}
+                                    <SearchableMultiSelect
+                                      label="Branch/Work Location"
+                                      placeholder="All Locations"
+                                      options={salaryUniqueLocations}
+                                      selected={salaryLocationFilters}
+                                      onChange={setSalaryLocationFilters}
                                       disabled={lockSalaryFilter("location")}
-                                      className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] disabled:opacity-60"
-                                    >
-                                      <option value="All">All Locations</option>
-                                      {salaryUniqueLocations.map((loc) => (
-                                        <option key={loc} value={loc}>{loc}</option>
-                                      ))}
-                                    </select>
+                                      containerId="salary-location-filter"
+                                    />
                                   </div>
                                   )}
 
@@ -1822,61 +1828,15 @@ export default function ModuleContent() {
                                   )}
 
                                   {showSalaryFilter("roles") && (
-                                  <div className="space-y-1.5 relative" id="salary-role-multiselect-container">
-                                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Job Role</label>
-                                    <div className="relative">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setIsSalaryRoleDropdownOpen(!isSalaryRoleDropdownOpen);
-                                          setIsSalarySkillDropdownOpen(false);
-                                        }}
-                                        className="w-full px-2.5 py-1.5 border border-slate-250 bg-white rounded text-xs font-semibold text-slate-700 focus:outline-none focus:border-[#f57416] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                      >
-                                        <span className="truncate">
-                                          {salaryRoleFilters.length === 0 
-                                            ? "All Roles" 
-                                            : `${salaryRoleFilters.length} Selected`}
-                                        </span>
-                                        <span className="text-[10px] text-slate-400">▼</span>
-                                      </button>
-                                  
-                                      {isSalaryRoleDropdownOpen && (
-                                        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-56 overflow-y-auto">
-                                          <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                            <span className="text-[10px] text-slate-400 font-bold">Roles</span>
-                                            <button
-                                              type="button"
-                                              onClick={() => setSalaryRoleFilters([])}
-                                              className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                            >
-                                              Clear All
-                                            </button>
-                                          </div>
-                                          {customRoles.map(role => {
-                                            const isChecked = salaryRoleFilters.includes(role);
-                                            const toggle = () => {
-                                              if (isChecked) {
-                                                setSalaryRoleFilters(prev => prev.filter(r => r !== role));
-                                              } else {
-                                                setSalaryRoleFilters(prev => [...prev, role]);
-                                              }
-                                            };
-                                            return (
-                                              <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                                <input id="checkbox-field-5645" name="checkbox_5645"
-                                                  type="checkbox"
-                                                  checked={isChecked}
-                                                  onChange={toggle}
-                                                  className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                                />
-                                                <span className="font-medium">{role}</span>
-                                              </label>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </div>
+                                  <div className="space-y-1.5" id="salary-role-multiselect-container">
+                                    <SearchableMultiSelect
+                                      label="Job Role"
+                                      placeholder="All Roles"
+                                      options={customRoles}
+                                      selected={salaryRoleFilters}
+                                      onChange={setSalaryRoleFilters}
+                                      containerId="salary-role-filter"
+                                    />
                                   </div>
                                   )}
 
@@ -1919,7 +1879,7 @@ export default function ModuleContent() {
                                   </div>
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Gross Payroll</span>
-                                    <span className="text-sm font-extrabold text-slate-800 block truncate mt-0.5">
+                                    <span className="text-sm font-extrabold text-slate-800 block whitespace-nowrap tabular-nums mt-0.5">
                                       ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Gross Salary (Monthly)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
@@ -1931,7 +1891,7 @@ export default function ModuleContent() {
                                   </div>
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Net Payable</span>
-                                    <span className="text-sm font-extrabold text-emerald-700 block truncate mt-0.5">
+                                    <span className="text-sm font-extrabold text-emerald-700 block whitespace-nowrap tabular-nums mt-0.5">
                                       ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Net Payable", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
@@ -1943,7 +1903,7 @@ export default function ModuleContent() {
                                   </div>
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Deductions ({selectedMonth})</span>
-                                    <span className="text-sm font-extrabold text-rose-700 block truncate mt-0.5">
+                                    <span className="text-sm font-extrabold text-rose-700 block whitespace-nowrap tabular-nums mt-0.5">
                                       ₹{filteredSalaryEmployees.reduce((sum, e) => sum + (Number(getSalaryColumnValue(e, "Total Deductions", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0), 0).toLocaleString("en-IN")}
                                     </span>
                                   </div>
@@ -1955,7 +1915,7 @@ export default function ModuleContent() {
                                   </div>
                                   <div className="min-w-0 flex-1 text-left">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Employer Liability</span>
-                                    <span className="text-sm font-extrabold text-indigo-700 block truncate mt-0.5">
+                                    <span className="text-sm font-extrabold text-indigo-700 block whitespace-nowrap tabular-nums mt-0.5">
                                       ₹{filteredSalaryEmployees.reduce((sum, e) => {
                                         const erPf = Number(getSalaryColumnValue(e, "Employer PF (13%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0;
                                         const erEsic = Number(getSalaryColumnValue(e, "Employer ESIC (3.25%)", selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled)) || 0;
@@ -2121,7 +2081,15 @@ export default function ModuleContent() {
                                           ];
                                         });
                                         const csvContent = "data:text/csv;charset=utf-8," 
-                                          + [headers.map(h => quoteCSVValue(h)).join(","), ...rows.map(r => r.map(c => quoteCSVValue(c)).join(","))].join("\n");
+                                          + [headers.map(h => quoteCSVValue(h)).join(","), ...rows.map(r => r.map(c => quoteCSVValue(c)).join(",")), (() => {
+                                            const sumIndices = headers
+                                              .map((header, index) => ({ header, index }))
+                                              .filter(({ header }) => header !== "Employee Code" && header !== "Employee Name" && header !== "Payment Status")
+                                              .map(({ index }) => index);
+                                            const totals = sumExportRows(rows, sumIndices);
+                                            const grandTotalRow = buildLabeledGrandTotalRow(headers.length, 1, totals);
+                                            return grandTotalRow.map(c => quoteCSVValue(c)).join(",");
+                                          })()].join("\n");
                                         const encodedUri = encodeURI(csvContent);
                                         const link = document.createElement("a");
                                         link.setAttribute("href", encodedUri);
@@ -2153,7 +2121,7 @@ export default function ModuleContent() {
                                         const dataToDownload = selectedSalaryEmployeeIds.length > 0
                                           ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
                                           : filteredSalaryEmployees;
-                                        downloadSalaryExcel(dataToDownload, visibleSalaryColumns, salaryLocationFilter, selectedMonth);
+                                        downloadSalaryExcel(dataToDownload, visibleSalaryColumns, salaryLocationFilters, selectedMonth);
                                       }}
                                       className="px-3.5 py-1.5 bg-[#107c41] hover:bg-[#0d6233] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
                                     >
@@ -2167,7 +2135,7 @@ export default function ModuleContent() {
                                         const dataToDownload = selectedSalaryEmployeeIds.length > 0
                                           ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
                                           : filteredSalaryEmployees;
-                                        downloadSalaryPDF(dataToDownload, visibleSalaryColumns, salaryLocationFilter, selectedMonth);
+                                        downloadSalaryPDF(dataToDownload, visibleSalaryColumns, salaryLocationFilters, selectedMonth);
                                       }}
                                       className="px-3.5 py-1.5 bg-[#d62222] hover:bg-[#b51c1c] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
                                     >
@@ -2266,7 +2234,7 @@ export default function ModuleContent() {
                                         <select id="active-salary-template-name" name="activeSalaryTemplateName"
                                           value={activeSalaryTemplateName}
                                           onChange={(e) => handleLoadSalaryTemplate(e.target.value)}
-                                          className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-bold text-slate-800 focus:outline-none min-w-[110px] max-w-[140px] truncate"
+                                          className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-bold text-slate-800 focus:outline-none min-w-[130px] max-w-[140px] truncate"
                                         >
                                           <option value="">-- Layout --</option>
                                           {savedSalaryTemplates.map((t: any) => (
@@ -2293,7 +2261,7 @@ export default function ModuleContent() {
                                           placeholder="Save layout name..."
                                           value={newSalaryTemplateName}
                                           onChange={(e) => setNewSalaryTemplateName(e.target.value)}
-                                          className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-medium text-slate-700 focus:outline-none focus:border-[#f57416] w-[110px]"
+                                          className="px-2 py-0.5 border border-slate-200 bg-white rounded text-[10px] font-medium text-slate-700 focus:outline-none focus:border-[#f57416] w-[130px]"
                                         />
                                         <button
                                           type="submit"
@@ -2422,7 +2390,7 @@ export default function ModuleContent() {
 
                                 {/* Responsive Scrollable Table Container */}
                                 <div className="overflow-x-auto border border-slate-200 rounded-lg max-h-[480px] overflow-y-auto shadow-sm" id="salary-sheet-scroller">
-                                  <table className="w-full text-xs text-left border-collapse bg-white table-fixed">
+                                  <table className="w-max min-w-full text-xs text-left border-collapse bg-white">
                                     <colgroup>
                                       <col className="w-[48px]" />
                                       {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
@@ -2438,61 +2406,61 @@ export default function ModuleContent() {
                                         <col className="w-[85px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Daily Wage") && (
-                                        <col className="w-[100px]" />
+                                        <col className="w-[120px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Total Salary") && (
-                                        <col className="w-[125px]" />
+                                        <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                        <col className="w-[125px]" />
+                                        <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Basic Salary") && (
-                                        <col className="w-[125px]" />
+                                        <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Employer PF (13%)") && (
-                                        <col className="w-[110px]" />
+                                        <col className="w-[130px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                        <col className="w-[110px]" />
+                                        <col className="w-[130px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Employee PF (12%)") && (
-                                        <col className="w-[110px]" />
+                                        <col className="w-[130px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                        <col className="w-[110px]" />
+                                        <col className="w-[130px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Professional Tax (PT)") && (
-                                        <col className="w-[95px]" />
+                                        <col className="w-[110px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Advance Balance") && (
-                                        <col className="w-[100px]" />
+                                        <col className="w-[120px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Uniform Deductions") && (
-                                        <col className="w-[100px]" />
+                                        <col className="w-[120px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Penalty Balance") && (
-                                        <col className="w-[100px]" />
+                                        <col className="w-[120px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Net Salary") && (
-                                        <col className="w-[125px]" />
+                                        <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Total Deductions") && (
-                                        <col className="w-[125px]" />
+                                        <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Food Perk") && (
-                                        <col className="w-[105px]" />
+                                        <col className="w-[115px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Accommodation Perk") && (
-                                        <col className="w-[105px]" />
+                                        <col className="w-[115px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Conveyance Perk") && (
-                                        <col className="w-[105px]" />
+                                        <col className="w-[115px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Net Payable") && (
                                         <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Payment Status") && (
-                                        <col className="w-[110px]" />
+                                        <col className="w-[130px]" />
                                       )}
                                     </colgroup>
                                     <thead className="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200">
@@ -2745,101 +2713,101 @@ export default function ModuleContent() {
                                               )}
           
                                               {visibleSalaryColumns.includes("Skill Category") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.skillCategory || "-"}>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-medium bg-slate-50/10 truncate" title={emp.skillCategory || "-"}>
                                                   {emp.skillCategory || "-"}
                                                 </td>
                                               )}
                                               {visibleSalaryColumns.includes("Job Role") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium bg-slate-50/10 truncate" title={emp.role || "-"}>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-medium bg-slate-50/10 truncate" title={emp.role || "-"}>
                                                   {emp.role || "-"}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Present Days") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-[#f57416] bg-orange-50/10">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-semibold text-[#f57416] bg-orange-50/10">
                                                   {presents}
                                                 </td>
                                               )}
 
                                               {visibleSalaryColumns.includes("Daily Wage") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-semibold text-slate-700 bg-slate-50/10">
                                                   ₹{resolveEmployeeDailyWage(emp).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Total Salary") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-semibold text-slate-700 bg-slate-50/10">₹{fullMonthSalary.toLocaleString("en-IN")}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-semibold text-slate-700 bg-slate-50/10">₹{fullMonthSalary.toLocaleString("en-IN")}</td>
                                               )}
                                               {visibleSalaryColumns.includes("Gross Salary (Monthly)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium">₹{gross.toLocaleString("en-IN")}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-medium">₹{gross.toLocaleString("en-IN")}</td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Basic Salary") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center font-medium text-slate-655 bg-slate-50/10">₹{basic.toLocaleString("en-IN")}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums font-medium text-slate-655 bg-slate-50/10">₹{basic.toLocaleString("en-IN")}</td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Employer PF (13%)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erPf).toLocaleString("en-IN")}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erPf).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                               {visibleSalaryColumns.includes("Employer ESIC (3.25%)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erEsic).toLocaleString("en-IN")}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-blue-800 bg-blue-50/10 font-semibold">{isCompliant ? `₹${Math.round(erEsic).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Employee PF (12%)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empPf).toLocaleString("en-IN")}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empPf).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                               {visibleSalaryColumns.includes("Employee ESIC (0.75%)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empEsic).toLocaleString("en-IN")}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-800 bg-rose-50/10 font-semibold">{isCompliant ? `₹${Math.round(empEsic).toLocaleString("en-IN")}` : ""}</td>
                                               )}
                                               {visibleSalaryColumns.includes("Professional Tax (PT)") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-800 bg-rose-50/10 font-medium">{isPtEnabled ? `₹${pt}` : ""}</td>
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-800 bg-rose-50/10 font-medium">{isPtEnabled ? `₹${pt}` : ""}</td>
                                               )}
                                               {visibleSalaryColumns.includes("Advance Balance") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-900 bg-rose-50/10">
                                                   {adv > 0 ? <span className="font-semibold text-blue-700">₹{adv}</span> : "-"}
                                                 </td>
                                               )}
                                               {visibleSalaryColumns.includes("Uniform Deductions") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-900 bg-rose-50/10">
                                                   {uniform > 0 ? <span className="font-semibold text-rose-600">₹{uniform}</span> : "-"}
                                                 </td>
                                               )}
                                               {visibleSalaryColumns.includes("Penalty Balance") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-50/10">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-900 bg-rose-50/10">
                                                   {pen > 0 ? <span className="font-semibold text-rose-600">₹{pen}</span> : "-"}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Net Salary") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-amber-800 bg-amber-50/10 font-semibold">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-amber-800 bg-amber-50/10 font-semibold">
                                                   ₹{Math.round(netSalaryValue).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Total Deductions") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-rose-900 bg-rose-100/10 font-semibold">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-900 bg-rose-100/10 font-semibold">
                                                   ₹{Math.round(totalDeductionsValue).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Food Perk") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-indigo-700 bg-indigo-50/10 font-semibold">
                                                   {food || 0}
                                                 </td>
                                               )}
                                               {visibleSalaryColumns.includes("Accommodation Perk") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-indigo-700 bg-indigo-50/10 font-semibold">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-indigo-700 bg-indigo-50/10 font-semibold">
                                                   {acc || 0}
                                                 </td>
                                               )}
                                               {visibleSalaryColumns.includes("Conveyance Perk") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center text-[#ff791a] bg-indigo-50/10 font-semibold">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-[#ff791a] bg-indigo-50/10 font-semibold">
                                                   {conv || 0}
                                                 </td>
                                               )}
                                           
                                               {visibleSalaryColumns.includes("Net Payable") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 bg-emerald-50 text-emerald-800 text-right font-black text-xs">
+                                                <td className="px-3 py-2.5 border-r border-slate-150 bg-emerald-50 text-emerald-800 text-right font-black text-xs whitespace-nowrap tabular-nums">
                                                   ₹{(presents <= 0 ? 0 : Math.round(Math.max(0, netPayableValue))).toLocaleString("en-IN")}
                                                 </td>
                                               )}
@@ -3173,62 +3141,17 @@ export default function ModuleContent() {
                                   {/* Premium Spacious Dynamic Filters Grid */}
                                   <div className="grid grid-cols-1 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-150 text-[10px] text-left">
                                     {/* Location Filter */}
-                                    <div className="space-y-1 relative" id="ledger-location-multiselect-container">
-                                      <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Branch/Site</span>
-                                      <div className="relative">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsLedgerLocationDropdownOpen(!isLedgerLocationDropdownOpen);
-                                            setIsLedgerSkillDropdownOpen(false);
-                                            setIsLedgerRoleDropdownOpen(false);
-                                          }}
-                                          className="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                        >
-                                          <span className="truncate">
-                                            {ledgerLocationFilters.length === 0 
-                                              ? "All Sites" 
-                                              : `${ledgerLocationFilters.length} Selected`}
-                                          </span>
-                                          <span className="text-[8px] text-slate-400">▼</span>
-                                        </button>
-                                
-                                        {isLedgerLocationDropdownOpen && (
-                                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                            <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                              <span className="text-[9px] text-slate-400 font-bold">Branches</span>
-                                              <button
-                                                type="button"
-                                                onClick={() => setLedgerLocationFilters([])}
-                                                className="text-[9px] font-black uppercase text-slate-500 hover:text-[#ff791a] cursor-pointer"
-                                              >
-                                                Clear All
-                                              </button>
-                                            </div>
-                                            {ledgerUniqueLocations.map(loc => {
-                                              const isChecked = ledgerLocationFilters.some(f => f.toLowerCase() === loc.toLowerCase());
-                                              const toggle = () => {
-                                                if (isChecked) {
-                                                  setLedgerLocationFilters(prev => prev.filter(c => c.toLowerCase() !== loc.toLowerCase()));
-                                                } else {
-                                                  setLedgerLocationFilters(prev => [...prev, loc]);
-                                                }
-                                              };
-                                              return (
-                                                <label key={loc} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-[10px] text-slate-700 cursor-pointer select-none">
-                                                  <input id="checkbox-field-6761" name="checkbox_6761"
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={toggle}
-                                                    className="w-3.5 h-3.5 rounded border-slate-350 text-[#ff791a] focus:ring-[#ff791a]"
-                                                  />
-                                                  <span className="font-semibold">{loc}</span>
-                                                </label>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
+                                    <div className="space-y-1" id="ledger-location-multiselect-container">
+                                      <SearchableMultiSelect
+                                        label="Branch/Site"
+                                        labelClassName="block text-[8px] font-black uppercase text-slate-400 tracking-wider"
+                                        placeholder="All Sites"
+                                        options={ledgerUniqueLocations}
+                                        selected={ledgerLocationFilters}
+                                        onChange={setLedgerLocationFilters}
+                                        containerId="ledger-location-filter"
+                                        buttonClassName="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
+                                      />
                                     </div>
       
                                     {/* Skill Filter */}
@@ -3291,62 +3214,17 @@ export default function ModuleContent() {
                                     </div>
       
                                     {/* Role Filter */}
-                                    <div className="space-y-1 relative" id="ledger-role-multiselect-container">
-                                      <span className="block text-[8px] font-black uppercase text-slate-400 tracking-wider">Job Role</span>
-                                      <div className="relative">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsLedgerRoleDropdownOpen(!isLedgerRoleDropdownOpen);
-                                            setIsLedgerLocationDropdownOpen(false);
-                                            setIsLedgerSkillDropdownOpen(false);
-                                          }}
-                                          className="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
-                                        >
-                                          <span className="truncate">
-                                            {ledgerRoleFilters.length === 0 
-                                              ? "All Roles" 
-                                              : `${ledgerRoleFilters.length} Selected`}
-                                          </span>
-                                          <span className="text-[8px] text-slate-400">▼</span>
-                                        </button>
-                                
-                                        {isLedgerRoleDropdownOpen && (
-                                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto">
-                                            <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                              <span className="text-[9px] text-slate-400 font-bold">Roles</span>
-                                              <button
-                                                type="button"
-                                                onClick={() => setLedgerRoleFilters([])}
-                                                className="text-[9px] font-black uppercase text-slate-500 hover:text-[#ff791a] cursor-pointer"
-                                              >
-                                                Clear All
-                                              </button>
-                                            </div>
-                                            {ledgerUniqueRoles.map(role => {
-                                              const isChecked = ledgerRoleFilters.some(f => f.toLowerCase() === role.toLowerCase());
-                                              const toggle = () => {
-                                                if (isChecked) {
-                                                  setLedgerRoleFilters(prev => prev.filter(c => c.toLowerCase() !== role.toLowerCase()));
-                                                } else {
-                                                  setLedgerRoleFilters(prev => [...prev, role]);
-                                                }
-                                              };
-                                              return (
-                                                <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-[10px] text-slate-700 cursor-pointer select-none">
-                                                  <input id="checkbox-field-6879" name="checkbox_6879"
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={toggle}
-                                                    className="w-3.5 h-3.5 rounded border-slate-350 text-[#ff791a] focus:ring-[#ff791a]"
-                                                  />
-                                                  <span className="font-semibold">{role}</span>
-                                                </label>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
+                                    <div className="space-y-1" id="ledger-role-multiselect-container">
+                                      <SearchableMultiSelect
+                                        label="Job Role"
+                                        labelClassName="block text-[8px] font-black uppercase text-slate-400 tracking-wider"
+                                        placeholder="All Roles"
+                                        options={ledgerUniqueRoles}
+                                        selected={ledgerRoleFilters}
+                                        onChange={setLedgerRoleFilters}
+                                        containerId="ledger-role-filter"
+                                        buttonClassName="w-full px-2 py-1.5 border border-slate-250 bg-white rounded text-[10px] font-bold text-slate-700 focus:outline-none focus:border-[#ff791a] text-left flex justify-between items-center shadow-2xs hover:bg-slate-50 transition cursor-pointer"
+                                      />
                                     </div>
                                   </div>
       
@@ -3750,17 +3628,16 @@ export default function ModuleContent() {
           
                                     {/* Location Filter */}
                                     <div>
-                                      <label htmlFor="directory-location" className="directory-field-label">Location / Site</label>
-                                      <select id="directory-location" name="directoryLocation"
-                                        value={directoryLocation}
-                                        onChange={(e) => setDirectoryLocation(e.target.value)}
-                                        className="directory-field-select"
-                                      >
-                                        <option value="">All Locations</option>
-                                        {salaryUniqueLocations.map((loc) => (
-                                          <option key={loc} value={loc}>{loc}</option>
-                                        ))}
-                                      </select>
+                                      <SearchableMultiSelect
+                                        label="Location / Site"
+                                        labelClassName="directory-field-label"
+                                        placeholder="All Locations"
+                                        options={salaryUniqueLocations}
+                                        selected={directoryLocationFilters}
+                                        onChange={setDirectoryLocationFilters}
+                                        containerId="directory-location-filter"
+                                        buttonClassName="directory-field-select w-full text-left flex justify-between items-center cursor-pointer"
+                                      />
                                     </div>
           
                                     {/* Gender Filter */}
@@ -3794,7 +3671,7 @@ export default function ModuleContent() {
                                           const roleMatch = (emp.role || "").toLowerCase().includes(q);
                                           if (!codeMatch && !nameMatch && !phoneMatch && !roleMatch) return false;
                                         }
-                                        if (directoryLocation && emp.location !== directoryLocation) return false;
+                                        if (!matchesMultiSelectFilter(emp.location, directoryLocationFilters)) return false;
                                         if (directoryGender && emp.gender?.toLowerCase() !== directoryGender.toLowerCase()) return false;
                                         return true;
                                       });
@@ -3857,17 +3734,16 @@ export default function ModuleContent() {
                                       </div>
                                     </div>
                                     <div>
-                                      <label htmlFor="helpline-location-filter" className="directory-field-label">Work Location</label>
-                                      <select id="helpline-location-filter" name="helplineLocationFilter"
-                                        value={helplineLocationFilter}
-                                        onChange={(e) => setHelplineLocationFilter(e.target.value)}
-                                        className="directory-field-select"
-                                      >
-                                        <option value="All Locations">All Work Locations</option>
-                                        {customLocations.map(loc => (
-                                          <option key={loc} value={loc}>{loc}</option>
-                                        ))}
-                                      </select>
+                                      <SearchableMultiSelect
+                                        label="Work Location"
+                                        labelClassName="directory-field-label"
+                                        placeholder="All Work Locations"
+                                        options={customLocations}
+                                        selected={helplineLocationFilters}
+                                        onChange={setHelplineLocationFilters}
+                                        containerId="helpline-location-filter"
+                                        buttonClassName="directory-field-select w-full text-left flex justify-between items-center cursor-pointer"
+                                      />
                                     </div>
                                   </div>
           
@@ -3962,7 +3838,11 @@ export default function ModuleContent() {
                                             formatPhoneDisplay(contact.phone).toLowerCase().includes(q);
                                           if (!nameMatch && !roleMatch && !catMatch && !phoneMatch) return false;
                                         }
-                                        if (helplineLocationFilter !== "All Locations" && contact.location !== "All Locations" && contact.location !== helplineLocationFilter) {
+                                        if (
+                                          helplineLocationFilters.length > 0 &&
+                                          contact.location !== "All Locations" &&
+                                          !matchesMultiSelectFilter(contact.location, helplineLocationFilters)
+                                        ) {
                                           return false;
                                         }
                                         return true;
@@ -4184,61 +4064,17 @@ export default function ModuleContent() {
                                               <div className="flex flex-wrap items-center gap-3">
                                             
                                                 {/* Bulk Wizard Role Filter */}
-                                                <div className="flex items-center gap-1.5 text-xs relative" id="bulk-wizard-role-multiselect-container">
-                                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Role:</span>
-                                                  <div className="relative">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => {
-                                                        setIsBulkWizardRoleDropdownOpen(!isBulkWizardRoleDropdownOpen);
-                                                        setIsBulkWizardSkillDropdownOpen(false);
-                                                      }}
-                                                      className="px-2.5 py-1 bg-white border border-slate-250 text-[11px] rounded-lg font-bold focus:outline-none flex justify-between items-center min-w-[130px] hover:bg-slate-50 transition cursor-pointer"
-                                                    >
-                                                      <span className="truncate">
-                                                        {bulkWizardRoleFilters.length === 0 
-                                                          ? "All Job Roles" 
-                                                          : `${bulkWizardRoleFilters.length} Selected`}
-                                                      </span>
-                                                      <span className="text-[9px] text-slate-400 ml-1">▼</span>
-                                                    </button>
-                                                
-                                                    {isBulkWizardRoleDropdownOpen && (
-                                                      <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-48 text-left">
-                                                        <div className="flex justify-between items-center border-b border-slate-100 pb-1 mb-1">
-                                                          <span className="text-[9px] text-slate-400 font-bold">Roles</span>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => setBulkWizardRoleFilters([])}
-                                                            className="text-[8px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                                          >
-                                                            Clear All
-                                                          </button>
-                                                        </div>
-                                                        {customRoles.map(role => {
-                                                          const isChecked = bulkWizardRoleFilters.includes(role);
-                                                          const toggle = () => {
-                                                            if (isChecked) {
-                                                              setBulkWizardRoleFilters(prev => prev.filter(r => r !== role));
-                                                            } else {
-                                                              setBulkWizardRoleFilters(prev => [...prev, role]);
-                                                            }
-                                                          };
-                                                          return (
-                                                            <label key={role} className="flex items-center gap-2 px-1.5 py-0.5 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                                              <input id="checkbox-field-8039" name="checkbox_8039"
-                                                                type="checkbox"
-                                                                checked={isChecked}
-                                                                onChange={toggle}
-                                                                className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                                              />
-                                                              <span className="font-medium text-[11px]">{role}</span>
-                                                            </label>
-                                                          );
-                                                        })}
-                                                      </div>
-                                                    )}
-                                                  </div>
+                                                <div className="flex items-center gap-1.5 text-xs" id="bulk-wizard-role-multiselect-container">
+                                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Role:</span>
+                                                  <SearchableMultiSelect
+                                                    placeholder="All Job Roles"
+                                                    options={customRoles}
+                                                    selected={bulkWizardRoleFilters}
+                                                    onChange={setBulkWizardRoleFilters}
+                                                    containerId="bulk-wizard-role-filter"
+                                                    className="min-w-[150px]"
+                                                    buttonClassName="px-2.5 py-1 bg-white border border-slate-250 text-[11px] rounded-lg font-bold focus:outline-none flex justify-between items-center min-w-[130px] hover:bg-slate-50 transition cursor-pointer w-full text-left"
+                                                  />
                                                 </div>
           
                                                 {/* Bulk Wizard Skill Filter */}
@@ -4615,17 +4451,32 @@ export default function ModuleContent() {
                                       </button>
                                       )}
                                       <button
-                                        onClick={downloadAttendanceExcel}
+                                        onClick={() => {
+                                          const hideAbsents = promptHideAttendanceAbsentColumn();
+                                          downloadAttendanceExcel({ hideAbsents });
+                                        }}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-250 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer shadow-xs"
                                       >
                                         <FileSpreadsheet size={13} className="text-green-600" /> Export Excel (Landscape)
                                       </button>
                                       <button
-                                        onClick={downloadAttendancePDF}
+                                        onClick={() => {
+                                          const hideAbsents = promptHideAttendanceAbsentColumn();
+                                          downloadAttendancePDF({ hideAbsents });
+                                        }}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f57416] hover:bg-[#e4640c] text-white text-xs font-bold rounded-lg transition cursor-pointer shadow-sm"
                                       >
                                         <FileText size={13} /> Export PDF (Landscape)
                                       </button>
+                                      <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-250 rounded-lg text-xs font-semibold text-slate-600 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={hideAttendanceAbsentColumn}
+                                          onChange={(e) => setHideAttendanceAbsentColumn(e.target.checked)}
+                                          className="w-3.5 h-3.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416]"
+                                        />
+                                        Hide Total Absent
+                                      </label>
                                     </div>
                                   </div>
           
@@ -4646,74 +4497,28 @@ export default function ModuleContent() {
                                     </div>
                                     <div className="flex flex-col gap-1 text-left">
                                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Worksite Branch Location</label>
-                                      <select id="attendance-location-filter" name="attendanceLocationFilter"
-                                        value={attendanceLocationFilter}
-                                        onChange={(e) => setAttendanceLocationFilter(e.target.value)}
-                                        className="w-full px-3 py-1.5 bg-white border border-slate-250 text-xs rounded-lg text-slate-800 font-bold focus:outline-none animate-none"
-                                      >
-                                        <option value="All">All Corporate Branches</option>
-                                        {customLocations.map(loc => (
-                                          <option key={loc} value={loc}>{loc}</option>
-                                        ))}
-                                      </select>
+                                      <SearchableMultiSelect
+                                        placeholder="All Corporate Branches"
+                                        options={customLocations}
+                                        selected={attendanceLocationFilters}
+                                        onChange={setAttendanceLocationFilters}
+                                        containerId="attendance-location-filter"
+                                        buttonClassName="w-full px-3 py-1.5 bg-white border border-slate-250 text-xs rounded-lg text-slate-800 font-bold focus:outline-none text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
+                                      />
                                     </div>
           
                                     {/* Attendance Job Role Filter */}
-                                    <div className="flex flex-col gap-1 text-left relative" id="attendance-role-multiselect-container">
-                                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Job Role</label>
-                                      <div className="relative">
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setIsAttendanceRoleDropdownOpen(!isAttendanceRoleDropdownOpen);
-                                            setIsAttendanceSkillDropdownOpen(false);
-                                          }}
-                                          className="w-full px-3 py-1.5 border border-slate-250 bg-white rounded-lg text-xs font-bold text-slate-800 focus:outline-none text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
-                                        >
-                                          <span className="truncate">
-                                            {attendanceRoleFilters.length === 0 
-                                              ? "All Job Roles" 
-                                              : `${attendanceRoleFilters.length} Selected`}
-                                          </span>
-                                          <span className="text-[10px] text-slate-400">▼</span>
-                                        </button>
-                                    
-                                        {isAttendanceRoleDropdownOpen && (
-                                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-30 p-2 space-y-1 max-h-48 overflow-y-auto w-full text-left">
-                                            <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5">
-                                              <span className="text-[10px] text-slate-400 font-bold">Roles</span>
-                                              <button
-                                                type="button"
-                                                onClick={() => setAttendanceRoleFilters([])}
-                                                className="text-[9px] font-black uppercase text-slate-500 hover:text-slate-700 cursor-pointer"
-                                              >
-                                                Clear All
-                                              </button>
-                                            </div>
-                                            {customRoles.map(role => {
-                                              const isChecked = attendanceRoleFilters.includes(role);
-                                              const toggle = () => {
-                                                if (isChecked) {
-                                                  setAttendanceRoleFilters(prev => prev.filter(r => r !== role));
-                                                } else {
-                                                  setAttendanceRoleFilters(prev => [...prev, role]);
-                                                }
-                                              };
-                                              return (
-                                                <label key={role} className="flex items-center gap-2 px-1.5 py-1 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none">
-                                                  <input id="checkbox-field-8623" name="checkbox_8623"
-                                                    type="checkbox"
-                                                    checked={isChecked}
-                                                    onChange={toggle}
-                                                    className="w-3.5 h-3.5 rounded border-slate-350 text-[#f57416] focus:ring-[#f57416]"
-                                                  />
-                                                  <span className="font-medium">{role}</span>
-                                                </label>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
-                                      </div>
+                                    <div className="flex flex-col gap-1 text-left" id="attendance-role-multiselect-container">
+                                      <SearchableMultiSelect
+                                        label="Job Role"
+                                        labelClassName="text-[10px] font-bold text-slate-400 uppercase tracking-wider block"
+                                        placeholder="All Job Roles"
+                                        options={customRoles}
+                                        selected={attendanceRoleFilters}
+                                        onChange={setAttendanceRoleFilters}
+                                        containerId="attendance-role-filter"
+                                        buttonClassName="w-full px-3 py-1.5 border border-slate-250 bg-white rounded-lg text-xs font-bold text-slate-800 focus:outline-none text-left flex justify-between items-center hover:bg-slate-50 transition cursor-pointer"
+                                      />
                                     </div>
           
                                     {/* Attendance Skill Category Filter */}
@@ -4819,14 +4624,16 @@ export default function ModuleContent() {
                                           <th key={i} className="px-1 py-2 text-center w-8 font-mono">{i + 1}</th>
                                         ))}
                                         <th className="px-3 py-2 text-center w-16">P</th>
-                                        <th className="px-3 py-2 text-center w-16">A</th>
+                                        {!hideAttendanceAbsentColumn && (
+                                          <th className="px-3 py-2 text-center w-16">A</th>
+                                        )}
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 text-xs">
                                       {(() => {
                                         const filtered = employees.filter(emp => {
                                           if (isEmployeeExitedForMonth(emp, selectedMonth)) return false;
-                                          const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
+                                          const locMatch = matchesMultiSelectFilter(emp.location, attendanceLocationFilters);
                                           const roleMatch = attendanceRoleFilters.length === 0 || attendanceRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
                                           const skillMatch = employeeMatchesSkillFilters(emp, attendanceSkillFilters);
                                           const q = attendanceSearchQuery.toLowerCase().trim();
@@ -4853,7 +4660,7 @@ export default function ModuleContent() {
                                         if (filtered.length === 0) {
                                           return (
                                             <tr>
-                                              <td colSpan={getDaysInSelectedMonth(selectedMonth) + 6} className="px-6 py-10 text-center text-slate-400">
+                                              <td colSpan={getDaysInSelectedMonth(selectedMonth) + 5 + (hideAttendanceAbsentColumn ? 0 : 1)} className="px-6 py-10 text-center text-slate-400">
                                                 {attendanceRecordFilter === "absent"
                                                   ? `No employees with absent days in ${selectedMonth}.`
                                                   : attendanceRecordFilter === "present"
@@ -4970,7 +4777,9 @@ export default function ModuleContent() {
                                                 );
                                               })}
                                               <td className="px-3 py-2 text-center font-bold text-emerald-600">{presents}</td>
-                                              <td className="px-3 py-2 text-center font-bold text-rose-600">{absents}</td>
+                                              {!hideAttendanceAbsentColumn && (
+                                                <td className="px-3 py-2 text-center font-bold text-rose-600">{absents}</td>
+                                              )}
                                             </tr>
                                           );
                                         });

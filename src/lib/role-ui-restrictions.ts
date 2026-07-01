@@ -145,7 +145,7 @@ export function applySalaryUiRestrictions(
   restrictions: ModuleUiRestrictions | undefined,
   handlers: {
     setSelectedSalaryColumns: (cols: string[]) => void;
-    setSalaryLocationFilter: (v: string) => void;
+    setSalaryLocationFilters: (v: string[]) => void;
     setSalarySearchQuery: (v: string) => void;
     setSalaryFilterType: (v: "all" | "advances" | "penalties" | "perks") => void;
     setSalaryJoinStartFilter: (v: string) => void;
@@ -177,7 +177,21 @@ export function applySalaryUiRestrictions(
   const locked = restrictions.lockedFilterValues;
   if (!locked) return;
 
-  if (typeof locked.location === "string") handlers.setSalaryLocationFilter(locked.location);
+  if (typeof locked.location === "string") {
+    handlers.setSalaryLocationFilters(
+      locked.location === "All" || locked.location === "All Locations" ? [] : [locked.location],
+    );
+  } else if (Array.isArray(locked.location)) {
+    handlers.setSalaryLocationFilters(
+      locked.location.filter(
+        (item): item is string =>
+          typeof item === "string" &&
+          item.trim() !== "" &&
+          item !== "All" &&
+          item !== "All Locations",
+      ),
+    );
+  }
   if (typeof locked.search === "string") handlers.setSalarySearchQuery(locked.search);
   if (typeof locked.filterType === "string") {
     const t = locked.filterType;

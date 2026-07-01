@@ -14,6 +14,8 @@ import {
   getEmployeeWageModeStickyCellClassName,
   resolveEmployeeWageModeRowVariant,
 } from "../lib/employee-helpers";
+import SearchableMultiSelect from "./ui/SearchableMultiSelect";
+import { matchesMultiSelectFilter } from "../lib/filter-helpers";
 
 interface EmployeeTableProps {
   employees: Employee[];
@@ -26,8 +28,10 @@ interface EmployeeTableProps {
   onMarkExit?: (employee: Employee, exitDate: string, exitReason: string) => Promise<boolean>;
   onExportSelected: (type: "csv" | "excel" | "pdf", ids: string[]) => void;
   readOnly?: boolean;
-  roleFilter?: string;
-  onRoleFilterChange?: (role: string) => void;
+  roleFilters?: string[];
+  onRoleFiltersChange?: (roles: string[]) => void;
+  locationFilters?: string[];
+  onLocationFiltersChange?: (locations: string[]) => void;
   statusFilter?: "active" | "exited" | "all" | "eligible_for_exit";
   onStatusFilterChange?: (status: "active" | "exited" | "all" | "eligible_for_exit") => void;
   exitEligibleLastPresent?: Record<string, string | null>;
@@ -62,17 +66,23 @@ export default function EmployeeTable({
   onMarkExit,
   onExportSelected,
   readOnly = false,
-  roleFilter: roleFilterProp,
-  onRoleFilterChange,
+  roleFilters: roleFiltersProp,
+  onRoleFiltersChange,
+  locationFilters: locationFiltersProp,
+  onLocationFiltersChange,
   statusFilter: statusFilterProp,
   onStatusFilterChange,
   exitEligibleLastPresent = {},
 }: EmployeeTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
-  const [localRoleFilter, setLocalRoleFilter] = useState("");
-  const roleFilter = onRoleFilterChange !== undefined ? (roleFilterProp ?? "") : localRoleFilter;
-  const setRoleFilter = onRoleFilterChange ?? setLocalRoleFilter;
+  const [localLocationFilters, setLocalLocationFilters] = useState<string[]>([]);
+  const [localRoleFilters, setLocalRoleFilters] = useState<string[]>([]);
+  const locationFilters =
+    onLocationFiltersChange !== undefined ? (locationFiltersProp ?? []) : localLocationFilters;
+  const setLocationFilters = onLocationFiltersChange ?? setLocalLocationFilters;
+  const roleFilters =
+    onRoleFiltersChange !== undefined ? (roleFiltersProp ?? []) : localRoleFilters;
+  const setRoleFilters = onRoleFiltersChange ?? setLocalRoleFilters;
   const [esicFilter, setEsicFilter] = useState("");
   const [localStatusFilter, setLocalStatusFilter] = useState<StatusFilter>("active");
   const statusFilter = onStatusFilterChange !== undefined ? (statusFilterProp ?? "active") : localStatusFilter;
@@ -164,13 +174,13 @@ export default function EmployeeTable({
     }
 
     // Location Filter
-    if (locationFilter) {
-      result = result.filter((e) => e.location === locationFilter);
+    if (locationFilters.length > 0) {
+      result = result.filter((e) => matchesMultiSelectFilter(e.location, locationFilters));
     }
 
     // Role Filter
-    if (roleFilter) {
-      result = result.filter((e) => (e.role || "").toLowerCase() === roleFilter.toLowerCase());
+    if (roleFilters.length > 0) {
+      result = result.filter((e) => matchesMultiSelectFilter(e.role, roleFilters));
     }
 
     // ESIC Filter
@@ -193,7 +203,7 @@ export default function EmployeeTable({
     });
 
     return result;
-  }, [employees, searchTerm, locationFilter, roleFilter, esicFilter, statusFilter, sortField, sortAsc, exitEligibleLastPresent]);
+  }, [employees, searchTerm, locationFilters, roleFilters, esicFilter, statusFilter, sortField, sortAsc, exitEligibleLastPresent]);
 
   // Handle select-all checkbox
   const isAllSelected = useMemo(() => {
@@ -224,8 +234,8 @@ export default function EmployeeTable({
 
   const clearFilters = () => {
     setSearchTerm("");
-    setLocationFilter("");
-    setRoleFilter("");
+    setLocationFilters([]);
+    setRoleFilters([]);
     setEsicFilter("");
     setStatusFilter("active");
   };
@@ -266,39 +276,31 @@ export default function EmployeeTable({
             </div>
 
             {/* Location filter */}
-            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600">
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600 min-w-[150px]">
               <MapPin size={16} className="text-slate-400 mr-1 shrink-0" />
-              <select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
-                className="py-2 pr-4 bg-transparent border-0 text-xs text-slate-700 focus:ring-0 focus:outline-none cursor-pointer"
-                id="location-filter-dd"
-              >
-                <option value="">All Locations</option>
-                {locations.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
-                  </option>
-                ))}
-              </select>
+              <SearchableMultiSelect
+                compact
+                placeholder="All Locations"
+                options={locations}
+                selected={locationFilters}
+                onChange={setLocationFilters}
+                className="flex-1 min-w-0"
+                containerId="employee-table-location-filter"
+              />
             </div>
 
             {/* Role filter */}
-            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600">
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 text-slate-600 min-w-[150px]">
               <Briefcase size={16} className="text-slate-400 mr-1 shrink-0" />
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="py-2 pr-4 bg-transparent border-0 text-xs text-slate-700 focus:ring-0 focus:outline-none cursor-pointer max-w-[140px]"
-                id="role-filter-dd"
-              >
-                <option value="">All Job Roles</option>
-                {roles.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
+              <SearchableMultiSelect
+                compact
+                placeholder="All Job Roles"
+                options={roles}
+                selected={roleFilters}
+                onChange={setRoleFilters}
+                className="flex-1 min-w-0"
+                containerId="employee-table-role-filter"
+              />
             </div>
 
             {/* ESIC filter */}
@@ -316,7 +318,7 @@ export default function EmployeeTable({
               </select>
             </div>
 
-            {(searchTerm || locationFilter || roleFilter || esicFilter || statusFilter !== "active") && (
+            {(searchTerm || locationFilters.length > 0 || roleFilters.length > 0 || esicFilter || statusFilter !== "active") && (
               <button
                 onClick={clearFilters}
                 className="px-3 py-2 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition font-semibold cursor-pointer"

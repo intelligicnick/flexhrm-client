@@ -132,6 +132,11 @@ import {
 } from "../lib/number-validation";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
+import { buildLabeledGrandTotalRow, buildSalaryGrandTotalRow, sumExportRows } from "../lib/export-totals";
+import {
+  formatMultiSelectExportLabel,
+  matchesMultiSelectFilter,
+} from "../lib/filter-helpers";
 import {
   appendLedgerItem,
   clearItemsOfType,
@@ -178,6 +183,27 @@ import ConfettiRain from "../components/ui/ConfettiRain";
 import { TOAST_DURATION_MS } from "../components/ui/AppToast";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
+
+function normalizeSavedLocationFilters(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is string =>
+        typeof item === "string" &&
+        item.trim() !== "" &&
+        item !== "All" &&
+        item !== "All Locations",
+    );
+  }
+  if (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    value !== "All" &&
+    value !== "All Locations"
+  ) {
+    return [value];
+  }
+  return [];
+}
 
 function applySalaryFieldsToDraft(
   emp: Employee,
@@ -488,11 +514,11 @@ export function useHRMSApp() {
   const activeSidebarTab = pathToTab(location.pathname);
   const setActiveSidebarTab = (tab: string) => navigate(tabToPath(tab));
   const [activePimSubTab, setActivePimSubTab] = useState("Employee List");
-  const [employeeListRoleFilter, setEmployeeListRoleFilter] = useState("");
+  const [employeeListRoleFilters, setEmployeeListRoleFilters] = useState<string[]>([]);
   const [employeeListStatusFilter, setEmployeeListStatusFilter] = useState<
     "active" | "exited" | "all" | "eligible_for_exit"
   >("active");
-  const [employeeListLocationFilter, setEmployeeListLocationFilter] = useState("");
+  const [employeeListLocationFilters, setEmployeeListLocationFilters] = useState<string[]>([]);
   const [employeeListEsicCoverageFilter, setEmployeeListEsicCoverageFilter] = useState<"" | "covered">("");
   const [renewalExpiryFilter, setRenewalExpiryFilter] = useState<
     "all" | "active" | "expiring_soon" | "expired" | "no_expiry" | "alert"
@@ -1512,7 +1538,7 @@ export function useHRMSApp() {
   const [isSubmittingBulkEdit, setIsSubmittingBulkEdit] = useState(false);
   // Salary Advanced Filtering states
   const [salarySearchQuery, setSalarySearchQuery] = useState("");
-  const [salaryLocationFilter, setSalaryLocationFilter] = useState("");
+  const [salaryLocationFilters, setSalaryLocationFilters] = useState<string[]>([]);
   const [salaryFilterType, setSalaryFilterType] = useState<"all" | "advances" | "penalties" | "perks">("all");
   const [salaryJoinStartFilter, setSalaryJoinStartFilter] = useState<string>("");
   const [salaryJoinEndFilter, setSalaryJoinEndFilter] = useState<string>("");
@@ -1550,7 +1576,7 @@ export function useHRMSApp() {
   const [newHelplineCategory, setNewHelplineCategory] = useState("Corporate Support");
   const [newHelplineLocation, setNewHelplineLocation] = useState("All Locations");
   const [helplineSearchQuery, setHelplineSearchQuery] = useState("");
-  const [helplineLocationFilter, setHelplineLocationFilter] = useState("All Locations");
+  const [helplineLocationFilters, setHelplineLocationFilters] = useState<string[]>([]);
 
   const fetchHelplines = useCallback(async () => {
     setIsFetchingHelplines(true);
@@ -1679,7 +1705,7 @@ export function useHRMSApp() {
   const [isFetchingExitEligibility, setIsFetchingExitEligibility] = useState(false);
   const [showExitEligibleModal, setShowExitEligibleModal] = useState(false);
 
-  const [attendanceLocationFilter, setAttendanceLocationFilter] = useState("All");
+  const [attendanceLocationFilters, setAttendanceLocationFilters] = useState<string[]>([]);
   const [attendanceRoleFilters, setAttendanceRoleFilters] = useState<string[]>([]);
   const [attendanceSkillFilters, setAttendanceSkillFilters] = useState<string[]>([]);
   const [isAttendanceRoleDropdownOpen, setIsAttendanceRoleDropdownOpen] = useState(false);
@@ -1689,6 +1715,7 @@ export function useHRMSApp() {
   const [isBulkWizardRoleDropdownOpen, setIsBulkWizardRoleDropdownOpen] = useState(false);
   const [isBulkWizardSkillDropdownOpen, setIsBulkWizardSkillDropdownOpen] = useState(false);
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
+  const [hideAttendanceAbsentColumn, setHideAttendanceAbsentColumn] = useState(false);
 
   // Bulk marking form states
   const [bulkStartDay, setBulkStartDay] = useState(1);
@@ -1914,7 +1941,7 @@ export function useHRMSApp() {
     const end = Math.max(start, Math.min(daysInMonth, bulkEndDay));
 
     const filtered = employees.filter(emp => {
-      const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
+      const locMatch = matchesMultiSelectFilter(emp.location, attendanceLocationFilters);
       const q = attendanceSearchQuery.toLowerCase().trim();
       const searchMatch = !q || emp.employeeCode.toLowerCase().includes(q) || (emp.nameAsPerAadhar || "").toLowerCase().includes(q);
       return locMatch && searchMatch;
@@ -2096,10 +2123,19 @@ export function useHRMSApp() {
   };
 
   // Landscape branded CSV/Excel download
-  const downloadAttendanceExcel = () => {
+  const promptHideAttendanceAbsentColumn = () => {
+    const hide = window.confirm(
+      "Hide the Total Absent column from attendance?\n\nClick OK to hide the Absent column in the attendance view and exports.\nClick Cancel to keep it visible.",
+    );
+    setHideAttendanceAbsentColumn(hide);
+    return hide;
+  };
+
+  const downloadAttendanceExcel = (options?: { hideAbsents?: boolean }) => {
+    const hideAbsents = options?.hideAbsents ?? hideAttendanceAbsentColumn;
     const daysInMonth = getDaysInSelectedMonth(selectedMonth);
     const filtered = employees.filter(emp => {
-      const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
+      const locMatch = matchesMultiSelectFilter(emp.location, attendanceLocationFilters);
       const roleMatch = attendanceRoleFilters.length === 0 || attendanceRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
       const skillMatch = employeeMatchesSkillFilters(emp, attendanceSkillFilters);
       const q = attendanceSearchQuery.toLowerCase().trim();
@@ -2108,7 +2144,8 @@ export function useHRMSApp() {
     });
 
     const daysHeaders = Array.from({ length: daysInMonth }, (_, i) => `Day ${i + 1}`);
-    const headers = ["SR NO", "Employee Code", "Employee Name", "Worksite Location", ...daysHeaders, "Presents", "Absents"];
+    const headers = ["SR NO", "Employee Code", "Employee Name", "Worksite Location", ...daysHeaders, "Presents"];
+    if (!hideAbsents) headers.push("Absents");
 
     const rows = filtered.map((emp, index) => {
       const monthData = attendanceDb[selectedMonth] || {};
@@ -2130,27 +2167,34 @@ export function useHRMSApp() {
         return display || "—";
       });
 
-      return [
+      const row = [
         index + 1,
         emp.employeeCode,
         emp.nameAsPerAadhar,
         emp.location || "Unassigned",
         ...daysCells,
         presents,
-        absents
       ];
+      if (!hideAbsents) row.push(absents);
+      return row;
     });
+
+    const presentsIdx = headers.indexOf("Presents");
+    const absentsIdx = hideAbsents ? -1 : headers.indexOf("Absents");
+    const sumIndices = absentsIdx >= 0 ? [presentsIdx, absentsIdx] : [presentsIdx];
+    const totals = sumExportRows(rows, sumIndices);
+    const grandTotalRow = buildLabeledGrandTotalRow(headers.length, 3, totals);
 
     const csvContent = "data:text/csv;charset=utf-8," 
       + `HRMS ENTERPRISE ATTENDANCE SHEET - ${selectedMonth}\n`
-      + `Report Location: ${attendanceLocationFilter === "All" ? "All Locations" : attendanceLocationFilter}\n`
+      + `Report Location: ${formatMultiSelectExportLabel(attendanceLocationFilters, "All Locations")}\n`
       + `Generated on: ${new Date().toLocaleString()}\n\n`
-      + [headers.join(","), ...rows.map(e => e.map(val => `"${val}"`).join(","))].join("\n");
+      + [headers.join(","), ...rows.map(e => e.map(val => `"${val}"`).join(",")), grandTotalRow.map(val => `"${val}"`).join(",")].join("\n");
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Attendance_Sheet_${selectedMonth.replace(" ", "_")}_${attendanceLocationFilter.replace(" ", "_")}.csv`);
+    link.setAttribute("download", `Attendance_Sheet_${selectedMonth.replace(" ", "_")}_${formatMultiSelectExportLabel(attendanceLocationFilters, "All").replace(/\s+/g, "_")}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2161,19 +2205,20 @@ export function useHRMSApp() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "DOWNLOAD_ATTENDANCE_CSV",
-        target: `Attendance CSV Sheet: Downloaded attendance register sheet for ${selectedMonth} (Location: ${attendanceLocationFilter === "All" ? "All Locations" : attendanceLocationFilter}) containing attendance tracking records for ${filtered.length} employees.`,
-        details: { month: selectedMonth, location: attendanceLocationFilter, recordCount: filtered.length, format: "CSV" }
+        target: `Attendance CSV Sheet: Downloaded attendance register sheet for ${selectedMonth} (Location: ${formatMultiSelectExportLabel(attendanceLocationFilters, "All Locations")}) containing attendance tracking records for ${filtered.length} employees.`,
+        details: { month: selectedMonth, location: attendanceLocationFilters, recordCount: filtered.length, format: "CSV" }
       })
     }).then(() => fetchAuditLogs()).catch(err => console.error("Audit log error:", err));
   };
 
   // Landscape branded PDF download
-  const downloadAttendancePDF = async () => {
+  const downloadAttendancePDF = async (options?: { hideAbsents?: boolean }) => {
     try {
+      const hideAbsents = options?.hideAbsents ?? hideAttendanceAbsentColumn;
       const { jsPDF, autoTable } = await loadPdfExport();
       const daysInMonth = getDaysInSelectedMonth(selectedMonth);
       const filtered = employees.filter(emp => {
-        const locMatch = attendanceLocationFilter === "All" || emp.location === attendanceLocationFilter;
+        const locMatch = matchesMultiSelectFilter(emp.location, attendanceLocationFilters);
         const roleMatch = attendanceRoleFilters.length === 0 || attendanceRoleFilters.some(f => (emp.role || "").toLowerCase() === f.toLowerCase());
         const skillMatch = employeeMatchesSkillFilters(emp, attendanceSkillFilters);
         const q = attendanceSearchQuery.toLowerCase().trim();
@@ -2193,11 +2238,12 @@ export function useHRMSApp() {
 
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
-      doc.text(`Worksite Location Designation: ${attendanceLocationFilter === "All" ? "All Corporate Branches" : attendanceLocationFilter}`, 14, 17);
+      doc.text(`Worksite Location Designation: ${formatMultiSelectExportLabel(attendanceLocationFilters, "All Corporate Branches")}`, 14, 17);
       doc.text(`Total Staff Enrolled: ${filtered.length} | Generated: ${new Date().toLocaleString()}`, 14, 22);
 
       const daysHeaders = Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`);
-      const headers = ["SR", "Emp Code", "Name", "Location", ...daysHeaders, "P", "A"];
+      const headers = ["SR", "Emp Code", "Name", "Location", ...daysHeaders, "P"];
+      if (!hideAbsents) headers.push("A");
 
       const rows = filtered.map((emp, index) => {
         const monthData = attendanceDb[selectedMonth] || {};
@@ -2207,6 +2253,7 @@ export function useHRMSApp() {
           empData,
           daysInMonth,
           (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+          { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
         );
 
         const daysCells = Array.from({ length: daysInMonth }, (_, i) => {
@@ -2218,16 +2265,24 @@ export function useHRMSApp() {
           return display || "—";
         });
 
-        return [
+        const row = [
           index + 1,
           emp.employeeCode,
           emp.nameAsPerAadhar.substring(0, 16),
           (emp.location || "Unassigned").substring(0, 12),
           ...daysCells,
           presents,
-          absents
         ];
+        if (!hideAbsents) row.push(absents);
+        return row;
       });
+
+      const presentsIdx = headers.indexOf("P");
+      const absentsIdx = hideAbsents ? -1 : headers.indexOf("A");
+      const sumIndices = absentsIdx >= 0 ? [presentsIdx, absentsIdx] : [presentsIdx];
+      const totals = sumExportRows(rows, sumIndices);
+      const grandTotalRow = buildLabeledGrandTotalRow(headers.length, 3, totals);
+      rows.push(grandTotalRow);
 
       autoTable(doc, {
         head: [headers],
@@ -2251,10 +2306,16 @@ export function useHRMSApp() {
           1: { cellWidth: 15, halign: "left" },
           2: { cellWidth: 30, halign: "left" },
           3: { cellWidth: 20, halign: "left" }
-        }
+        },
+        didParseCell: (data) => {
+          if (data.row.index === rows.length - 1) {
+            data.cell.styles.fontStyle = "bold";
+            data.cell.styles.fillColor = [255, 247, 237];
+          }
+        },
       });
 
-      doc.save(`Attendance_Sheet_${selectedMonth.replace(" ", "_")}_${attendanceLocationFilter.replace(" ", "_")}.pdf`);
+      doc.save(`Attendance_Sheet_${selectedMonth.replace(" ", "_")}_${formatMultiSelectExportLabel(attendanceLocationFilters, "All").replace(/\s+/g, "_")}.pdf`);
       triggerSuccess("Landscape Attendance PDF generated and saved successfully!");
 
       fetch("/api/audit-logs", {
@@ -2262,8 +2323,8 @@ export function useHRMSApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "DOWNLOAD_ATTENDANCE_PDF",
-          target: `Attendance PDF Report: Downloaded attendance register PDF (landscape format) for ${selectedMonth} (Location: ${attendanceLocationFilter === "All" ? "All Locations" : attendanceLocationFilter}) containing records for ${filtered.length} employees.`,
-          details: { month: selectedMonth, location: attendanceLocationFilter, recordCount: filtered.length, format: "PDF" }
+          target: `Attendance PDF Report: Downloaded attendance register PDF (landscape format) for ${selectedMonth} (Location: ${formatMultiSelectExportLabel(attendanceLocationFilters, "All Locations")}) containing records for ${filtered.length} employees.`,
+          details: { month: selectedMonth, location: attendanceLocationFilters, recordCount: filtered.length, format: "PDF" }
         })
       }).then(() => fetchAuditLogs()).catch(err => console.error("Audit log error:", err));
     } catch (err: any) {
@@ -2274,7 +2335,7 @@ export function useHRMSApp() {
   // Directory Sub-navigation & dialing overlays
   const [activeDirectorySubTab, setActiveDirectorySubTab] = useState<"employees" | "contacts">("employees");
   const [directorySearch, setDirectorySearch] = useState("");
-  const [directoryLocation, setDirectoryLocation] = useState("");
+  const [directoryLocationFilters, setDirectoryLocationFilters] = useState<string[]>([]);
   const [directoryGender, setDirectoryGender] = useState("");
   const [activeDialerContact, setActiveDialerContact] = useState<{ name: string; phone: string; role?: string } | null>(null);
   const [activeDialerStatus, setActiveDialerStatus] = useState<"ringing" | "connected" | "ended">("ringing");
@@ -2312,7 +2373,7 @@ export function useHRMSApp() {
     if (!isLoggedIn || !salaryUiRestrictions) return;
     applySalaryUiRestrictions(salaryUiRestrictions, {
       setSelectedSalaryColumns,
-      setSalaryLocationFilter,
+      setSalaryLocationFilters,
       setSalarySearchQuery,
       setSalaryFilterType,
       setSalaryJoinStartFilter,
@@ -2481,7 +2542,7 @@ export function useHRMSApp() {
       name,
       columns: [...selectedSalaryColumns],
       filters: {
-        location: salaryLocationFilter,
+        location: salaryLocationFilters,
         month: selectedMonth,
         searchQuery: salarySearchQuery,
         filterType: salaryFilterType,
@@ -2529,7 +2590,12 @@ export function useHRMSApp() {
           ? template.columns
           : [...SALARY_HEADERS]
       );
-      if (template.filters.location !== undefined) setSalaryLocationFilter(template.filters.location);
+      if (template.filters.location !== undefined) {
+        setSalaryLocationFilters(normalizeSavedLocationFilters(template.filters.location));
+      }
+      if (template.filters.locations !== undefined) {
+        setSalaryLocationFilters(normalizeSavedLocationFilters(template.filters.locations));
+      }
       if (template.filters.month !== undefined) setSelectedMonth(template.filters.month);
       if (template.filters.searchQuery !== undefined) setSalarySearchQuery(template.filters.searchQuery);
       if (template.filters.filterType !== undefined) setSalaryFilterType(template.filters.filterType);
@@ -3634,7 +3700,8 @@ export function useHRMSApp() {
   };
 
   // Download custom Salary Excel sheet using ExcelJS in landscape orientation with active Location stamp
-  const downloadSalaryExcel = async (data: Employee[], cols: string[], activeLocation: string, month: string) => {
+  const downloadSalaryExcel = async (data: Employee[], cols: string[], activeLocation: string[], month: string) => {
+    const locationLabel = formatMultiSelectExportLabel(activeLocation, "All Locations");
     try {
       const ExcelJS = await loadExcelJS();
       const workbook = new ExcelJS.Workbook();
@@ -3645,7 +3712,7 @@ export function useHRMSApp() {
 
       // Set nicely styled titles
       ws.addRow([`Dynamic Custom Payroll Calculations Sheet — ${month}`]);
-      ws.addRow([`Worksite / Branch Location: ${activeLocation || "All Locations"}`]);
+      ws.addRow([`Worksite / Branch Location: ${locationLabel}`]);
       ws.addRow([`Generated on: ${new Date().toLocaleString()} | Filtered records: ${data.length}`]);
       ws.addRow([]); // Grid buffer space
 
@@ -3666,10 +3733,21 @@ export function useHRMSApp() {
       headerRow.height = 24;
 
       // Add actual data
+      const tableRows: unknown[][] = [];
       data.forEach((emp) => {
         const rowData = cols.map(c => getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled));
+        tableRows.push(rowData);
         ws.addRow(rowData);
       });
+
+      const grandTotalRow = buildSalaryGrandTotalRow(tableRows, cols, 0);
+      const totalRow = ws.addRow(grandTotalRow);
+      totalRow.font = { bold: true, name: "Calibri", size: 11 };
+      totalRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFF7ED" },
+      };
 
       // Auto-scale column widths
       ws.columns.forEach((col, cIdx) => {
@@ -3711,7 +3789,8 @@ export function useHRMSApp() {
   };
 
   // Download custom Salary PDF sheet in landscape orientation with active Location stamp
-  const downloadSalaryPDF = async (data: Employee[], cols: string[], activeLocation: string, month: string) => {
+  const downloadSalaryPDF = async (data: Employee[], cols: string[], activeLocation: string[], month: string) => {
+    const locationLabel = formatMultiSelectExportLabel(activeLocation, "All Locations");
     try {
       const { jsPDF, autoTable } = await loadPdfExport();
       const doc = new jsPDF({
@@ -3726,17 +3805,19 @@ export function useHRMSApp() {
 
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
-      doc.text(`Worksite / Branch Location: ${activeLocation || "All Locations"} | Generated on: ${new Date().toLocaleString()}`, 14, 18);
+      doc.text(`Worksite / Branch Location: ${locationLabel} | Generated on: ${new Date().toLocaleString()}`, 14, 18);
       doc.text(`Filtered Count: ${data.length} Employees Mapped`, 14, 23);
 
       const tableHeaders = [cols];
-      const tableData = data.map((emp) => 
+      const tableData: (string | number)[][] = data.map((emp) => 
         cols.map(c => {
           const val = getSalaryColumnValue(emp, c, month, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled);
-          if (typeof val === "number") return val.toLocaleString("en-IN");
+          if (typeof val === "number") return val;
           return String(val);
         })
       );
+      const grandTotalRow = buildSalaryGrandTotalRow(tableData, cols, 0);
+      tableData.push(grandTotalRow);
 
       // Auto-scale font sizes dynamically based on chosen column counts to always fit A4 Landscape neatly
       let calculatedFontSize = 8;
@@ -3764,7 +3845,13 @@ export function useHRMSApp() {
         alternateRowStyles: {
           fillColor: [248, 250, 252]
         },
-        margin: { left: 8, right: 8 }
+        margin: { left: 8, right: 8 },
+        didParseCell: (data) => {
+          if (data.row.index === tableData.length - 1) {
+            data.cell.styles.fontStyle = "bold";
+            data.cell.styles.fillColor = [255, 247, 237];
+          }
+        },
       });
 
       doc.save(`custom_salary_sheet_${month.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`);
@@ -6596,7 +6683,7 @@ export function useHRMSApp() {
       selectedSalaryColumns.length > 0 ? selectedSalaryColumns : [...SALARY_HEADERS];
     const salarySheet = {
       month: selectedMonth,
-      location: salaryLocationFilter || "All Locations",
+      location: formatMultiSelectExportLabel(salaryLocationFilters, "All Locations"),
       columns: cols,
       employeeRows: selectedEmployees.map((emp) =>
         cols.map((c) =>
@@ -7107,10 +7194,8 @@ export function useHRMSApp() {
       }
 
       // 2. Location Filter
-      if (salaryLocationFilter && salaryLocationFilter !== "All") {
-        if ((emp.location || "").toLowerCase() !== salaryLocationFilter.toLowerCase()) {
-          return false;
-        }
+      if (!matchesMultiSelectFilter(emp.location, salaryLocationFilters)) {
+        return false;
       }
 
       // 3. Joining Date Filter (PF Joining Date)
@@ -7255,7 +7340,7 @@ export function useHRMSApp() {
     employees,
     attendanceDb,
     salarySearchQuery,
-    salaryLocationFilter,
+    salaryLocationFilters,
     salaryFilterType,
     selectedMonth,
     salaryJoinStartFilter,
@@ -7466,12 +7551,12 @@ export function useHRMSApp() {
     roleError,
     roleSuccess,
     activePimSubTab,
-    employeeListRoleFilter,
+    employeeListRoleFilters,
     employeeListStatusFilter,
-    employeeListLocationFilter,
+    employeeListLocationFilters,
     employeeListEsicCoverageFilter,
     setEmployeeListStatusFilter,
-    setEmployeeListLocationFilter,
+    setEmployeeListLocationFilters,
     setEmployeeListEsicCoverageFilter,
     renewalExpiryFilter,
     setRenewalExpiryFilter,
@@ -7566,7 +7651,7 @@ export function useHRMSApp() {
     isLedgerRoleDropdownOpen,
     tempLedgerEntries,
     salarySearchQuery,
-    salaryLocationFilter,
+    salaryLocationFilters,
     salaryFilterType,
     salaryJoinStartFilter,
     salaryJoinEndFilter,
@@ -7596,10 +7681,10 @@ export function useHRMSApp() {
     newHelplineCategory,
     newHelplineLocation,
     helplineSearchQuery,
-    helplineLocationFilter,
+    helplineLocationFilters,
     attendanceDb,
     isFetchingAttendance,
-    attendanceLocationFilter,
+    attendanceLocationFilters,
     attendanceRoleFilters,
     attendanceSkillFilters,
     isAttendanceRoleDropdownOpen,
@@ -7613,6 +7698,9 @@ export function useHRMSApp() {
     handleConfirmDialogConfirm,
     handleConfirmDialogCancel,
     attendanceSearchQuery,
+    hideAttendanceAbsentColumn,
+    setHideAttendanceAbsentColumn,
+    promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
     bulkStatus,
@@ -7629,7 +7717,7 @@ export function useHRMSApp() {
     bulkConfirm2,
     activeDirectorySubTab,
     directorySearch,
-    directoryLocation,
+    directoryLocationFilters,
     directoryGender,
     activeDialerContact,
     activeDialerStatus,
@@ -7985,7 +8073,7 @@ export function useHRMSApp() {
     setRoleError,
     setRoleSuccess,
     setActivePimSubTab,
-    setEmployeeListRoleFilter,
+    setEmployeeListRoleFilters,
     setSidebarSearch,
     setIsSidebarCollapsed,
     setIsProfileOpen,
@@ -8048,7 +8136,7 @@ export function useHRMSApp() {
     setIsLedgerRoleDropdownOpen,
     setTempLedgerEntries,
     setSalarySearchQuery,
-    setSalaryLocationFilter,
+    setSalaryLocationFilters,
     setSalaryFilterType,
     setSalaryJoinStartFilter,
     setSalaryJoinEndFilter,
@@ -8078,10 +8166,10 @@ export function useHRMSApp() {
     setNewHelplineCategory,
     setNewHelplineLocation,
     setHelplineSearchQuery,
-    setHelplineLocationFilter,
+    setHelplineLocationFilters,
     setAttendanceDb,
     setIsFetchingAttendance,
-    setAttendanceLocationFilter,
+    setAttendanceLocationFilters,
     setAttendanceRoleFilters,
     setAttendanceSkillFilters,
     setIsAttendanceRoleDropdownOpen,
@@ -8107,7 +8195,7 @@ export function useHRMSApp() {
     setBulkConfirm2,
     setActiveDirectorySubTab,
     setDirectorySearch,
-    setDirectoryLocation,
+    setDirectoryLocationFilters,
     setDirectoryGender,
     setActiveDialerContact,
     setActiveDialerStatus,
