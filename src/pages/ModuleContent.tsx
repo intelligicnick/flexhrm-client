@@ -123,6 +123,7 @@ import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-co
 import {
   countMonthAttendance,
   isWeeklyOffDay,
+  getDayOfWeekForMonthDay,
   getEffectiveAttendanceStatus,
   getBulkAttendanceDisabledDays,
   filterSelectableBulkDays,
@@ -176,7 +177,7 @@ function attendanceBadgeClass(code: string): string {
     case "H":
       return `${base} bg-blue-100 text-blue-800`;
     case "WO":
-      return `${base} bg-violet-100 text-violet-800`;
+      return `${base} bg-red-100 text-red-800`;
     default:
       return `${base} bg-slate-100 text-slate-400 font-semibold`;
   }
@@ -4612,20 +4613,34 @@ export default function ModuleContent() {
 
                                   {/* Interactive Grid Table */}
                               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-                                <div className="overflow-x-auto max-w-full">
-                                  <table className="w-full text-left border-collapse min-w-[1200px]">
+                                <div className="overflow-auto max-w-full max-h-[min(70vh,720px)]">
+                                  <table className="w-full text-left border-separate border-spacing-0 min-w-[1200px]">
                                     <thead>
-                                      <tr className="bg-slate-100 text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                                        <th className="px-3 py-2 w-12 text-center">SR</th>
-                                        <th className="px-3 py-2 w-28">Emp Code</th>
-                                        <th className="px-3 py-2 w-48">Employee Name</th>
-                                        <th className="px-3 py-2 w-36">Worksite Location</th>
-                                        {Array.from({ length: getDaysInSelectedMonth(selectedMonth) }, (_, i) => (
-                                          <th key={i} className="px-1 py-2 text-center w-8 font-mono">{i + 1}</th>
-                                        ))}
-                                        <th className="px-3 py-2 text-center w-16">P</th>
+                                      <tr className="text-[10px] font-black uppercase tracking-wider border-b border-slate-200">
+                                        <th className="sticky top-0 z-30 px-3 py-2 w-12 text-center bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">SR</th>
+                                        <th className="sticky top-0 z-30 px-3 py-2 w-28 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Emp Code</th>
+                                        <th className="sticky top-0 z-30 px-3 py-2 w-48 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Employee Name</th>
+                                        <th className="sticky top-0 z-30 px-3 py-2 w-36 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Worksite Location</th>
+                                        {Array.from({ length: getDaysInSelectedMonth(selectedMonth) }, (_, i) => {
+                                          const dayNum = i + 1;
+                                          const isSunday = getDayOfWeekForMonthDay(selectedMonth, dayNum) === 0;
+                                          return (
+                                            <th
+                                              key={i}
+                                              title={isSunday ? `Sunday · ${dayNum}` : `Day ${dayNum}`}
+                                              className={`sticky top-0 z-30 px-1 py-2 text-center w-8 font-mono shadow-[inset_0_-1px_0_0_rgb(226,232,240)] ${
+                                                isSunday
+                                                  ? "bg-red-100 text-red-700 font-black"
+                                                  : "bg-slate-100 text-slate-500"
+                                              }`}
+                                            >
+                                              {dayNum}
+                                            </th>
+                                          );
+                                        })}
+                                        <th className="sticky top-0 z-30 px-3 py-2 text-center w-16 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">P</th>
                                         {!hideAttendanceAbsentColumn && (
-                                          <th className="px-3 py-2 text-center w-16">A</th>
+                                          <th className="sticky top-0 z-30 px-3 py-2 text-center w-16 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">A</th>
                                         )}
                                       </tr>
                                     </thead>
@@ -4701,6 +4716,7 @@ export default function ModuleContent() {
                                                 const currentStatus = empData[dayNum] || "";
                                                 const isExitedToday = isEmployeeExitedOnDayStatic(emp, selectedMonth, dayNum);
                                                 const isWeeklyOff = isWeeklyOffDay(emp.workingDaysType, selectedMonth, dayNum);
+                                                const isSunday = getDayOfWeekForMonthDay(selectedMonth, dayNum) === 0;
                                                 const effectiveStatus = getEffectiveAttendanceStatus(
                                                   emp.workingDaysType,
                                                   selectedMonth,
@@ -4708,7 +4724,7 @@ export default function ModuleContent() {
                                                   currentStatus,
                                                 );
                                                 return (
-                                                  <td key={i} className="px-0.5 py-1 text-center">
+                                                  <td key={i} className={`px-0.5 py-1 text-center ${isSunday ? "bg-red-50/50" : ""}`}>
                                                     {isExitedToday ? (
                                                       <span 
                                                         className="text-[9px] font-bold text-slate-400 select-none bg-slate-100 rounded px-1.5 py-0.5 border border-slate-200"
@@ -4725,7 +4741,7 @@ export default function ModuleContent() {
                                                           if (val === "P") handleCellAttendanceChange(emp.id, dayNum, "P");
                                                         }}
                                                         title="Weekly Off — change to Present if employee worked"
-                                                        className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-violet-100 text-violet-800"
+                                                        className="text-[9px] font-black text-center border-0 rounded px-1 py-0.5 focus:ring-0 focus:outline-none cursor-pointer bg-red-100 text-red-800"
                                                       >
                                                         <option value="WO">WO</option>
                                                         <option value="P">P</option>
