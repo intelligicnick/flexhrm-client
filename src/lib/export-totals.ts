@@ -48,7 +48,7 @@ export function buildLabeledGrandTotalRow(
   totalsByColumn: Record<number, number>,
   label = "GRAND TOTAL",
 ): (string | number)[] {
-  const row = Array.from({ length: columnCount }, () => "");
+  const row: (string | number)[] = Array.from({ length: columnCount }, () => "");
   row[labelColumnIndex] = label;
   for (const [colIdx, total] of Object.entries(totalsByColumn)) {
     row[Number(colIdx)] = Math.round(total);
