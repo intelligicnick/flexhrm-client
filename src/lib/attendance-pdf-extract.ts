@@ -78,10 +78,18 @@ export type AttendancePdfExtractResult = {
 };
 
 let ocrWorkerPromise: Promise<import("tesseract.js").Worker> | null = null;
+let ocrModulePromise: Promise<typeof import("tesseract.js")> | null = null;
+
+async function getOcrModule(): Promise<typeof import("tesseract.js")> {
+  if (!ocrModulePromise) {
+    ocrModulePromise = import("tesseract.js");
+  }
+  return ocrModulePromise;
+}
 
 async function getOcrWorker(): Promise<import("tesseract.js").Worker> {
   if (!ocrWorkerPromise) {
-    const { createWorker } = await import("tesseract.js");
+    const { createWorker } = await getOcrModule();
     ocrWorkerPromise = createWorker("eng");
   }
   return ocrWorkerPromise;
@@ -106,24 +114,25 @@ async function ocrRegion(
   mode: "header" | "name" | "total" | "generic",
 ): Promise<string> {
   const worker = await getOcrWorker();
+  const { PSM } = await getOcrModule();
   if (mode === "header") {
     await worker.setParameters({
-      tessedit_pageseg_mode: "7",
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 :-/",
     });
   } else if (mode === "name") {
     await worker.setParameters({
-      tessedit_pageseg_mode: "7",
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .'-",
     });
   } else if (mode === "total") {
     await worker.setParameters({
-      tessedit_pageseg_mode: "10",
+      tessedit_pageseg_mode: PSM.SINGLE_CHAR,
       tessedit_char_whitelist: "0123456789",
     });
   } else {
     await worker.setParameters({
-      tessedit_pageseg_mode: "6",
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
     });
   }
   const { data } = await worker.recognize(canvas);

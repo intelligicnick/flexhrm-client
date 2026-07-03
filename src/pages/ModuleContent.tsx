@@ -138,6 +138,7 @@ import {
   isFilterLocked,
   isFilterVisible,
   SALARY_COLUMNS,
+  type SalaryColumn,
 } from "../lib/role-ui-restrictions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import AdminAccountsPanel from "../components/admin/AdminAccountsPanel";
@@ -2419,7 +2420,9 @@ export default function ModuleContent() {
                                         headers: ["Net Payable"]
                                       }
                                     ].filter((group) => group.headers.some((header) => allowSalaryColumn(header))).map(group => {
-                                      const visibleGroupHeaders = group.headers.filter((header) => allowSalaryColumn(header));
+                                      const visibleGroupHeaders: SalaryColumn[] = group.headers.filter(
+                                        (header): header is SalaryColumn => allowSalaryColumn(header),
+                                      );
                                       const groupCheckedCount = visibleGroupHeaders.filter(h => visibleSalaryColumns.includes(h)).length;
                                       const isAllGroupChecked = groupCheckedCount === visibleGroupHeaders.length && visibleGroupHeaders.length > 0;
                                       const isSomeGroupChecked = groupCheckedCount > 0 && !isAllGroupChecked;
@@ -2448,7 +2451,7 @@ export default function ModuleContent() {
                                               const isChecked = visibleSalaryColumns.includes(header);
                                           
                                               // Shorten names for clean fit inside small columns
-                                              let displayName = header;
+                                              let displayName: string = header;
                                               if (header === "Skill Category") displayName = "Skill Cat.";
                                               else if (header === "Job Role") displayName = "Role";
                                               else if (header === "Total Salary") displayName = "Total Sal";
@@ -2627,13 +2630,24 @@ export default function ModuleContent() {
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Basic Pay</th>
                                         )}
                                         {(() => {
-                                          const count = ["Employer PF (13%)", "Employer ESIC (3.25%)"].filter(c => visibleSalaryColumns.includes(c)).length;
+                                          const count = (["Employer PF (13%)", "Employer ESIC (3.25%)"] as const).filter(
+                                            (c) => visibleSalaryColumns.includes(c),
+                                          ).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-blue-50 text-blue-700 text-center" colSpan={count}>Employer Liability</th>
                                           ) : null;
                                         })()}
                                         {(() => {
-                                          const count = ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"].filter(c => visibleSalaryColumns.includes(c)).length;
+                                          const count = (
+                                            [
+                                              "Employee PF (12%)",
+                                              "Employee ESIC (0.75%)",
+                                              "Professional Tax (PT)",
+                                              "Advance Balance",
+                                              "Uniform Deductions",
+                                              "Penalty Balance",
+                                            ] as const
+                                          ).filter((c) => visibleSalaryColumns.includes(c)).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
                                           ) : null;
@@ -2645,7 +2659,9 @@ export default function ModuleContent() {
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
                                         )}
                                         {(() => {
-                                          const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => visibleSalaryColumns.includes(c)).length;
+                                          const count = (["Food Perk", "Accommodation Perk", "Conveyance Perk"] as const).filter(
+                                            (c) => visibleSalaryColumns.includes(c),
+                                          ).length;
                                           return count > 0 ? (
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-indigo-50 text-indigo-700 text-center" colSpan={count}>Extra Perks</th>
                                           ) : null;
@@ -2738,7 +2754,30 @@ export default function ModuleContent() {
                                             colSpan={
                                               1 +
                                               ((visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) ? 1 : 0) +
-                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Total Deductions", "Net Salary", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => visibleSalaryColumns.includes(c)).length
+                                              ([
+                                                "Skill Category",
+                                                "Job Role",
+                                                "Present Days",
+                                                "Daily Wage",
+                                                "Total Salary",
+                                                "Gross Salary (Monthly)",
+                                                "Basic Salary",
+                                                "Employer PF (13%)",
+                                                "Employer ESIC (3.25%)",
+                                                "Employee PF (12%)",
+                                                "Employee ESIC (0.75%)",
+                                                "Professional Tax (PT)",
+                                                "Advance Balance",
+                                                "Uniform Deductions",
+                                                "Penalty Balance",
+                                                "Total Deductions",
+                                                "Net Salary",
+                                                "Food Perk",
+                                                "Accommodation Perk",
+                                                "Conveyance Perk",
+                                                "Net Payable",
+                                                "Payment Status",
+                                              ] as const).filter((c) => visibleSalaryColumns.includes(c)).length
                                             } 
                                             className="p-8 text-center text-xs text-slate-400 font-medium"
                                           >

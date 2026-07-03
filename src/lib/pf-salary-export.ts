@@ -1,4 +1,4 @@
-import type ExcelJS from "exceljs";
+import type * as ExcelJS from "exceljs";
 import { Employee } from "../types";
 import { getMonthLedger } from "./ledger-helpers";
 import { getSalaryColumnValue } from "./salary-columns";
@@ -355,11 +355,11 @@ export function addPfSalaryDataToWorksheet(
 }
 
 export async function buildPfSalaryWorkbookBuffer(
-  ExcelJS: typeof import("exceljs").default,
+  ExcelJSImport: typeof ExcelJS,
   employees: Employee[],
   ctx: PfSalaryExportContext,
 ): Promise<{ buffer: ArrayBuffer; recordCount: number; sheetCount: number }> {
-  const workbook = new ExcelJS.Workbook();
+  const workbook = new ExcelJSImport.Workbook();
   const grouped = new Map<string, Employee[]>();
 
   employees.forEach((emp) => {
