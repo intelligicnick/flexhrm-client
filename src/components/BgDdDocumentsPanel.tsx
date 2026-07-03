@@ -258,7 +258,10 @@ const BgDdDocumentsPanel = forwardRef<BgDdDocumentsPanelHandle, BgDdDocumentsPan
           {savedDocs.map((doc) => (
             <div
               key={doc.id}
-              className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2"
+              className="flex cursor-pointer items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 transition hover:border-slate-300 hover:bg-slate-50"
+              onClick={() => {
+                if (bgDdId) setPreviewDoc(doc);
+              }}
             >
               <div className="flex min-w-0 items-center gap-2">
                 <FileText size={14} className="shrink-0 text-slate-400" />
@@ -271,7 +274,10 @@ const BgDdDocumentsPanel = forwardRef<BgDdDocumentsPanelHandle, BgDdDocumentsPan
                 {bgDdId && (
                   <button
                     type="button"
-                    onClick={() => setPreviewDoc(doc)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPreviewDoc(doc);
+                    }}
                     className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                     title="Preview"
                   >
@@ -281,7 +287,10 @@ const BgDdDocumentsPanel = forwardRef<BgDdDocumentsPanelHandle, BgDdDocumentsPan
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => void handleDeleteSaved(doc)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteSaved(doc);
+                    }}
                     className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
                     title="Delete"
                   >

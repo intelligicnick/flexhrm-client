@@ -3,6 +3,7 @@ import { Edit2, Plus, Shield, Trash2 } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import {
   ROLE_PERMISSION_MODULE_ROWS,
+  createFullRolePermission,
   createEmptyRolePermissions,
   DEFAULT_NEW_ROLE_PERMISSIONS,
 } from "../../lib/permissions";
@@ -34,6 +35,7 @@ export default function RolesPermissionsPanel() {
   } = useHRMS();
 
   const canEditAdmin = !!userPermissions.admin?.edit;
+  const canDeleteAdmin = !!userPermissions.admin?.delete;
 
   const toggleRoleSalaryUiFilter = (filterKey: string) => {
     setRoleUiInput((prev) => {
@@ -91,11 +93,20 @@ export default function RolesPermissionsPanel() {
   const allRoleModulesEditSelected = ROLE_PERMISSION_MODULE_ROWS.every(
     (mod) => !!rolePermsInput[mod.key]?.view && !!rolePermsInput[mod.key]?.edit,
   );
+  const allRoleModulesDeleteSelected = ROLE_PERMISSION_MODULE_ROWS.every(
+    (mod) =>
+      !!rolePermsInput[mod.key]?.view &&
+      !!rolePermsInput[mod.key]?.edit &&
+      !!rolePermsInput[mod.key]?.delete,
+  );
   const someRoleModulesViewSelected = ROLE_PERMISSION_MODULE_ROWS.some(
     (mod) => !!rolePermsInput[mod.key]?.view,
   );
   const someRoleModulesEditSelected = ROLE_PERMISSION_MODULE_ROWS.some(
     (mod) => !!rolePermsInput[mod.key]?.edit,
+  );
+  const someRoleModulesDeleteSelected = ROLE_PERMISSION_MODULE_ROWS.some(
+    (mod) => !!rolePermsInput[mod.key]?.delete,
   );
 
   const setAllRoleModuleViews = (checked: boolean) => {
@@ -106,6 +117,7 @@ export default function RolesPermissionsPanel() {
           ...prev[mod.key],
           view: checked,
           edit: checked ? !!prev[mod.key]?.edit : false,
+          delete: checked ? !!prev[mod.key]?.delete : false,
         };
       });
       return next;
@@ -119,6 +131,21 @@ export default function RolesPermissionsPanel() {
         next[mod.key] = {
           view: checked ? true : !!prev[mod.key]?.view,
           edit: checked,
+          delete: checked ? !!prev[mod.key]?.delete : false,
+        };
+      });
+      return next;
+    });
+  };
+
+  const setAllRoleModuleDeletes = (checked: boolean) => {
+    setRolePermsInput((prev) => {
+      const next = { ...prev };
+      ROLE_PERMISSION_MODULE_ROWS.forEach((mod) => {
+        next[mod.key] = {
+          view: checked ? true : !!prev[mod.key]?.view,
+          edit: checked ? true : !!prev[mod.key]?.edit,
+          delete: checked,
         };
       });
       return next;
@@ -129,7 +156,7 @@ export default function RolesPermissionsPanel() {
     setRolePermsInput((prev) => {
       const next = { ...prev };
       ROLE_PERMISSION_MODULE_ROWS.forEach((mod) => {
-        next[mod.key] = { view: true, edit: true };
+        next[mod.key] = { view: true, edit: true, delete: true };
       });
       return next;
     });
@@ -139,7 +166,7 @@ export default function RolesPermissionsPanel() {
     setRolePermsInput((prev) => {
       const next = { ...prev };
       ROLE_PERMISSION_MODULE_ROWS.forEach((mod) => {
-        next[mod.key] = { view: true, edit: false };
+        next[mod.key] = { view: true, edit: false, delete: false };
       });
       return next;
     });
@@ -186,14 +213,18 @@ export default function RolesPermissionsPanel() {
 
   const activeRoleCount = useMemo(
     () =>
-      Object.values(rolePermsInput).filter((perm) => perm?.view || perm?.edit).length,
+      Object.values(rolePermsInput).filter((perm) => perm?.view || perm?.edit || perm?.delete).length,
     [rolePermsInput],
   );
 
   const loadRoleIntoEditor = (role: (typeof rolesList)[number]) => {
     setRoleNameInput(role.name);
     setRoleDescInput(role.description || "");
-    setRolePermsInput(role.permissions || createEmptyRolePermissions());
+    const normalized = createEmptyRolePermissions();
+    ROLE_PERMISSION_MODULE_ROWS.forEach((mod) => {
+      normalized[mod.key] = createFullRolePermission(role.permissions?.[mod.key]);
+    });
+    setRolePermsInput(normalized);
     setRoleUiInput(role.uiRestrictions || createEmptyRoleUiRestrictions());
     triggerSuccess(`Loaded "${role.name}" into the editor.`);
   };
@@ -213,7 +244,7 @@ export default function RolesPermissionsPanel() {
           Roles & Permissions
         </h3>
         <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-          Pick a role on the left, tune module access on the right. View unlocks the menu tab; Edit allows saving changes.
+          Pick a role on the left, tune module access on the right. View unlocks the menu tab, Edit allows updates, and Delete allows removals.
         </p>
       </div>
 
@@ -285,24 +316,28 @@ export default function RolesPermissionsPanel() {
                           {enabledModules} module{enabledModules === 1 ? "" : "s"} enabled
                         </p>
                       </button>
-                      {canEditAdmin && (
+                      {(canEditAdmin || canDeleteAdmin) && (
                         <div className="flex items-center gap-0.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => loadRoleIntoEditor(role)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white transition cursor-pointer"
-                            title="Edit role"
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteRole(role.name)}
-                            className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
-                            title="Delete role"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {canEditAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => loadRoleIntoEditor(role)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-white transition cursor-pointer"
+                              title="Edit role"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                          )}
+                          {canDeleteAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRole(role.name)}
+                              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                              title="Delete role"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -375,7 +410,7 @@ export default function RolesPermissionsPanel() {
                     onClick={grantAllRoleModuleAccess}
                     className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer"
                   >
-                    All view + edit
+                    All access
                   </button>
                   <button
                     type="button"
@@ -437,6 +472,23 @@ export default function RolesPermissionsPanel() {
                             />
                           </label>
                         </th>
+                        <th className="p-3 text-center w-24">
+                          <label className="inline-flex flex-col items-center gap-1 cursor-pointer select-none">
+                            <span>Delete</span>
+                            <input
+                              type="checkbox"
+                              checked={allRoleModulesDeleteSelected}
+                              ref={(el) => {
+                                if (el) {
+                                  el.indeterminate =
+                                    someRoleModulesDeleteSelected && !allRoleModulesDeleteSelected;
+                                }
+                              }}
+                              onChange={(e) => setAllRoleModuleDeletes(e.target.checked)}
+                              className="rounded text-orange-500 focus:ring-orange-500 scale-110 cursor-pointer"
+                            />
+                          </label>
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -462,6 +514,7 @@ export default function RolesPermissionsPanel() {
                                     ...prev[mod.key],
                                     view: val,
                                     edit: val ? prev[mod.key]?.edit : false,
+                                    delete: val ? prev[mod.key]?.delete : false,
                                   },
                                 }));
                               }}
@@ -480,7 +533,30 @@ export default function RolesPermissionsPanel() {
                                   ...prev,
                                   [mod.key]: {
                                     ...prev[mod.key],
+                                    view: e.target.checked ? true : !!prev[mod.key]?.view,
                                     edit: e.target.checked,
+                                    delete: e.target.checked ? !!prev[mod.key]?.delete : false,
+                                  },
+                                }));
+                              }}
+                              className="rounded text-orange-600 focus:ring-orange-500 scale-110 cursor-pointer disabled:opacity-40"
+                            />
+                          </td>
+                          <td className="p-3 text-center">
+                            <input
+                              id={`role-perm-delete-${mod.key}`}
+                              name={`rolePermDelete_${mod.key}`}
+                              type="checkbox"
+                              checked={!!rolePermsInput[mod.key]?.delete}
+                              disabled={!rolePermsInput[mod.key]?.edit}
+                              onChange={(e) => {
+                                setRolePermsInput((prev) => ({
+                                  ...prev,
+                                  [mod.key]: {
+                                    ...prev[mod.key],
+                                    view: e.target.checked ? true : !!prev[mod.key]?.view,
+                                    edit: e.target.checked ? true : !!prev[mod.key]?.edit,
+                                    delete: e.target.checked,
                                   },
                                 }));
                               }}

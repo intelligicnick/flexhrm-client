@@ -40,6 +40,7 @@ import {
   ChevronRight,
   Info,
   Building,
+  Landmark,
   CheckCircle2,
   FileText,
   BarChart4,
@@ -63,6 +64,7 @@ import {
   Gavel,
   Compass,
   Smartphone,
+  ScanLine,
 } from "lucide-react";
 import ExcelJS from "exceljs";
 import { jsPDF } from "jspdf";
@@ -147,13 +149,15 @@ import ConfettiRain from "../components/ui/ConfettiRain";
 import ExcelPreviewGrid from "../components/ExcelPreviewGrid";
 import BirthdaysTab from "../components/BirthdaysTab";
 import BulkAttendanceDateCalendar from "../components/BulkAttendanceDateCalendar";
-import { LedgerOverviewRow, filterEmployeesWithLedgerEntries } from "../components/LedgerOverviewRow";
+import EmployeeAttendanceMarkingView from "../components/EmployeeAttendanceMarkingView";
+import AttendancePdfUploadWizard from "../components/AttendancePdfUploadWizard";
+import { filterEmployeesWithLedgerEntries } from "../components/LedgerOverviewRow";
+import LedgerRecordedOverviewModal from "../components/LedgerRecordedOverviewModal";
 import {
   getMonthLedger,
-  getTotalByType,
   sumMonthTotals,
   defaultTempLedgerEntry,
-  LEDGER_TYPE_LABELS,
+  getLedgerDateBoundsForMonth,
 } from "../lib/ledger-helpers";
 import {
   buildLabeledGrandTotalRow,
@@ -349,6 +353,10 @@ export default function ModuleContent() {
     attendanceSearchQuery,
     hideAttendanceAbsentColumn,
     setHideAttendanceAbsentColumn,
+    attendanceStickyColumns,
+    setAttendanceStickyColumns,
+    salaryStickyEmployeeDetails,
+    setSalaryStickyEmployeeDetails,
     promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
@@ -356,6 +364,7 @@ export default function ModuleContent() {
     bulkWizardStep,
     isBulkWizardOpen,
     attendanceSubView,
+    individualAttendanceEmployeeId,
     attendanceRecordFilter,
     bulkSelLocations,
     bulkSelEmployees,
@@ -423,6 +432,10 @@ export default function ModuleContent() {
     handleCellAttendanceChange,
     handleApplyBulkAttendance,
     handleApplyBulkWizardAttendance,
+    handleApplyPdfAttendanceImport,
+    handleEmployeeBulkAttendanceChange,
+    openEmployeeAttendanceMarking,
+    closeEmployeeAttendanceMarking,
     downloadAttendanceExcel,
     downloadAttendancePDF,
     normalizeTemplates,
@@ -437,10 +450,9 @@ export default function ModuleContent() {
     handleAddRoleFromConfig,
     handleEditRoleFromConfig,
     handleDeleteRoles,
+    saveBatchLedgerRecords,
     handleSaveBatchLedgerRecords,
-    handleDeleteLedgerItem,
     handleSaveLedgerRecord,
-    handleClearLedgerValue,
     handleUpdatePaymentStatus,
     handleBulkUpdatePaymentStatus,
     handleCallInitiate,
@@ -449,6 +461,7 @@ export default function ModuleContent() {
     downloadReportsPDF,
     downloadSalaryExcel,
     downloadSalaryPDF,
+    downloadPfSalaryExcel,
     fetchEmployees,
     fetchAdmins,
     fetchAdminProfile,
@@ -531,6 +544,7 @@ export default function ModuleContent() {
     handleResolveSupervisorEscalation,
     handleUpdateCommitmentDiary,
     handleGenerateSchoolBilling,
+    handleDeleteSchoolBilling,
     handleSaveSchoolWorkdays,
     handleSavePartnerPayUpdates,
     handleSavePartnerPayDetails,
@@ -837,17 +851,85 @@ export default function ModuleContent() {
     String(sessionUser || "").toLowerCase() === "admin";
   const canViewSalary = !!userPermissions.salary?.view;
   const canEditSalary = !!userPermissions.salary?.edit;
+  const canDeleteSalary = !!userPermissions.salary?.delete;
+  const canDeleteSchoolWork = !!userPermissions.schoolWork?.delete;
   const canEditLedger = !!userPermissions.ledger?.edit;
   const canEditAttendance = !!userPermissions.attendance?.edit;
   const canEditDirectory = !!userPermissions.directory?.edit;
+  const canDeleteDirectory = !!userPermissions.directory?.delete;
+  const [showRecordedLedgerModal, setShowRecordedLedgerModal] = useState(false);
+  const [ledgerAutoSaveEnabled, setLedgerAutoSaveEnabled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("hrms_ledger_autosave") === "1";
+  });
+  const [isLedgerAutoSaving, setIsLedgerAutoSaving] = useState(false);
+  const [lastLedgerAutoSaveAt, setLastLedgerAutoSaveAt] = useState("");
 
   useEffect(() => {
-    if (!canEditAttendance && attendanceSubView === "wizard") {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("hrms_ledger_autosave", ledgerAutoSaveEnabled ? "1" : "0");
+  }, [ledgerAutoSaveEnabled]);
+
+  useEffect(() => {
+    if (!canEditAttendance && (attendanceSubView === "wizard" || attendanceSubView === "pdf-import")) {
       setAttendanceSubView("grid");
     }
   }, [canEditAttendance, attendanceSubView, setAttendanceSubView]);
 
   const bulkCalendarMonthKey = bulkCalendarMonth || selectedMonth;
+  const ledgerDateBounds = useMemo(
+    () => getLedgerDateBoundsForMonth(selectedMonth),
+    [selectedMonth],
+  );
+  const recordedLedgerOverviewRows = useMemo(
+    () =>
+      filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger).map((emp) => ({
+        emp,
+        monthLedger: getMonthLedger(emp, selectedMonth),
+      })),
+    [employees, selectedMonth],
+  );
+  const hasLedgerAmounts = useCallback((entry: ReturnType<typeof defaultTempLedgerEntry>) => {
+    return [
+      entry.advance,
+      entry.uniform,
+      entry.penalty,
+      entry.foodPerk,
+      entry.accommodationPerk,
+      entry.conveyancePerk,
+    ].some((value) => Number(value) > 0);
+  }, []);
+  const handleLedgerAutoSave = useCallback(
+    async (employeeId: string) => {
+      if (!ledgerAutoSaveEnabled || isLedgerAutoSaving) return;
+      const entry = tempLedgerEntries[employeeId];
+      if (!entry || !hasLedgerAmounts(entry)) return;
+      setIsLedgerAutoSaving(true);
+      try {
+        const saved = await saveBatchLedgerRecords({
+          source: "autosave",
+          employeeIds: [employeeId],
+        });
+        if (saved) {
+          setLastLedgerAutoSaveAt(
+            new Date().toLocaleTimeString("en-IN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          );
+        }
+      } finally {
+        setIsLedgerAutoSaving(false);
+      }
+    },
+    [
+      hasLedgerAmounts,
+      isLedgerAutoSaving,
+      ledgerAutoSaveEnabled,
+      saveBatchLedgerRecords,
+      tempLedgerEntries,
+    ],
+  );
   const bulkWizardSelectedEmployees = useMemo(
     () => employees.filter((employee) => bulkSelEmployees.includes(employee.id)),
     [employees, bulkSelEmployees],
@@ -887,10 +969,12 @@ export default function ModuleContent() {
   );
   const salaryColumnPickerLocked = !!salaryUiRestrictions?.hideColumnPicker;
   const visibleSalaryColumns = useMemo(
-    () =>
-      clampSelectedColumns(selectedSalaryColumns, salaryUiRestrictions, SALARY_COLUMNS).filter((column) =>
+    () => {
+      const allowed = clampSelectedColumns(selectedSalaryColumns, salaryUiRestrictions, SALARY_COLUMNS).filter((column) =>
         allowSalaryColumn(column),
-      ),
+      );
+      return SALARY_COLUMNS.filter((column) => allowed.includes(column));
+    },
     [selectedSalaryColumns, salaryUiRestrictions, allowSalaryColumn],
   );
   const toggleSalaryColumn = useCallback(
@@ -2003,8 +2087,8 @@ export default function ModuleContent() {
                                           "Advance Bal. (" + selectedMonth + ")",
                                           "Uniform Bal. (" + selectedMonth + ")",
                                           "Penalty Bal. (" + selectedMonth + ")",
-                                          "Net Salary",
                                           "Total Deductions",
+                                          "Net Salary",
                                           "Food Perk",
                                           "Accommodation Perk",
                                           "Conveyance Perk",
@@ -2072,8 +2156,8 @@ export default function ModuleContent() {
                                             adv,
                                             uniform,
                                             pen,
-                                            Math.round(netSalaryVal),
                                             Math.round(totalDeductionsVal),
+                                            Math.round(netSalaryVal),
                                             food,
                                             acc,
                                             conv,
@@ -2163,6 +2247,21 @@ export default function ModuleContent() {
                                       )}
                                     </button>
                                     )}
+
+                                    <button
+                                      type="button"
+                                      disabled={filteredSalaryEmployees.length === 0}
+                                      onClick={() => {
+                                        const dataToDownload = selectedSalaryEmployeeIds.length > 0
+                                          ? filteredSalaryEmployees.filter(emp => selectedSalaryEmployeeIds.includes(emp.id))
+                                          : filteredSalaryEmployees;
+                                        downloadPfSalaryExcel(dataToDownload, salaryLocationFilters, selectedMonth);
+                                      }}
+                                      className="px-3.5 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition"
+                                      title="Download PF Salary register in standard PF SAL format (Excel)"
+                                    >
+                                      <Landmark size={13} className="stroke-[2.5]" /> PF Salary {selectedSalaryEmployeeIds.length > 0 && `(${selectedSalaryEmployeeIds.length})`}
+                                    </button>
                                   </div>
                                 </div>
           
@@ -2191,7 +2290,7 @@ export default function ModuleContent() {
                                           {lastSavedBulkPay.downloadCount ?? 0}
                                         </span>
                                       </button>
-                                      {userPermissions.salary?.edit && (
+                                      {canDeleteSalary && (
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteBulkPayArchive(lastSavedBulkPay.id)}
@@ -2242,7 +2341,7 @@ export default function ModuleContent() {
                                             <option key={t.name} value={t.name}>{t.name}</option>
                                           ))}
                                         </select>
-                                        {activeSalaryTemplateName && (
+                                        {activeSalaryTemplateName && canDeleteSalary && (
                                           <button
                                             type="button"
                                             onClick={() => handleDeleteSalaryTemplate(activeSalaryTemplateName)}
@@ -2300,14 +2399,14 @@ export default function ModuleContent() {
                                         headers: ["Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance"]
                                       },
                                       {
-                                        name: "Net Salary",
-                                        color: "bg-amber-50/80 text-amber-700 border-amber-200",
-                                        headers: ["Net Salary"]
-                                      },
-                                      {
                                         name: "Total Deductions",
                                         color: "bg-rose-100/60 text-rose-800 border-rose-200",
                                         headers: ["Total Deductions"]
+                                      },
+                                      {
+                                        name: "Net Salary",
+                                        color: "bg-amber-50/80 text-amber-700 border-amber-200",
+                                        headers: ["Net Salary"]
                                       },
                                       {
                                         name: "Extra Perks",
@@ -2390,7 +2489,27 @@ export default function ModuleContent() {
                                 )}
 
                                 {/* Responsive Scrollable Table Container */}
-                                <div className="overflow-x-auto border border-slate-200 rounded-lg max-h-[480px] overflow-y-auto shadow-sm" id="salary-sheet-scroller">
+                                <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 border-b border-slate-100 bg-white">
+                                    <button
+                                      type="button"
+                                      role="switch"
+                                      aria-checked={salaryStickyEmployeeDetails}
+                                      aria-label="Pin Employee Details column"
+                                      onClick={() => setSalaryStickyEmployeeDetails((on) => !on)}
+                                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                        salaryStickyEmployeeDetails ? "bg-[#f57416]" : "bg-slate-300"
+                                      }`}
+                                    >
+                                      <span
+                                        className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                                          salaryStickyEmployeeDetails ? "translate-x-3.5" : "translate-x-0.5"
+                                        }`}
+                                      />
+                                    </button>
+                                    <span className="text-[10px] font-medium text-slate-500">Sticky employee details</span>
+                                  </div>
+                                  <div className="overflow-x-auto max-h-[480px] overflow-y-auto" id="salary-sheet-scroller">
                                   <table className="w-max min-w-full text-xs text-left border-collapse bg-white">
                                     <colgroup>
                                       <col className="w-[48px]" />
@@ -2442,10 +2561,10 @@ export default function ModuleContent() {
                                       {visibleSalaryColumns.includes("Penalty Balance") && (
                                         <col className="w-[120px]" />
                                       )}
-                                      {visibleSalaryColumns.includes("Net Salary") && (
+                                      {visibleSalaryColumns.includes("Total Deductions") && (
                                         <col className="w-[140px]" />
                                       )}
-                                      {visibleSalaryColumns.includes("Total Deductions") && (
+                                      {visibleSalaryColumns.includes("Net Salary") && (
                                         <col className="w-[140px]" />
                                       )}
                                       {visibleSalaryColumns.includes("Food Perk") && (
@@ -2466,7 +2585,7 @@ export default function ModuleContent() {
                                     </colgroup>
                                     <thead className="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200">
                                       <tr>
-                                        <th rowSpan={2} className="sticky top-0 z-30 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] align-middle">
+                                        <th rowSpan={2} className={`sticky top-0 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle ${salaryStickyEmployeeDetails ? "left-0 z-50 shadow-[2px_0_4px_rgba(0,0,0,0.04)]" : "z-30"}`}>
                                           <input
                                             id="salary-select-all"
                                             name="salarySelectAll"
@@ -2484,7 +2603,7 @@ export default function ModuleContent() {
                                           />
                                         </th>
                                         {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                          <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100">Employee Details</th>
+                                          <th className={`sticky top-0 px-3 py-2.5 border-r border-slate-200 bg-slate-100 w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? "left-[48px] z-50 shadow-[2px_0_4px_rgba(0,0,0,0.06)]" : "z-20"}`}>Employee Details</th>
                                         )}
                                         {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
@@ -2519,11 +2638,11 @@ export default function ModuleContent() {
                                             <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-50 text-rose-700 text-center" colSpan={count}>Employee Deductions</th>
                                           ) : null;
                                         })()}
-                                        {visibleSalaryColumns.includes("Net Salary") && (
-                                          <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
-                                        )}
                                         {visibleSalaryColumns.includes("Total Deductions") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-800 text-center">Total Deductions</th>
+                                        )}
+                                        {visibleSalaryColumns.includes("Net Salary") && (
+                                          <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-700 text-center">Net Salary</th>
                                         )}
                                         {(() => {
                                           const count = ["Food Perk", "Accommodation Perk", "Conveyance Perk"].filter(c => visibleSalaryColumns.includes(c)).length;
@@ -2540,7 +2659,7 @@ export default function ModuleContent() {
                                       </tr>
                                       <tr className="border-t border-slate-200">
                                         {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                          <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold">Code & Name</th>
+                                          <th className={`sticky top-[34px] px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? "left-[48px] z-50 shadow-[2px_0_4px_rgba(0,0,0,0.06)]" : "z-20"}`}>Code & Name</th>
                                         )}
                                         {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Skill Category</th>
@@ -2590,11 +2709,11 @@ export default function ModuleContent() {
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 text-center font-bold bg-rose-50 text-rose-800">Pen</th>
                                         )}
                                     
-                                        {visibleSalaryColumns.includes("Net Salary") && (
-                                          <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-800 text-center font-bold">Net Salary</th>
-                                        )}
                                         {visibleSalaryColumns.includes("Total Deductions") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-rose-100 text-rose-900 text-center font-bold">Total Ded.</th>
+                                        )}
+                                        {visibleSalaryColumns.includes("Net Salary") && (
+                                          <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-amber-50 text-amber-800 text-center font-bold">Net Salary</th>
                                         )}
                                     
                                         {visibleSalaryColumns.includes("Food Perk") && (
@@ -2619,7 +2738,7 @@ export default function ModuleContent() {
                                             colSpan={
                                               1 +
                                               ((visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) ? 1 : 0) +
-                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Net Salary", "Total Deductions", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => visibleSalaryColumns.includes(c)).length
+                                              ["Skill Category", "Job Role", "Present Days", "Daily Wage", "Total Salary", "Gross Salary (Monthly)", "Basic Salary", "Employer PF (13%)", "Employer ESIC (3.25%)", "Employee PF (12%)", "Employee ESIC (0.75%)", "Professional Tax (PT)", "Advance Balance", "Uniform Deductions", "Penalty Balance", "Total Deductions", "Net Salary", "Food Perk", "Accommodation Perk", "Conveyance Perk", "Net Payable", "Payment Status"].filter(c => visibleSalaryColumns.includes(c)).length
                                             } 
                                             className="p-8 text-center text-xs text-slate-400 font-medium"
                                           >
@@ -2680,15 +2799,16 @@ export default function ModuleContent() {
                                            const netPayableValue = safeNumber(netSalaryValue) - safeNumber(adv) - safeNumber(pen) - safeNumber(uniform) + safeNumber(food) + safeNumber(acc) + safeNumber(conv);
                                       
                                           const isSelected = selectedSalaryEmployeeIds.includes(emp.id);
+                                          const salaryStickyRowBg = isSelected ? "bg-orange-50" : "bg-white";
                                       
                                           return (
                                             <tr 
                                               key={emp.id} 
-                                              className={`hover:bg-slate-50/40 transition border-b border-slate-150 align-middle ${
+                                              className={`group hover:bg-slate-50/40 transition border-b border-slate-150 align-middle ${
                                                 isSelected ? "bg-orange-50/20 hover:bg-orange-50/30" : ""
                                               }`}
                                             >
-                                              <td className="px-2.5 py-2.5 border-r border-slate-150 text-center w-[48px] align-middle bg-slate-50/10">
+                                              <td className={`px-2.5 py-2.5 border-r border-slate-150 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle ${salaryStickyEmployeeDetails ? `sticky left-0 z-20 shadow-[2px_0_4px_rgba(0,0,0,0.04)] ${salaryStickyRowBg}` : "bg-slate-50/10"}`}>
                                                 <input id={`salary-select-${emp.id}`} name={`salarySelect_${emp.id}`}
                                                   type="checkbox"
                                                   checked={isSelected}
@@ -2703,7 +2823,7 @@ export default function ModuleContent() {
                                                 />
                                               </td>
                                               {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 bg-slate-50/20 text-left truncate">
+                                                <td className={`px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 text-left truncate w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? `sticky left-[48px] z-20 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${salaryStickyRowBg}` : "bg-slate-50/20"}`}>
                                                   {visibleSalaryColumns.includes("Employee Name") && (
                                                     <div className="truncate" title={emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}>{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</div>
                                                   )}
@@ -2779,15 +2899,15 @@ export default function ModuleContent() {
                                                 </td>
                                               )}
                                           
-                                              {visibleSalaryColumns.includes("Net Salary") && (
-                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-amber-800 bg-amber-50/10 font-semibold">
-                                                  ₹{Math.round(netSalaryValue).toLocaleString("en-IN")}
-                                                </td>
-                                              )}
-                                          
                                               {visibleSalaryColumns.includes("Total Deductions") && (
                                                 <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-rose-900 bg-rose-100/10 font-semibold">
                                                   ₹{Math.round(totalDeductionsValue).toLocaleString("en-IN")}
+                                                </td>
+                                              )}
+                                          
+                                              {visibleSalaryColumns.includes("Net Salary") && (
+                                                <td className="px-3 py-2.5 border-r border-slate-150 text-center whitespace-nowrap tabular-nums text-amber-800 bg-amber-50/10 font-semibold">
+                                                  ₹{Math.round(netSalaryValue).toLocaleString("en-IN")}
                                                 </td>
                                               )}
                                           
@@ -2845,6 +2965,7 @@ export default function ModuleContent() {
                                   </table>
                                 </div>
                               </div>
+                            </div>
                             </div>
                           ) : activeSidebarTab === "Saved Bulk Pay" ? (
                             <div className="max-w-7xl mx-auto space-y-6 animate-fade-in" id="saved-bulk-pay-module-view">
@@ -2918,7 +3039,7 @@ export default function ModuleContent() {
                                           {lastSavedBulkPay.downloadCount ?? 0}
                                         </span>
                                       </button>
-                                      {userPermissions.salary?.edit && (
+                                      {canDeleteSalary && (
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteBulkPayArchive(lastSavedBulkPay.id)}
@@ -3016,7 +3137,7 @@ export default function ModuleContent() {
                                                       {item.downloadCount ?? 0}
                                                     </span>
                                                   </button>
-                                                  {userPermissions.salary?.edit && (
+                                                  {canDeleteSalary && (
                                                     <button
                                                       type="button"
                                                       onClick={() => handleDeleteBulkPayArchive(item.id)}
@@ -3051,7 +3172,7 @@ export default function ModuleContent() {
                                 </div>
                         
                                 {/* Month Selection Sync */}
-                                <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex flex-wrap items-center gap-2 shrink-0">
                                   <span className="text-xs font-bold text-slate-500">Active Month:</span>
                                   <select id="ledger-month-select" name="selectedMonth"
                                     value={MONTHS_LIST.includes(selectedMonth) ? selectedMonth : (MONTHS_LIST[0] || selectedMonth)}
@@ -3062,6 +3183,16 @@ export default function ModuleContent() {
                                       <option key={m} value={m}>{m}</option>
                                     ))}
                                   </select>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await fetchEmployees({ forceLedger: true });
+                                      setShowRecordedLedgerModal(true);
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg border border-orange-200 bg-orange-50 text-xs font-bold text-orange-700 hover:bg-orange-100 transition cursor-pointer"
+                                  >
+                                    View recorded ledger
+                                  </button>
                                 </div>
                               </div>
       
@@ -3100,9 +3231,10 @@ export default function ModuleContent() {
                               </div>
                               {/* 3. Grid split: 2/5 Interactive Search & Checklist and 3/5 Ledger Entry rows */}
                               {canEditLedger && (
-                              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                                {/* Left Column: Interactive Employee checklist with search */}
-                                <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
+                                <>
+                                <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)] gap-5 min-w-0 items-start">
+                                  {/* Left Column: Interactive Employee checklist with search */}
+                                  <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
                                   <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                                     <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
                                       1. Select Employees
@@ -3290,7 +3422,7 @@ export default function ModuleContent() {
                                 </div>
       
                                 {/* Right Column: per-employee row with date and all columns side by side */}
-                                <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px]">
+                                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col space-y-4 h-[640px] min-w-0 @container">
                                   <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider pb-2 border-b border-slate-100 flex items-center justify-between">
                                     <span>2. Record Monthly Settled Ledger Rows</span>
                                     <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">{ledgerSelectedEmployeeIds.length} Selected</span>
@@ -3309,53 +3441,80 @@ export default function ModuleContent() {
                                       </div>
                                     </div>
                                   ) : (
-                                    <form onSubmit={handleSaveBatchLedgerRecords} className="flex flex-col flex-1 overflow-hidden">
-                                      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 scrollbar-thin">
+                                    <form onSubmit={handleSaveBatchLedgerRecords} className="flex flex-col flex-1 min-h-0 min-w-0">
+                                      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-4 pr-1.5 scrollbar-thin">
                                         {ledgerSelectedEmployeeIds.map((empId) => {
                                           const emp = employees.find((e) => e.id === empId);
                                           if (!emp) return null;
       
-                                          const entry = tempLedgerEntries[empId] || defaultTempLedgerEntry();
+                                          const entry = tempLedgerEntries[empId] || defaultTempLedgerEntry(selectedMonth);
+                                          const hasPenaltyAmount = Number(entry.penalty) > 0;
       
                                           const updateField = (field: keyof typeof entry, val: string) => {
-                                            setTempLedgerEntries((prev) => ({
-                                              ...prev,
-                                              [empId]: {
+                                            setTempLedgerEntries((prev) => {
+                                              const nextEntry = {
                                                 ...(prev[empId] || entry),
                                                 [field]: val,
-                                              },
-                                            }));
+                                              };
+                                              if (field === "penalty" && Number(val) <= 0) {
+                                                nextEntry.penaltyReason = "";
+                                              }
+                                              return {
+                                                ...prev,
+                                                [empId]: nextEntry,
+                                              };
+                                            });
                                           };
       
                                           return (
-                                            <div key={empId} className="p-3 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2.5 relative text-left">
-                                              <button
-                                                type="button"
-                                                onClick={async () => {
-                                                  const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
-                                                  const confirmed = await confirmAction({
-                                                    title: "Remove from list",
-                                                    message: `Remove ${empName} from the settlement list? Any unsaved amounts in this row will be lost.`,
-                                                    confirmLabel: "Remove",
-                                                    variant: "danger",
-                                                  });
-                                                  if (confirmed) {
-                                                    setLedgerSelectedEmployeeIds((prev) => prev.filter((id) => id !== empId));
-                                                  }
-                                                }}
-                                                className="absolute top-2 right-2 text-slate-400 hover:text-red-500 font-extrabold text-xs cursor-pointer"
-                                                title="Remove from settlement list"
-                                              >
-                                                ✕
-                                              </button>
-      
-                                              <div className="pr-6">
-                                                <span className="text-xs font-black text-slate-800">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</span>
-                                                <span className="text-[9px] font-mono text-slate-400 ml-1.5">({emp.employeeCode})</span>
+                                            <div
+                                              key={empId}
+                                              className="p-3 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2.5 relative text-left min-w-0"
+                                              onBlurCapture={(event) => {
+                                                if (!ledgerAutoSaveEnabled) return;
+                                                if (!hasLedgerAmounts(entry)) return;
+                                                const nextTarget = event.relatedTarget as HTMLElement | null;
+                                                if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                                                if (nextTarget?.closest("[data-ledger-manual-save='true']")) return;
+                                                if (nextTarget?.closest("[data-ledger-autosave-toggle='true']")) return;
+                                                void handleLedgerAutoSave(empId);
+                                              }}
+                                            >
+                                              <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                                                <button
+                                                  type="button"
+                                                  onClick={async () => {
+                                                    const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
+                                                    const confirmed = await confirmAction({
+                                                      title: "Remove from list",
+                                                      message: `Remove ${empName} from the settlement list? Any unsaved amounts in this row will be lost.`,
+                                                      confirmLabel: "Remove",
+                                                      variant: "danger",
+                                                    });
+                                                    if (confirmed) {
+                                                      setLedgerSelectedEmployeeIds((prev) => prev.filter((id) => id !== empId));
+                                                    }
+                                                  }}
+                                                  className="text-slate-400 hover:text-red-500 font-extrabold text-xs cursor-pointer"
+                                                  title="Remove from settlement list"
+                                                >
+                                                  ✕
+                                                </button>
                                               </div>
       
-                                              <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
-                                                <div>
+                                              <div className="pr-6 min-w-0">
+                                                <span className="text-xs font-black text-slate-800 truncate block">{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</span>
+                                                <span className="text-[9px] font-mono text-slate-400">({emp.employeeCode})</span>
+                                              </div>
+
+                                              <div
+                                                className={`grid grid-cols-2 md:grid-cols-3 gap-2 min-w-0 ${
+                                                  hasPenaltyAmount
+                                                    ? "lg:grid-cols-[minmax(9.25rem,0.95fr)_repeat(3,minmax(0,0.9fr))_minmax(12rem,1.45fr)_repeat(3,minmax(0,0.9fr))]"
+                                                    : "lg:grid-cols-[minmax(9.25rem,0.95fr)_repeat(6,minmax(0,0.95fr))]"
+                                                }`}
+                                              >
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📅 Date</label>
                                                   <input
                                                     id={`ledger-date-${empId}`}
@@ -3363,10 +3522,12 @@ export default function ModuleContent() {
                                                     type="date"
                                                     value={entry.entryDate}
                                                     onChange={(e) => updateField("entryDate", e.target.value)}
-                                                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
+                                                    min={ledgerDateBounds.min}
+                                                    max={ledgerDateBounds.max}
+                                                    className="w-full min-w-[9.25rem] px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 tracking-tight focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">💰 Advance</label>
                                                   <input
                                                     id={`ledger-advance-${empId}`}
@@ -3379,7 +3540,7 @@ export default function ModuleContent() {
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">👕 Uniform</label>
                                                   <input
                                                     id={`ledger-uniform-${empId}`}
@@ -3392,7 +3553,7 @@ export default function ModuleContent() {
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-[#f57416] focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">⚠️ Penalty</label>
                                                   <input
                                                     id={`ledger-penalty-${empId}`}
@@ -3405,7 +3566,22 @@ export default function ModuleContent() {
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-slate-800 focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                {hasPenaltyAmount && (
+                                                  <div className="min-w-0">
+                                                    <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📝 Reason</label>
+                                                    <input
+                                                      id={`ledger-penalty-reason-${empId}`}
+                                                      name={`ledgerPenaltyReason_${empId}`}
+                                                      type="text"
+                                                      value={entry.penaltyReason}
+                                                      onChange={(e) => updateField("penaltyReason", e.target.value)}
+                                                      required
+                                                      placeholder="Penalty reason"
+                                                      className="w-full min-w-0 px-2.5 py-1 border border-slate-200 bg-white rounded text-[11px] text-slate-700 transition-all duration-200 focus:outline-none focus:border-orange-400"
+                                                    />
+                                                  </div>
+                                                )}
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🍔 Food</label>
                                                   <input
                                                     id={`ledger-food-${empId}`}
@@ -3418,7 +3594,7 @@ export default function ModuleContent() {
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🏠 Accom.</label>
                                                   <input
                                                     id={`ledger-accom-${empId}`}
@@ -3431,7 +3607,7 @@ export default function ModuleContent() {
                                                     className="w-full px-2 py-1 border border-slate-200 bg-white rounded text-[11px] font-bold text-indigo-700 focus:outline-none focus:border-orange-400"
                                                   />
                                                 </div>
-                                                <div>
+                                                <div className="min-w-0">
                                                   <label className="text-[9px] font-bold text-slate-400 block mb-0.5">🚗 Conv.</label>
                                                   <input
                                                     id={`ledger-conv-${empId}`}
@@ -3445,112 +3621,64 @@ export default function ModuleContent() {
                                                   />
                                                 </div>
                                               </div>
-      
-                                              <div>
-                                                <label className="text-[9px] font-bold text-slate-400 block mb-0.5">📝 Settlement Reason / Penalty Notes</label>
-                                                <input
-                                                  id={`ledger-penalty-reason-${empId}`}
-                                                  name={`ledgerPenaltyReason_${empId}`}
-                                                  type="text"
-                                                  value={entry.penaltyReason}
-                                                  onChange={(e) => updateField("penaltyReason", e.target.value)}
-                                                  placeholder="Enter reason for penalty, advance remarks, or perk approvals..."
-                                                  className="w-full px-2.5 py-1 border border-slate-200 bg-white rounded text-[11px] text-slate-700 focus:outline-none focus:border-orange-400"
-                                                />
-                                              </div>
                                             </div>
                                           );
                                         })}
                                       </div>
       
-                                      <div className="pt-3 border-t border-slate-100 flex gap-2">
+                                      <div className="pt-3 border-t border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={ledgerAutoSaveEnabled}
+                                            aria-label="Toggle ledger auto save"
+                                            data-ledger-autosave-toggle="true"
+                                            onClick={() => setLedgerAutoSaveEnabled((enabled) => !enabled)}
+                                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                              ledgerAutoSaveEnabled ? "bg-[#f57416]" : "bg-slate-300"
+                                            }`}
+                                          >
+                                            <span
+                                              className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                                                ledgerAutoSaveEnabled ? "translate-x-4" : "translate-x-0.5"
+                                              }`}
+                                            />
+                                          </button>
+                                          <div className="leading-tight">
+                                            <p className="text-[11px] font-bold text-slate-600">Auto save</p>
+                                            <p className="text-[10px] text-slate-400">
+                                              {isLedgerAutoSaving
+                                                ? "Saving current row..."
+                                                : ledgerAutoSaveEnabled
+                                                  ? (lastLedgerAutoSaveAt ? `Last saved at ${lastLedgerAutoSaveAt}` : "Saves automatically when you leave a row.")
+                                                  : "Manual save only"}
+                                            </p>
+                                          </div>
+                                        </div>
                                         <button
                                           type="submit"
-                                          className="w-full py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md transition active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
+                                          data-ledger-manual-save="true"
+                                          className="w-full sm:w-auto sm:min-w-[260px] py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white font-bold rounded-lg text-xs shadow-md transition active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
                                         >
                                           💾 Save Monthly Ledger Rows ({selectedMonth})
                                         </button>
                                       </div>
                                     </form>
                                   )}
+                                  </div>
                                 </div>
-                              </div>
+                                </>
                               )}
 
-                              {/* 4. Bottom Section: Statement Overview Table for the Selected Month */}
-                              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs flex flex-col space-y-4">
-                                <div className="text-left">
-                                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                                    Ledger Overview Sheet for {selectedMonth}
-                                  </h4>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    Monthly totals at a glance. Click &quot;View entries&quot; on any employee to see date-wise lines and remove individual records.
-                                  </p>
-                                </div>
-                                <div className="border border-slate-200 rounded-lg overflow-hidden flex flex-col">
-                                  <div className="bg-slate-100/50 px-4 py-2 border-b border-slate-200 grid grid-cols-10 text-[10px] font-black text-slate-500 uppercase tracking-wider text-left select-none">
-                                    <span className="col-span-2">Employee</span>
-                                    <span>Advance</span>
-                                    <span>Uniform</span>
-                                    <span>Penalty</span>
-                                    <span>Food</span>
-                                    <span>Accom.</span>
-                                    <span>Conv.</span>
-                                    <span className="col-span-2 text-center">Settlement Reason / Notes</span>
-                                  </div>
-      
-                                  <div className="divide-y divide-slate-150 max-h-[350px] overflow-y-auto" id="ledger-records-container">
-                                    {employees.length === 0 ? (
-                                      <div className="p-8 text-center text-xs text-slate-450 font-medium">No employees registered in the system database.</div>
-                                    ) : (() => {
-                                      const overviewRows = filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger);
-                                      if (overviewRows.length === 0) {
-                                        return (
-                                          <div className="p-8 text-center text-xs text-slate-450 font-medium">No ledger entries recorded for {selectedMonth} yet.</div>
-                                        );
-                                      }
-                                      return overviewRows.map((emp) => {
-                                        const monthLedger = getMonthLedger(emp, selectedMonth);
-
-                                        return (
-                                          <LedgerOverviewRow
-                                            key={emp.id}
-                                            emp={emp}
-                                            monthLedger={monthLedger}
-                                            canEdit={canEditLedger}
-                                            onDeleteItem={async (itemId) => {
-                                              const item = monthLedger.ledgerItems.find((i) => i.id === itemId);
-                                              if (!item) return;
-                                              const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
-                                              const typeLabel = LEDGER_TYPE_LABELS[item.type];
-                                              const confirmed = await confirmAction({
-                                                title: "Remove entry",
-                                                message: `Remove ${typeLabel} entry of ₹${item.amount.toLocaleString("en-IN")} for ${empName} in ${selectedMonth}?`,
-                                                confirmLabel: "Remove",
-                                                variant: "danger",
-                                              });
-                                              if (confirmed) await handleDeleteLedgerItem(emp.id, itemId);
-                                            }}
-                                            onClearType={async (type) => {
-                                              const total = getTotalByType(monthLedger, type);
-                                              if (total <= 0) return;
-                                              const typeLabel = LEDGER_TYPE_LABELS[type];
-                                              const empName = emp.nameAsPerAadharColumn || emp.nameAsPerAadhar || emp.employeeCode;
-                                              const confirmed = await confirmAction({
-                                                title: `Clear ${typeLabel}`,
-                                                message: `Clear all ${typeLabel} entries (₹${total.toLocaleString("en-IN")}) for ${empName} in ${selectedMonth}?`,
-                                                confirmLabel: "Clear",
-                                                variant: "danger",
-                                              });
-                                              if (confirmed) await handleClearLedgerValue(emp.id, type);
-                                            }}
-                                          />
-                                        );
-                                      });
-                                    })()}
-                                  </div>
-                                </div>
-                              </div>
+                              {showRecordedLedgerModal && (
+                                <LedgerRecordedOverviewModal
+                                  monthLabel={selectedMonth}
+                                  overviewRows={recordedLedgerOverviewRows}
+                                  hasEmployees={employees.length > 0}
+                                  onClose={() => setShowRecordedLedgerModal(false)}
+                                />
+                              )}
                             </div>
                           ) : activeSidebarTab === "Birthdays" ? (
                             <BirthdaysTab
@@ -3882,7 +4010,7 @@ export default function ModuleContent() {
                                             badge={contact.category}
                                             badgeTone={badgeTone}
                                             headerAction={
-                                              canEditDirectory ? (
+                                              canDeleteDirectory ? (
                                               <button
                                                 type="button"
                                                 onClick={() => handleDeleteHelpline(contact.name)}
@@ -3908,7 +4036,51 @@ export default function ModuleContent() {
                           ) : activeSidebarTab === "Attendance" ? (
                             /* --- ENTERPRISE ATTENDANCE WORKSPACE ("TIME" MODULE) --- */
                             <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 animate-fade-in" id="attendance-workspace-panel">
-                              {attendanceSubView === "wizard" && canEditAttendance ? (
+                              {attendanceSubView === "employee" && individualAttendanceEmployeeId ? (
+                                (() => {
+                                  const markingEmployee = employees.find((e) => e.id === individualAttendanceEmployeeId);
+                                  if (!markingEmployee) {
+                                    return (
+                                      <div className="text-center py-10 text-slate-400 text-sm">
+                                        Employee not found.{" "}
+                                        <button
+                                          type="button"
+                                          onClick={closeEmployeeAttendanceMarking}
+                                          className="text-[#ff791a] font-bold hover:underline cursor-pointer"
+                                        >
+                                          Back to grid
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <EmployeeAttendanceMarkingView
+                                      employee={markingEmployee}
+                                      selectedMonth={selectedMonth}
+                                      monthsList={MONTHS_LIST}
+                                      attendanceDb={attendanceDb}
+                                      canEdit={canEditAttendance}
+                                      getDaysInMonth={getDaysInSelectedMonth}
+                                      onMonthChange={(month) => {
+                                        setSelectedMonth(month);
+                                        void fetchAttendanceForMonth(month);
+                                      }}
+                                      onBack={closeEmployeeAttendanceMarking}
+                                      onCellChange={handleCellAttendanceChange}
+                                      onBulkApply={handleEmployeeBulkAttendanceChange}
+                                    />
+                                  );
+                                })()
+                              ) : attendanceSubView === "pdf-import" && canEditAttendance ? (
+                                <AttendancePdfUploadWizard
+                                  employees={employees}
+                                  monthsList={MONTHS_LIST}
+                                  defaultMonth={selectedMonth}
+                                  canEdit={canEditAttendance}
+                                  onBack={() => setAttendanceSubView("grid")}
+                                  onApply={handleApplyPdfAttendanceImport}
+                                />
+                              ) : attendanceSubView === "wizard" && canEditAttendance ? (
                                 /* --- NEW SCREEN: INTERACTIVE WIZARD VIEW --- */
                                 <div className="space-y-6">
                                   <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -4441,6 +4613,7 @@ export default function ModuleContent() {
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2">
                                       {canEditAttendance && (
+                                      <>
                                       <button
                                         onClick={() => {
                                           setAttendanceSubView("wizard");
@@ -4450,6 +4623,14 @@ export default function ModuleContent() {
                                       >
                                         <Clock size={13} className="stroke-[2.5]" /> Bulk Mark Attendance
                                       </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAttendanceSubView("pdf-import")}
+                                        className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-[#ff791a] hover:bg-orange-50 text-[#e4640c] text-xs font-extrabold rounded-lg transition cursor-pointer shadow-xs"
+                                      >
+                                        <ScanLine size={13} className="stroke-[2.5]" /> Mark via PDF Upload
+                                      </button>
+                                      </>
                                       )}
                                       <button
                                         onClick={() => {
@@ -4613,13 +4794,32 @@ export default function ModuleContent() {
 
                                   {/* Interactive Grid Table */}
                               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 border-b border-slate-100">
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={attendanceStickyColumns}
+                                    aria-label="Pin Emp Code and Employee Name columns"
+                                    onClick={() => setAttendanceStickyColumns((on) => !on)}
+                                    className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                      attendanceStickyColumns ? "bg-[#f57416]" : "bg-slate-300"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                                        attendanceStickyColumns ? "translate-x-3.5" : "translate-x-0.5"
+                                      }`}
+                                    />
+                                  </button>
+                                  <span className="text-[10px] font-medium text-slate-500">Sticky code & name</span>
+                                </div>
                                 <div className="overflow-auto max-w-full max-h-[min(70vh,720px)]">
                                   <table className="w-full text-left border-separate border-spacing-0 min-w-[1200px]">
                                     <thead>
                                       <tr className="text-[10px] font-black uppercase tracking-wider border-b border-slate-200">
-                                        <th className="sticky top-0 z-30 px-3 py-2 w-12 text-center bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">SR</th>
-                                        <th className="sticky top-0 z-30 px-3 py-2 w-28 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Emp Code</th>
-                                        <th className="sticky top-0 z-30 px-3 py-2 w-48 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Employee Name</th>
+                                        <th className="sticky top-0 z-30 px-3 py-2 w-12 min-w-[3rem] max-w-[3rem] text-center bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">SR</th>
+                                        <th className={`sticky top-0 px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)] ${attendanceStickyColumns ? "left-0 z-40 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.04),inset_0_-1px_0_0_rgb(226,232,240)]" : "z-30"}`}>Emp Code</th>
+                                        <th className={`sticky top-0 px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)] ${attendanceStickyColumns ? "left-28 z-40 border-r border-slate-300 shadow-[2px_0_4px_rgba(0,0,0,0.06),inset_0_-1px_0_0_rgb(226,232,240)]" : "z-30"}`}>Employee Name</th>
                                         <th className="sticky top-0 z-30 px-3 py-2 w-36 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Worksite Location</th>
                                         {Array.from({ length: getDaysInSelectedMonth(selectedMonth) }, (_, i) => {
                                           const dayNum = i + 1;
@@ -4698,16 +4898,41 @@ export default function ModuleContent() {
                                             { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
                                           );
 
+                                          const stickyRowBg =
+                                            attendanceRecordFilter === "absent" && absents > 0
+                                              ? "bg-rose-50 group-hover:bg-rose-100/70"
+                                              : "bg-white group-hover:bg-slate-50";
+
                                           return (
                                             <tr
                                               key={emp.id}
-                                              className={`hover:bg-slate-50/50 ${
+                                              className={`group hover:bg-slate-50/50 ${
                                                 attendanceRecordFilter === "absent" && absents > 0 ? "bg-rose-50/40" : ""
                                               }`}
                                             >
-                                              <td className="px-3 py-2 text-center text-slate-400 font-bold">{index + 1}</td>
-                                              <td className="px-3 py-2 font-mono font-bold text-slate-800">{emp.employeeCode}</td>
-                                              <td className="px-3 py-2 font-semibold text-slate-700">{emp.nameAsPerAadhar}</td>
+                                              <td className="px-3 py-2 w-12 min-w-[3rem] max-w-[3rem] text-center text-slate-400 font-bold">
+                                                {index + 1}
+                                              </td>
+                                              <td className={`px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] font-mono font-bold ${attendanceStickyColumns ? `sticky left-0 z-20 border-r border-slate-100 shadow-[2px_0_4px_rgba(0,0,0,0.04)] ${stickyRowBg}` : ""}`}>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openEmployeeAttendanceMarking(emp.id)}
+                                                  className="text-[#ff791a] hover:text-[#e4640c] hover:underline cursor-pointer transition"
+                                                  title="Open individual attendance marking"
+                                                >
+                                                  {emp.employeeCode}
+                                                </button>
+                                              </td>
+                                              <td className={`px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] font-semibold ${attendanceStickyColumns ? `sticky left-28 z-20 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${stickyRowBg}` : ""}`}>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openEmployeeAttendanceMarking(emp.id)}
+                                                  className="text-[#ff791a] hover:text-[#e4640c] hover:underline cursor-pointer transition text-left"
+                                                  title="Open individual attendance marking"
+                                                >
+                                                  {emp.nameAsPerAadhar}
+                                                </button>
+                                              </td>
                                               <td className="px-3 py-2 text-slate-500 font-medium truncate max-w-[120px]" title={emp.location || "Unassigned"}>
                                                 {emp.location || "—"}
                                               </td>
@@ -4946,6 +5171,7 @@ export default function ModuleContent() {
                                   monthsList={MONTHS_LIST}
                                   onMonthChange={(month) => setSelectedMonth(normalizeMonthKey(month))}
                                   onGenerate={handleGenerateSchoolBilling}
+                                  onDeleteBilling={canDeleteSchoolWork ? handleDeleteSchoolBilling : undefined}
                                   onSaveWorkdays={handleSaveSchoolWorkdays}
                                   onSavePayUpdates={handleSavePartnerPayUpdates}
                                   onSavePartnerDetails={handleSavePartnerPayDetails}
@@ -5075,7 +5301,7 @@ export default function ModuleContent() {
                                               {lastSavedSchoolBulkPay.downloadCount ?? 0}
                                             </span>
                                           </button>
-                                          {userPermissions.schoolWork?.edit && (
+                                          {canDeleteSchoolWork && (
                                             <button
                                               type="button"
                                               onClick={() => handleDeleteSchoolBulkPayArchive(lastSavedSchoolBulkPay.id)}
@@ -5173,7 +5399,7 @@ export default function ModuleContent() {
                                                           {item.downloadCount ?? 0}
                                                         </span>
                                                       </button>
-                                                      {userPermissions.schoolWork?.edit && (
+                                                      {canDeleteSchoolWork && (
                                                         <button
                                                           type="button"
                                                           onClick={() => handleDeleteSchoolBulkPayArchive(item.id)}
@@ -5201,6 +5427,7 @@ export default function ModuleContent() {
                                 <TendersPanel
                                   tenders={rawTenders}
                                   readOnly={!userPermissions.bids?.edit}
+                                  canManageLockedTenders={isSuperAdmin}
                                   initialDeadlineFilter={tenderDeadlineFilter}
                                   onRefresh={fetchTenders}
                                   onCreate={handleCreateTender}
@@ -5296,7 +5523,7 @@ export default function ModuleContent() {
                           /* --- CENTRAL EMPLOYEES MODULE ACTIVE --- */
                           <EmployeesPage />
                         )}
-            </>
+                      </>
                     </div>
   );
 }

@@ -750,6 +750,7 @@ export const SCHOOL_MATERIAL_ITEMS = [
 export interface RolePermission {
   view: boolean;
   edit: boolean;
+  delete: boolean;
 }
 
 export interface CustomRole {

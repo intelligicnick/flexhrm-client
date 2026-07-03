@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ChevronDown,
   Clock,
   FileText,
   Filter,
@@ -87,6 +88,41 @@ function expiryMeta(expiryDate: string): {
   return { label: formatted, className: "text-slate-700", band: "ok" };
 }
 
+function contractLocationLabel(contract: Contract): string {
+  const linkedLocations = (contract.linkedLocations || [])
+    .map((location) => location.trim())
+    .filter(Boolean);
+  if (linkedLocations.length > 0) return linkedLocations.join(", ");
+  return contract.correspondingOffice.trim();
+}
+
+function contractDepartmentLabel(contract: Contract): string {
+  return contract.officeName.trim();
+}
+
+function contractMetaLabel(contract: Contract): string {
+  const parts = [
+    contract.officerName.trim(),
+    contractLocationLabel(contract),
+    contractDepartmentLabel(contract),
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function contractSearchText(contract: Contract): string {
+  return [
+    contract.contractNo,
+    contract.companyName,
+    contract.officerName,
+    contract.officeName,
+    contract.correspondingOffice,
+    contract.linkedLocations?.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 export default function BgDdPanel({
   records,
   contracts,
@@ -97,6 +133,7 @@ export default function BgDdPanel({
   onDelete,
 }: BgDdPanelProps) {
   const docsPanelRef = useRef<BgDdDocumentsPanelHandle>(null);
+  const contractSelectRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"" | BgDdInstrumentType>("");
   const [statusFilter, setStatusFilter] = useState<"" | BgDdStatus>("");
@@ -107,12 +144,15 @@ export default function BgDdPanel({
   const [expiryTo, setExpiryTo] = useState("");
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
+  const [selectedDocsRecord, setSelectedDocsRecord] = useState<BgDdRecord | null>(null);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CreateBgDdInput>(emptyForm());
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [contractDropdownOpen, setContractDropdownOpen] = useState(false);
+  const [contractSearch, setContractSearch] = useState("");
 
   const contractById = useMemo(() => {
     const map = new Map<string, Contract>();
@@ -127,6 +167,17 @@ export default function BgDdPanel({
       ),
     [contracts],
   );
+
+  const selectedContract = useMemo(
+    () => (form.contractId ? contractById.get(form.contractId) : undefined),
+    [form.contractId, contractById],
+  );
+
+  const filteredContractOptions = useMemo(() => {
+    const query = contractSearch.trim().toLowerCase();
+    if (!query) return contractOptions;
+    return contractOptions.filter((contract) => contractSearchText(contract).includes(query));
+  }, [contractOptions, contractSearch]);
 
   const loadDocCounts = useCallback(async () => {
     const counts: Record<string, number> = {};
@@ -149,6 +200,20 @@ export default function BgDdPanel({
   useEffect(() => {
     void loadDocCounts();
   }, [loadDocCounts]);
+
+  useEffect(() => {
+    if (!contractDropdownOpen) {
+      setContractSearch("");
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (contractSelectRef.current && !contractSelectRef.current.contains(event.target as Node)) {
+        setContractDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [contractDropdownOpen]);
 
   const filteredRecords = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -217,6 +282,8 @@ export default function BgDdPanel({
     setEditingId(null);
     setForm(emptyForm());
     setFormError(null);
+    setContractDropdownOpen(false);
+    setContractSearch("");
     docsPanelRef.current?.clearPending();
     setIsFormOpen(true);
   };
@@ -237,6 +304,8 @@ export default function BgDdPanel({
       entryDate: item.entryDate,
     });
     setFormError(null);
+    setContractDropdownOpen(false);
+    setContractSearch("");
     docsPanelRef.current?.clearPending();
     setIsFormOpen(true);
   };
@@ -246,6 +315,8 @@ export default function BgDdPanel({
     setEditingId(null);
     setFormError(null);
     setSaving(false);
+    setContractDropdownOpen(false);
+    setContractSearch("");
     docsPanelRef.current?.clearPending();
   };
 
@@ -293,6 +364,13 @@ export default function BgDdPanel({
     await onRefresh();
     await loadDocCounts();
   };
+
+  const openDocsViewer = (item: BgDdRecord) => {
+    if ((docCounts[item.id] ?? 0) === 0) return;
+    setSelectedDocsRecord(item);
+  };
+
+  const closeDocsViewer = () => setSelectedDocsRecord(null);
 
   return (
     <div className="space-y-5" id="bg-dd-panel">
@@ -455,7 +533,7 @@ export default function BgDdPanel({
                   return (
                     <tr
                       key={item.id}
-                      className="border-b border-slate-100 hover:bg-slate-50/80 cursor-pointer"
+                      className={`border-b border-slate-100 hover:bg-slate-50/80 ${readOnly ? "" : "cursor-pointer"}`}
                       onClick={() => !readOnly && openEdit(item)}
                     >
                       <td className="px-3 py-2.5">
@@ -490,10 +568,23 @@ export default function BgDdPanel({
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
-                        <span className="inline-flex items-center gap-1 text-slate-600">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDocsViewer(item);
+                          }}
+                          disabled={(docCounts[item.id] ?? 0) === 0}
+                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 transition ${
+                            (docCounts[item.id] ?? 0) > 0
+                              ? "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                              : "cursor-not-allowed text-slate-300"
+                          }`}
+                          title={(docCounts[item.id] ?? 0) > 0 ? "View documents" : "No documents uploaded"}
+                        >
                           <FileText size={12} />
                           {docCounts[item.id] ?? 0}
-                        </span>
+                        </button>
                       </td>
                       {!readOnly && (
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -619,19 +710,117 @@ export default function BgDdPanel({
                 </div>
                 <div className="sm:col-span-2">
                   <label className="text-[10px] font-bold uppercase text-slate-400">Link to Contract</label>
-                  <select
-                    value={form.contractId}
-                    onChange={(e) => setForm((prev) => ({ ...prev, contractId: e.target.value }))}
-                    className={FORM_FIELD}
-                  >
-                    <option value="">— No contract linked —</option>
-                    {contractOptions.map((contract) => (
-                      <option key={contract.id} value={contract.id}>
-                        {contract.contractNo}
-                        {contract.companyName ? ` · ${contract.companyName}` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <div ref={contractSelectRef} className="relative mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setContractDropdownOpen((open) => !open)}
+                      className={`w-full rounded-lg border bg-white px-2.5 py-2 text-left transition ${
+                        contractDropdownOpen
+                          ? "border-[#ff791a] ring-2 ring-[#ff791a]/20"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span
+                            className={`block truncate text-xs font-medium ${
+                              selectedContract ? "text-slate-800" : "text-slate-500"
+                            }`}
+                          >
+                            {selectedContract?.contractNo || "— No contract linked —"}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                            {selectedContract
+                              ? contractMetaLabel(selectedContract) ||
+                                selectedContract.companyName ||
+                                "No extra contract details"
+                              : "Search by contract no, officer, location, or department"}
+                          </span>
+                        </span>
+                        <ChevronDown
+                          size={14}
+                          className={`shrink-0 text-slate-400 transition ${
+                            contractDropdownOpen ? "rotate-180" : ""
+                          }`}
+                        />
+                      </span>
+                    </button>
+
+                    {contractDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-50 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                        <div className="border-b border-slate-100 p-2">
+                          <div className="relative">
+                            <Search
+                              size={12}
+                              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                            />
+                            <input
+                              type="text"
+                              value={contractSearch}
+                              onChange={(e) => setContractSearch(e.target.value)}
+                              placeholder="Search contract no, officer, location, department..."
+                              className="w-full rounded-md border border-slate-200 py-1.5 pl-7 pr-2 text-xs text-slate-700 focus:outline-none focus:border-[#ff791a]"
+                              autoFocus
+                            />
+                          </div>
+                        </div>
+
+                        <div className="max-h-72 overflow-y-auto py-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({ ...prev, contractId: "" }));
+                              setContractDropdownOpen(false);
+                            }}
+                            className={`w-full px-3 py-2 text-left transition hover:bg-slate-50 ${
+                              !form.contractId ? "bg-orange-50/70" : ""
+                            }`}
+                          >
+                            <div className={`text-xs font-semibold ${!form.contractId ? "text-[#ff791a]" : "text-slate-700"}`}>
+                              — No contract linked —
+                            </div>
+                            <div className="mt-0.5 text-[10px] text-slate-400">Clear the selected contract link</div>
+                          </button>
+
+                          {filteredContractOptions.length === 0 ? (
+                            <p className="px-3 py-4 text-center text-xs text-slate-400">
+                              No contracts match your search.
+                            </p>
+                          ) : (
+                            filteredContractOptions.map((contract) => {
+                              const meta = contractMetaLabel(contract);
+                              const isSelected = form.contractId === contract.id;
+                              return (
+                                <button
+                                  key={contract.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setForm((prev) => ({ ...prev, contractId: contract.id }));
+                                    setContractDropdownOpen(false);
+                                  }}
+                                  className={`w-full border-t border-slate-50 px-3 py-2 text-left transition first:border-t-0 hover:bg-slate-50 ${
+                                    isSelected ? "bg-orange-50/70" : ""
+                                  }`}
+                                >
+                                  <div className={`text-xs font-semibold ${isSelected ? "text-[#ff791a]" : "text-slate-800"}`}>
+                                    {contract.contractNo || "Untitled contract"}
+                                  </div>
+                                  <div className="mt-0.5 text-[10px] text-slate-500">
+                                    {meta || contract.companyName || "No extra contract details"}
+                                  </div>
+                                  {contract.companyName.trim() ? (
+                                    <div className="mt-0.5 truncate text-[10px] text-slate-400">
+                                      {contract.companyName}
+                                    </div>
+                                  ) : null}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="sm:col-span-2">
                   <label className="text-[10px] font-bold uppercase text-slate-400">Status</label>
@@ -684,6 +873,39 @@ export default function BgDdPanel({
               >
                 {saving ? "Saving…" : editingId ? "Update" : "Add Record"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedDocsRecord && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={closeDocsViewer} aria-hidden />
+          <div
+            className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  {selectedDocsRecord.instrumentType === "bg" ? "BG" : "DD"} Documents
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {selectedDocsRecord.number || "Untitled record"}
+                  {selectedDocsRecord.beneficiary ? ` · ${selectedDocsRecord.beneficiary}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDocsViewer}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] overflow-y-auto p-5">
+              <BgDdDocumentsPanel bgDdId={selectedDocsRecord.id} readOnly embedded />
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MousePointerClick, Pencil, RotateCcw, Save, X } from "lucide-react";
+import { MousePointerClick, Pencil, RotateCcw, Save, Search, X } from "lucide-react";
 import { SchoolPartner } from "../types";
 import {
   PARTNER_PAYMENT_HEADERS,
@@ -41,10 +41,25 @@ interface PartnerPayBulkEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedMonth?: string;
-  filteredPartners: SchoolPartner[];
+  partners: SchoolPartner[];
+  totalPartnerCount: number;
   paymentRows: Array<Array<string | number>>;
   changeCount: number;
   saving: boolean;
+  searchTerm: string;
+  districtFilter: string;
+  blockFilter: string;
+  categoryFilter: string;
+  statusFilter: PartnerPayStatus | "";
+  districtOptions: string[];
+  blockOptions: string[];
+  categoryOptions: string[];
+  onSearchTermChange: (value: string) => void;
+  onDistrictFilterChange: (value: string) => void;
+  onBlockFilterChange: (value: string) => void;
+  onCategoryFilterChange: (value: string) => void;
+  onStatusFilterChange: (value: PartnerPayStatus | "") => void;
+  onClearFilters: () => void;
   columnSelection: ColumnSelection | null;
   selectedPartnerIds: string[];
   selectedFieldLabel?: string;
@@ -70,10 +85,25 @@ export default function PartnerPayBulkEditModal({
   isOpen,
   onClose,
   selectedMonth,
-  filteredPartners,
+  partners,
+  totalPartnerCount,
   paymentRows,
   changeCount,
   saving,
+  searchTerm,
+  districtFilter,
+  blockFilter,
+  categoryFilter,
+  statusFilter,
+  districtOptions,
+  blockOptions,
+  categoryOptions,
+  onSearchTermChange,
+  onDistrictFilterChange,
+  onBlockFilterChange,
+  onCategoryFilterChange,
+  onStatusFilterChange,
+  onClearFilters,
   columnSelection,
   selectedPartnerIds,
   selectedFieldLabel,
@@ -108,6 +138,9 @@ export default function PartnerPayBulkEditModal({
       ? isPartnerPayNumericField(selectedField)
       : false;
   const isStatusField = selectedField === "paymentStatus";
+  const hasActiveFilters = Boolean(
+    searchTerm || districtFilter || blockFilter || categoryFilter || statusFilter,
+  );
 
   const handleCellMouseDown = (
     e: React.MouseEvent,
@@ -251,7 +284,8 @@ export default function PartnerPayBulkEditModal({
               Bulk Edit Partner Payments
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              {filteredPartners.length} partners
+              {partners.length}
+              {totalPartnerCount !== partners.length ? ` of ${totalPartnerCount}` : ""} partners
               {selectedMonth ? ` · ${selectedMonth}` : ""} — edit bank details, toilets, days, and pay
             </p>
           </div>
@@ -280,6 +314,89 @@ export default function PartnerPayBulkEditModal({
             >
               <X size={18} />
             </button>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 shrink-0">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative min-w-[240px] flex-1 max-w-sm">
+                <Search
+                  size={15}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => onSearchTermChange(e.target.value)}
+                  placeholder="Search school, partner, account, IFSC..."
+                  className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:border-blue-400"
+                />
+              </label>
+              <select
+                value={districtFilter}
+                onChange={(e) => onDistrictFilterChange(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white cursor-pointer"
+              >
+                <option value="">All Districts</option>
+                {districtOptions.map((district) => (
+                  <option key={district} value={district}>
+                    {district}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={blockFilter}
+                onChange={(e) => onBlockFilterChange(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white cursor-pointer disabled:opacity-60"
+                disabled={blockOptions.length === 0}
+              >
+                <option value="">All Blocks</option>
+                {blockOptions.map((block) => (
+                  <option key={block} value={block}>
+                    {block}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={categoryFilter}
+                onChange={(e) => onCategoryFilterChange(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white cursor-pointer"
+              >
+                <option value="">All Categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => onStatusFilterChange(e.target.value as PartnerPayStatus | "")}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white cursor-pointer"
+              >
+                <option value="">All Statuses</option>
+                {PARTNER_PAY_STATUS_OPTIONS.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={onClearFilters}
+                  className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg bg-white cursor-pointer"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {totalPartnerCount === partners.length
+                ? `Showing all ${partners.length} partners in this bulk edit view.`
+                : `Showing ${partners.length} of ${totalPartnerCount} partners in this bulk edit view.`}
+            </p>
           </div>
         </div>
 
@@ -397,11 +514,11 @@ export default function PartnerPayBulkEditModal({
                       colSpan={PARTNER_PAYMENT_HEADERS.length}
                       className="p-8 text-center text-slate-400"
                     >
-                      No partner records found for this filter.
+                      No partner records found for the current bulk edit filters.
                     </td>
                   </tr>
                 ) : (
-                  filteredPartners.map((partner, index) => {
+                  partners.map((partner, index) => {
                     const row = paymentRows[index];
                     const values = resolveValues(partner);
                     const textValues = resolveTextValues(partner);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiUrl, parseApiError } from "../api";
 import { clearCsrfToken, setCsrfToken } from "../lib/csrf";
-import { PERMISSION_MODULES } from "../lib/permissions";
+import { createFullRolePermission, PERMISSION_MODULES } from "../lib/permissions";
 import type { RoleUiRestrictions } from "../lib/role-ui-restrictions";
 import { clearObserverToken } from "../lib/observer-session";
 import { DEFAULT_PATH, LOGIN_PATH } from "../routes";
@@ -16,7 +16,7 @@ export function useAuth() {
   const [sessionLocations, setSessionLocations] = useState<string[]>([]);
   const [sessionPermissions, setSessionPermissions] = useState<Record<
     string,
-    { view: boolean; edit: boolean }
+    { view: boolean; edit: boolean; delete: boolean }
   > | null>(null);
   const [sessionUiRestrictions, setSessionUiRestrictions] = useState<RoleUiRestrictions | null>(null);
 
@@ -44,7 +44,7 @@ export function useAuth() {
       username?: string;
       role?: string;
       locations?: string[];
-      permissions?: Record<string, { view?: boolean; edit?: boolean }>;
+      permissions?: Record<string, { view?: boolean; edit?: boolean; delete?: boolean }>;
       uiRestrictions?: RoleUiRestrictions;
       csrfToken?: string;
       tenantId?: string;
@@ -71,10 +71,10 @@ export function useAuth() {
         localStorage.setItem("hrms_locations", JSON.stringify(data.locations));
       }
       if (data.permissions) {
-        const normalized: Record<string, { view: boolean; edit: boolean }> = {};
+        const normalized: Record<string, { view: boolean; edit: boolean; delete: boolean }> = {};
         PERMISSION_MODULES.forEach((module) => {
           const perm = data.permissions?.[module];
-          normalized[module] = { view: !!perm?.view, edit: !!perm?.edit };
+          normalized[module] = createFullRolePermission(perm);
         });
         setSessionPermissions(normalized);
       }
@@ -88,6 +88,7 @@ export function useAuth() {
   const clearLocalSession = useCallback(() => {
     clearCsrfToken();
     localStorage.removeItem("hrms_logged_in");
+    localStorage.removeItem("hrms_selected_month");
     localStorage.removeItem("hrms_username");
     localStorage.removeItem("hrms_role");
     localStorage.removeItem("hrms_locations");

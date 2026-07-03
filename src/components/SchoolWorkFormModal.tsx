@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_CATEGORIES } from "../types";
 import { defaultRatesForCategory, getBlocksForDistrictName, validateSchoolWork } from "../lib/school-work-helpers";
+import { useHRMS } from "../context/HRMSContext";
+import { UNSAVED_CHANGES_CONFIRM } from "../lib/unsaved-changes";
 
 interface SchoolWorkFormModalProps {
   school?: SchoolWork | null;
@@ -42,9 +44,11 @@ export default function SchoolWorkFormModal({
   onClose,
   onSave,
 }: SchoolWorkFormModalProps) {
+  const { confirmAction, setScreenUnsavedFlag } = useHRMS();
   const isEdit = !!school;
   const [activeTab, setActiveTab] = useState<FormTab>("school");
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<SchoolWork>>({
     udise: school?.udise || "",
@@ -99,7 +103,25 @@ export default function SchoolWorkFormModal({
     };
   }, []);
 
+  useEffect(() => {
+    setIsDirty(false);
+  }, [school]);
+
+  useEffect(() => {
+    setScreenUnsavedFlag("schoolForm", isDirty);
+    return () => setScreenUnsavedFlag("schoolForm", false);
+  }, [isDirty, setScreenUnsavedFlag]);
+
+  const requestClose = async () => {
+    if (isDirty) {
+      const confirmed = await confirmAction(UNSAVED_CHANGES_CONFIRM);
+      if (!confirmed) return;
+    }
+    onClose();
+  };
+
   const update = (key: keyof SchoolWork, value: string | number) => {
+    setIsDirty(true);
     setFormData((prev) => {
       const next = { ...prev, [key]: value };
       if (key === "district") {
@@ -139,7 +161,7 @@ export default function SchoolWorkFormModal({
   };
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && !saving) onClose();
+    if (e.target === e.currentTarget && !saving) void requestClose();
   };
 
   const renderTextInput = (
@@ -207,7 +229,7 @@ export default function SchoolWorkFormModal({
               </div>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => void requestClose()}
                 disabled={saving}
                 className="cursor-pointer rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white shrink-0 disabled:opacity-50"
               >
@@ -330,7 +352,7 @@ export default function SchoolWorkFormModal({
               <div className="flex justify-end gap-2 ml-auto">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={() => void requestClose()}
                   disabled={saving}
                   className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-50"
                 >

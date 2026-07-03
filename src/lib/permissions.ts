@@ -133,23 +133,42 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   },
 ];
 
-export function createEmptyRolePermissions(): Record<PermissionModuleKey, { view: boolean; edit: boolean }> {
+export function createEmptyRolePermissions(): Record<
+  PermissionModuleKey,
+  { view: boolean; edit: boolean; delete: boolean }
+> {
   return Object.fromEntries(
-    PERMISSION_MODULES.map((key) => [key, { view: false, edit: false }]),
-  ) as Record<PermissionModuleKey, { view: boolean; edit: boolean }>;
+    PERMISSION_MODULES.map((key) => [key, { view: false, edit: false, delete: false }]),
+  ) as Record<PermissionModuleKey, { view: boolean; edit: boolean; delete: boolean }>;
 }
 
-export const DEFAULT_NEW_ROLE_PERMISSIONS: Record<PermissionModuleKey, { view: boolean; edit: boolean }> = {
-  employees: { view: true, edit: true },
-  schoolWork: { view: true, edit: true },
-  bids: { view: true, edit: true },
-  renewals: { view: true, edit: true },
-  salary: { view: false, edit: false },
-  ledger: { view: false, edit: false },
-  attendance: { view: true, edit: true },
-  leave: { view: true, edit: true },
-  birthdays: { view: true, edit: false },
-  directory: { view: true, edit: false },
-  monitor: { view: true, edit: true },
-  admin: { view: false, edit: false },
+export function createFullRolePermission(
+  values?: Partial<{ view: boolean; edit: boolean; delete: boolean }>,
+): { view: boolean; edit: boolean; delete: boolean } {
+  const deletePermission = values?.delete ?? !!values?.edit;
+  const edit = !!values?.edit || !!deletePermission;
+  const view = !!values?.view || edit;
+  return {
+    view,
+    edit,
+    delete: !!deletePermission,
+  };
+}
+
+export const DEFAULT_NEW_ROLE_PERMISSIONS: Record<
+  PermissionModuleKey,
+  { view: boolean; edit: boolean; delete: boolean }
+> = {
+  employees: { view: true, edit: true, delete: true },
+  schoolWork: { view: true, edit: true, delete: true },
+  bids: { view: true, edit: true, delete: true },
+  renewals: { view: true, edit: true, delete: true },
+  salary: { view: false, edit: false, delete: false },
+  ledger: { view: false, edit: false, delete: false },
+  attendance: { view: true, edit: true, delete: true },
+  leave: { view: true, edit: true, delete: true },
+  birthdays: { view: true, edit: false, delete: false },
+  directory: { view: true, edit: false, delete: false },
+  monitor: { view: true, edit: true, delete: true },
+  admin: { view: false, edit: false, delete: false },
 };

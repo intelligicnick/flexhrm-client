@@ -64,6 +64,12 @@ export default function SearchableMultiSelect({
   }, [isOpen]);
 
   const summary = formatMultiSelectSummary(selected, placeholder);
+  const dropdownPanelClass = [
+    "absolute left-0 top-full mt-1 z-50",
+    "w-80 min-w-full max-w-[calc(100vw-1rem)]",
+    "bg-white border border-slate-200 rounded-lg shadow-lg",
+    "p-2 space-y-1 max-h-60 overflow-hidden flex flex-col",
+  ].join(" ");
 
   const defaultButtonClass = compact
     ? "w-full py-2 pr-3 bg-transparent border-0 text-xs text-slate-700 focus:ring-0 focus:outline-none text-left flex justify-between items-center cursor-pointer disabled:opacity-60"
@@ -91,9 +97,9 @@ export default function SearchableMultiSelect({
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 space-y-1 max-h-60 overflow-hidden flex flex-col">
+        <div className={dropdownPanelClass}>
           <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1.5 gap-2">
-            <div className="relative flex-1">
+            <div className="relative flex-1 min-w-0">
               <Search size={12} className="absolute left-2 top-2 text-slate-400" />
               <input
                 type="text"
@@ -124,15 +130,15 @@ export default function SearchableMultiSelect({
                 return (
                   <label
                     key={option}
-                    className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none"
+                    className="flex items-start gap-2 px-2 py-1.5 hover:bg-slate-50 rounded text-xs text-slate-700 cursor-pointer select-none"
                   >
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => onChange(toggleMultiSelectValue(selected, option))}
-                      className="w-3.5 h-3.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416]"
+                      className="w-3.5 h-3.5 rounded border-slate-300 text-[#f57416] focus:ring-[#f57416] mt-0.5 shrink-0"
                     />
-                    <span className="font-medium">{option}</span>
+                    <span className="font-medium break-words leading-snug">{option}</span>
                   </label>
                 );
               })

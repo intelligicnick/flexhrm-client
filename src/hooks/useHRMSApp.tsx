@@ -2,7 +2,7 @@
  * Core HRMS application state and handlers (extracted from App.tsx).
  */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, useBlocker } from "react-router-dom";
 import { resetAllBusyButtons } from "../components/ActionButtonFeedback";
 import { 
   Users, 
@@ -134,14 +134,26 @@ import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedF
 import { getSalaryColumnValue, resolveEmployeeDailyWage } from "../lib/salary-columns";
 import { buildLabeledGrandTotalRow, buildSalaryGrandTotalRow, sumExportRows } from "../lib/export-totals";
 import {
+  buildPfSalaryFilename,
+  buildPfSalaryWorkbookBuffer,
+  type PfSalaryExportContext,
+} from "../lib/pf-salary-export";
+import {
   formatMultiSelectExportLabel,
   matchesMultiSelectFilter,
 } from "../lib/filter-helpers";
+import {
+  hasBulkWizardProgress,
+  hasDraftRecords,
+  hasTempLedgerDrafts,
+  UNSAVED_CHANGES_CONFIRM,
+} from "../lib/unsaved-changes";
 import {
   appendLedgerItem,
   clearItemsOfType,
   defaultTempLedgerEntry,
   getMonthLedger,
+  isLedgerDateWithinMonth,
   monthLedgerToPayload,
   removeLedgerItem,
   TempLedgerEntry,
@@ -157,10 +169,23 @@ import {
   type AttendanceRecordFilter,
 } from "../lib/attendance-helpers";
 import {
+  buildAttendanceEntriesFromParsedRows,
+  type ParsedAttendanceRow,
+  type ParsedAttendanceSheet,
+} from "../lib/attendance-pdf-parser";
+import {
   pickLatestMonthKey,
   type ExitEligibleEmployee,
 } from "../lib/exit-eligibility-helpers";
-import { getModuleKey, PERMISSION_MODULES, createEmptyRolePermissions, DEFAULT_NEW_ROLE_PERMISSIONS, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import {
+  getModuleKey,
+  PERMISSION_MODULES,
+  createEmptyRolePermissions,
+  createFullRolePermission,
+  DEFAULT_NEW_ROLE_PERMISSIONS,
+  SidebarItemDef,
+  isAdminModuleTab,
+} from "../lib/permissions";
 import {
   applySalaryUiRestrictions,
   createEmptyRoleUiRestrictions,
@@ -434,7 +459,9 @@ export function useHRMSApp() {
   // Custom Roles Editor States
   const [roleNameInput, setRoleNameInput] = useState("");
   const [roleDescInput, setRoleDescInput] = useState("");
-  const [rolePermsInput, setRolePermsInput] = useState<Record<string, { view: boolean; edit: boolean }>>(
+  const [rolePermsInput, setRolePermsInput] = useState<
+    Record<string, { view: boolean; edit: boolean; delete: boolean }>
+  >(
     () => ({ ...DEFAULT_NEW_ROLE_PERMISSIONS }),
   );
   const [roleUiInput, setRoleUiInput] = useState<RoleUiRestrictions>(() => createEmptyRoleUiRestrictions());
@@ -444,20 +471,17 @@ export function useHRMSApp() {
   // Parse permissions dynamically — prefer server session from /api/auth/me
   const userPermissions = useMemo(() => {
     const isSuperAdmin = String(sessionRole || "").toLowerCase() === "admin" || String(sessionUser || "").toLowerCase() === "admin";
-    const result: Record<string, { view: boolean; edit: boolean }> = {};
+    const result: Record<string, { view: boolean; edit: boolean; delete: boolean }> = {};
 
     PERMISSION_MODULES.forEach(m => {
       if (isSuperAdmin) {
-        result[m] = { view: true, edit: true };
+        result[m] = { view: true, edit: true, delete: true };
       } else if (sessionPermissions?.[m]) {
         result[m] = sessionPermissions[m];
       } else {
         const matchedRole = rolesList.find(r => String(r.name || "").toLowerCase() === String(sessionRole || "").toLowerCase());
         const perm = matchedRole?.permissions?.[m];
-        result[m] = {
-          view: !!perm?.view,
-          edit: !!perm?.edit,
-        };
+        result[m] = createFullRolePermission(perm);
       }
     });
     return result;
@@ -891,6 +915,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteBulkPayArchive = async (id: string) => {
+    if (!ensureDeletePermission("salary", "salary archives")) return;
     const confirmed = await confirmAction({
       title: "Delete archived file",
       message: "Delete this archived bulk pay file from the server? This cannot be undone.",
@@ -1017,6 +1042,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSchoolBulkPayArchive = async (id: string) => {
+    if (!ensureDeletePermission("schoolWork", "school bulk pay archives")) return;
     const confirmed = await confirmAction({
       title: "Delete archived file",
       message: "Delete this archived school bulk pay file from the server? This cannot be undone.",
@@ -1435,10 +1461,19 @@ export function useHRMSApp() {
   const [ledgerType, setLedgerType] = useState<"advance" | "penalty" | "foodPerk" | "accommodationPerk" | "conveyancePerk">("advance");
   const [ledgerAmount, setLedgerAmount] = useState("");
 
-  const [selectedMonth, setSelectedMonth] = useState(() => {
+  const getDefaultSelectedMonth = useCallback(() => {
+    const today = new Date();
+    today.setMonth(today.getMonth() - 1);
+    return normalizeMonthKey(
+      `${MONTH_NAME_LIST[today.getMonth()]} ${today.getFullYear()}`,
+    );
+  }, []);
+
+  const [selectedMonth, setSelectedMonthDirect] = useState(() => {
     const saved = localStorage.getItem("hrms_selected_month");
-    return normalizeMonthKey(saved);
+    return normalizeMonthKey(saved) || getDefaultSelectedMonth();
   });
+  const [screenUnsavedFlags, setScreenUnsavedFlags] = useState<Record<string, boolean>>({});
 
   const activeMonthName = useMemo(() => {
     return selectedMonth ? selectedMonth.split(" ")[0] : "January";
@@ -1483,12 +1518,9 @@ export function useHRMSApp() {
     if (availableFYRanges.includes(activeFYRange)) return;
     const currentFY = getCurrentFYRange();
     const months = getMonthsForFY(currentFY);
-    const today = new Date();
-    const defaultMonth = normalizeMonthKey(
-      `${MONTH_NAME_LIST[today.getMonth()]} ${today.getFullYear()}`,
-    );
-    setSelectedMonth(months.includes(defaultMonth) ? defaultMonth : months[0] || defaultMonth);
-  }, [availableFYRanges, activeFYRange]);
+    const defaultMonth = getDefaultSelectedMonth();
+    setSelectedMonthDirect(months.includes(defaultMonth) ? defaultMonth : months[0] || defaultMonth);
+  }, [availableFYRanges, activeFYRange, getDefaultSelectedMonth]);
 
   // Advance & Penalty Month-wise Batch states
   const [ledgerSearchQuery, setLedgerSearchQuery] = useState("");
@@ -1520,12 +1552,12 @@ export function useHRMSApp() {
       const updated = { ...prev };
       ledgerSelectedEmployeeIds.forEach((empId) => {
         if (!updated[empId]) {
-          updated[empId] = defaultTempLedgerEntry();
+          updated[empId] = defaultTempLedgerEntry(selectedMonth);
         }
       });
       return updated;
     });
-  }, [ledgerSelectedEmployeeIds]);
+  }, [ledgerSelectedEmployeeIds, selectedMonth]);
 
   const [bulkEditDrafts, setBulkEditDrafts] = useState<Record<string, Partial<Employee>>>({});
   const [bulkEditSalaryWageModes, setBulkEditSalaryWageModes] = useState<
@@ -1672,6 +1704,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteHelpline = async (nameToDelete: string) => {
+    if (!ensureDeletePermission("directory", "directory contacts")) return;
     const confirmed = await confirmAction({
       title: "Delete helpline",
       message: `Are you sure you want to delete the helpline "${nameToDelete}"?`,
@@ -1716,6 +1749,8 @@ export function useHRMSApp() {
   const [isBulkWizardSkillDropdownOpen, setIsBulkWizardSkillDropdownOpen] = useState(false);
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
   const [hideAttendanceAbsentColumn, setHideAttendanceAbsentColumn] = useState(false);
+  const [attendanceStickyColumns, setAttendanceStickyColumns] = useState(true);
+  const [salaryStickyEmployeeDetails, setSalaryStickyEmployeeDetails] = useState(true);
 
   // Bulk marking form states
   const [bulkStartDay, setBulkStartDay] = useState(1);
@@ -1725,7 +1760,8 @@ export function useHRMSApp() {
   // Bulk marking wizard state
   const [bulkWizardStep, setBulkWizardStep] = useState<"employees" | "dates" | "review">("employees");
   const [isBulkWizardOpen, setIsBulkWizardOpen] = useState(false);
-  const [attendanceSubView, setAttendanceSubView] = useState<"grid" | "wizard">("grid");
+  const [attendanceSubView, setAttendanceSubView] = useState<"grid" | "wizard" | "pdf-import" | "employee">("grid");
+  const [individualAttendanceEmployeeId, setIndividualAttendanceEmployeeId] = useState<string | null>(null);
   const [attendanceRecordFilter, setAttendanceRecordFilter] = useState<AttendanceRecordFilter>("all");
   const [bulkSelLocations, setBulkSelLocations] = useState<string[]>([]);
   const [bulkSelEmployees, setBulkSelEmployees] = useState<string[]>([]);
@@ -1758,6 +1794,17 @@ export function useHRMSApp() {
       setConfirmDialog({ ...options, open: true });
     });
   }, []);
+
+  const ensureDeletePermission = useCallback(
+    (module: string, subject: string) => {
+      if (userPermissions[module]?.delete) {
+        return true;
+      }
+      setErrorMessage(`Action locked: You do not have delete permissions for ${subject}.`);
+      return false;
+    },
+    [setErrorMessage, userPermissions],
+  );
 
   const handleConfirmDialogConfirm = useCallback(() => {
     closeConfirmDialog(true);
@@ -1860,7 +1907,7 @@ export function useHRMSApp() {
   useEffect(() => {
     if (!MONTHS_LIST.length) return;
     if (!MONTHS_LIST.includes(selectedMonth)) {
-      setSelectedMonth(MONTHS_LIST[0]);
+      setSelectedMonthDirect(MONTHS_LIST[0]);
     }
   }, [MONTHS_LIST, selectedMonth]);
 
@@ -1884,13 +1931,29 @@ export function useHRMSApp() {
     return new Date(year, monthIndex + 1, 0).getDate();
   };
 
+  const openEmployeeAttendanceMarking = useCallback((empId: string) => {
+    setIndividualAttendanceEmployeeId(empId);
+    setAttendanceSubView("employee");
+  }, []);
+
+  const closeEmployeeAttendanceMarking = useCallback(() => {
+    setIndividualAttendanceEmployeeId(null);
+    setAttendanceSubView("grid");
+  }, []);
+
   // Mark single cell attendance
-  const handleCellAttendanceChange = async (empId: string, day: number, status: string) => {
+  const handleCellAttendanceChange = async (
+    empId: string,
+    day: number,
+    status: string,
+    monthKey?: string,
+  ) => {
     if (!userPermissions.attendance?.edit) {
       alert("Action locked: You do not have write permissions for Attendance.");
       return;
     }
 
+    const targetMonth = monthKey || selectedMonth;
     const emp = employees.find(e => e.id === empId);
     const empName = emp ? `${emp.employeeCode} (${emp.nameAsPerAadhar})` : empId;
 
@@ -1902,18 +1965,18 @@ export function useHRMSApp() {
           employeeId: empId,
           employeeCode: emp?.employeeCode,
           location: emp?.location,
-          monthKey: selectedMonth,
+          monthKey: targetMonth,
           day,
           status,
         }),
       });
       if (!res.ok) throw await parseApiError(res, "Failed to save attendance.");
       setAttendanceDb(prev => {
-        const monthData = prev[selectedMonth] || {};
+        const monthData = prev[targetMonth] || {};
         const empData = monthData[empId] || {};
         return {
           ...prev,
-          [selectedMonth]: {
+          [targetMonth]: {
             ...monthData,
             [empId]: {
               ...empData,
@@ -1922,7 +1985,7 @@ export function useHRMSApp() {
           }
         };
       });
-      scheduleFetchExitEligibility(selectedMonth, false);
+      scheduleFetchExitEligibility(targetMonth, false);
       void fetchFinancialYearsWithData();
     } catch (err: any) {
       setErrorMessage(err.message || `Failed to mark attendance for ${empName}.`);
@@ -2119,6 +2182,124 @@ export function useHRMSApp() {
       scheduleFetchExitEligibility(refMonth, true, TOAST_DURATION_MS);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to apply wizard attendance.");
+    }
+  };
+
+  const handleApplyPdfAttendanceImport = async (
+    _sheet: ParsedAttendanceSheet,
+    rows: ParsedAttendanceRow[],
+    monthKey: string,
+  ) => {
+    if (!userPermissions.attendance?.edit) {
+      alert("Action locked: You do not have write permissions for Attendance.");
+      return;
+    }
+
+    const entries = buildAttendanceEntriesFromParsedRows(
+      rows,
+      monthKey,
+      employees,
+      resolveBulkAttendanceStatus,
+      isEmployeeExitedOnDayStatic,
+    );
+
+    if (entries.length === 0) {
+      alert("No attendance marks to apply. Check employee matches and included rows.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/attendance/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to save PDF attendance import.");
+
+      setAttendanceDb((prev) => {
+        const nextDb = { ...prev };
+        const monthData = { ...(nextDb[monthKey] || {}) };
+        for (const entry of entries) {
+          const empData = { ...(monthData[entry.employeeId] || {}) };
+          empData[entry.day] = entry.status;
+          monthData[entry.employeeId] = empData;
+        }
+        nextDb[monthKey] = monthData;
+        return nextDb;
+      });
+
+      triggerSuccess(`Attendance imported from PDF (${entries.length} day marks).`);
+      setAttendanceSubView("grid");
+      scheduleFetchExitEligibility(monthKey, true, TOAST_DURATION_MS);
+      void fetchFinancialYearsWithData();
+      if (selectedMonth !== monthKey) {
+        setSelectedMonthDirect(monthKey);
+        void fetchAttendanceForMonth(monthKey);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to apply PDF attendance import.");
+      throw err;
+    }
+  };
+
+  const handleEmployeeBulkAttendanceChange = async (
+    empId: string,
+    monthKey: string,
+    days: number[],
+    status: string,
+  ) => {
+    if (!userPermissions.attendance?.edit) {
+      alert("Action locked: You do not have write permissions for Attendance.");
+      return;
+    }
+    if (days.length === 0) return;
+
+    const emp = employees.find((e) => e.id === empId);
+    const sortedDays = [...days].sort((a, b) => a - b);
+    const entries = sortedDays
+      .map((day) => {
+        if (emp && isEmployeeExitedOnDayStatic(emp, monthKey, day)) {
+          return null;
+        }
+        return {
+          employeeId: empId,
+          employeeCode: emp?.employeeCode,
+          location: emp?.location,
+          monthKey,
+          day,
+          status: emp
+            ? resolveBulkAttendanceStatus(emp.workingDaysType, monthKey, day, status)
+            : status,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+    if (entries.length === 0) return;
+
+    try {
+      const res = await fetch("/api/attendance/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      if (!res.ok) throw await parseApiError(res, "Failed to save attendance.");
+
+      setAttendanceDb((prev) => {
+        const monthData = { ...(prev[monthKey] || {}) };
+        const empData = { ...(monthData[empId] || {}) };
+        entries.forEach((entry) => {
+          empData[entry.day] = entry.status;
+        });
+        monthData[empId] = empData;
+        return { ...prev, [monthKey]: monthData };
+      });
+
+      triggerSuccess("Attendance updated successfully.");
+      scheduleFetchExitEligibility(monthKey, false);
+      void fetchFinancialYearsWithData();
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to apply attendance changes.");
+      throw err;
     }
   };
 
@@ -2358,9 +2539,9 @@ export function useHRMSApp() {
     "Professional Tax (PT)",
     "Advance Balance",
     "Uniform Deductions",
-    "Penalty Balance",
-    "Net Salary",
-    "Total Deductions",
+  "Penalty Balance",
+  "Total Deductions",
+  "Net Salary",
     "Food Perk",
     "Accommodation Perk",
     "Conveyance Perk",
@@ -2508,6 +2689,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteReportTemplate = async (name: string) => {
+    if (!ensureDeletePermission("employees", "report templates")) return;
     const confirmed = await confirmAction({
       title: "Delete report template",
       message: `Delete the report template "${name}"? This cannot be undone.`,
@@ -2596,7 +2778,7 @@ export function useHRMSApp() {
       if (template.filters.locations !== undefined) {
         setSalaryLocationFilters(normalizeSavedLocationFilters(template.filters.locations));
       }
-      if (template.filters.month !== undefined) setSelectedMonth(template.filters.month);
+      if (template.filters.month !== undefined) setSelectedMonthDirect(template.filters.month);
       if (template.filters.searchQuery !== undefined) setSalarySearchQuery(template.filters.searchQuery);
       if (template.filters.filterType !== undefined) setSalaryFilterType(template.filters.filterType);
       if (template.filters.joinStart !== undefined) setSalaryJoinStartFilter(template.filters.joinStart);
@@ -2635,6 +2817,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSalaryTemplate = async (name: string) => {
+    if (!ensureDeletePermission("salary", "salary templates")) return;
     const confirmed = await confirmAction({
       title: "Delete salary template",
       message: `Delete the salary template "${name}"? This cannot be undone.`,
@@ -2660,6 +2843,7 @@ export function useHRMSApp() {
   // Handler to delete locations (single or bulk)
   const handleDeleteLocations = async (locsToDelete: string[]) => {
     if (!locsToDelete || locsToDelete.length === 0) return;
+    if (!ensureDeletePermission("employees", "employee locations")) return;
     
     const confirmMsg = locsToDelete.length === 1 
       ? `Are you sure you want to delete "${locsToDelete[0]}"? Active employees with this location will have their location unassigned.`
@@ -2795,6 +2979,7 @@ export function useHRMSApp() {
   // Handler to delete roles (single or bulk)
   const handleDeleteRoles = async (rolesToDelete: string[]) => {
     if (!rolesToDelete || rolesToDelete.length === 0) return;
+    if (!ensureDeletePermission("employees", "job roles")) return;
     
     const confirmMsg = rolesToDelete.length === 1 
       ? `Are you sure you want to delete the role "${rolesToDelete[0]}"? Active employees with this role will have their role unassigned.`
@@ -2859,15 +3044,24 @@ export function useHRMSApp() {
     }
   };
 
-  const handleSaveBatchLedgerRecords = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  const saveBatchLedgerRecords = async ({
+    source = "manual",
+    employeeIds = ledgerSelectedEmployeeIds,
+  }: {
+    source?: "manual" | "autosave";
+    employeeIds?: string[];
+  } = {}) => {
     if (!userPermissions.ledger?.edit) {
-      alert("Action locked: You do not have write permissions for Ledgers.");
-      return;
+      if (source === "manual") {
+        alert("Action locked: You do not have write permissions for Ledgers.");
+      }
+      return false;
     }
-    if (ledgerSelectedEmployeeIds.length === 0) {
-      setErrorMessage("Please select at least one employee.");
-      return;
+    if (employeeIds.length === 0) {
+      if (source === "manual") {
+        setErrorMessage("Please select at least one employee.");
+      }
+      return false;
     }
 
     const apiEntries: Array<{
@@ -2878,11 +3072,20 @@ export function useHRMSApp() {
       note: string;
     }> = [];
 
-    for (const empId of ledgerSelectedEmployeeIds) {
-      const entry = tempLedgerEntries[empId] ?? defaultTempLedgerEntry();
+    for (const empId of employeeIds) {
+      const entry = tempLedgerEntries[empId] ?? defaultTempLedgerEntry(selectedMonth);
       if (!entry.entryDate) {
         setErrorMessage("Please select an entry date for each employee.");
-        return;
+        return false;
+      }
+      if (!isLedgerDateWithinMonth(entry.entryDate, selectedMonth)) {
+        setErrorMessage(`Entry date must be within ${selectedMonth}.`);
+        return false;
+      }
+      const penaltyAmount = parseNonNegativeNumber(entry.penalty, 0);
+      if (penaltyAmount > 0 && !entry.penaltyReason.trim()) {
+        setErrorMessage("Enter a reason for each penalty amount.");
+        return false;
       }
       const note = entry.penaltyReason.trim();
       const fields: Array<[LedgerItemType, string]> = [
@@ -2901,54 +3104,61 @@ export function useHRMSApp() {
             type,
             amount,
             entryDate: entry.entryDate,
-            note,
+            note: type === "penalty" ? note : "",
           });
         }
       }
     }
 
     if (apiEntries.length === 0) {
-      setErrorMessage("Enter at least one amount greater than zero.");
-      return;
+      if (source === "manual") {
+        setErrorMessage("Enter at least one amount greater than zero.");
+      }
+      return false;
     }
 
     try {
       setErrorMessage(null);
-      const byEmployee = new Map<string, Array<{ type: LedgerItemType; amount: number; entryDate: string; note: string }>>();
-      for (const entry of apiEntries) {
-        const list = byEmployee.get(entry.employeeId) ?? [];
-        list.push(entry);
-        byEmployee.set(entry.employeeId, list);
+      const res = await fetch("/api/employees/payroll-ledger/add-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthKey: selectedMonth,
+          entries: apiEntries,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Server rejected ledger entries.");
       }
-
-      let savedCount = 0;
-      for (const [empId, items] of byEmployee) {
-        const emp = employees.find((e) => e.id === empId);
-        if (!emp) continue;
-        let ledger = getMonthLedger(emp, selectedMonth);
-        for (const item of items) {
-          ledger = appendLedgerItem(ledger, item);
-        }
-        await persistEmployeeMonthLedger(empId, selectedMonth, ledger);
-        savedCount += items.length;
-      }
+      const result = await res.json().catch(() => ({}));
+      const savedCount = Number(result.count) || apiEntries.length;
 
       await fetchEmployees();
       setTempLedgerEntries((prev) => {
         const next = { ...prev };
-        for (const empId of ledgerSelectedEmployeeIds) {
-          next[empId] = defaultTempLedgerEntry();
+        for (const empId of employeeIds) {
+          next[empId] = defaultTempLedgerEntry(selectedMonth);
         }
         return next;
       });
-      triggerSuccess(`Saved ${savedCount} ledger entry line(s) for ${selectedMonth}.`);
+      if (source === "manual") {
+        triggerSuccess(`Saved ${savedCount} ledger entry line(s) for ${selectedMonth}.`);
+      }
+      return true;
     } catch (err: any) {
       setErrorMessage("Failed to save ledger entries: " + err.message);
+      return false;
     }
   };
 
+  const handleSaveBatchLedgerRecords = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    await saveBatchLedgerRecords();
+  };
+
   const handleDeleteLedgerItem = async (employeeId: string, itemId: string) => {
-    if (!userPermissions.ledger?.edit) return;
+    if (!ensureDeletePermission("ledger", "ledger entries")) return;
     try {
       setErrorMessage(null);
       const emp = employees.find((e) => e.id === employeeId);
@@ -3871,6 +4081,65 @@ export function useHRMSApp() {
     }
   };
 
+  const downloadPfSalaryExcel = async (data: Employee[], activeLocation: string[], month: string) => {
+    if (data.length === 0) {
+      alert("No employees selected to export.");
+      return;
+    }
+
+    const ctx: PfSalaryExportContext = {
+      month,
+      esicEligibilityLimit,
+      attendanceDb,
+      locationCompliance,
+      locationPtEnabled,
+    };
+
+    try {
+      const ExcelJS = await loadExcelJS();
+      const { buffer, recordCount, sheetCount } = await buildPfSalaryWorkbookBuffer(
+        ExcelJS,
+        data,
+        ctx,
+      );
+
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", buildPfSalaryFilename(month));
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      triggerSuccess(
+        `PF Salary sheet exported (${recordCount} employee${recordCount === 1 ? "" : "s"} across ${sheetCount} location sheet${sheetCount === 1 ? "" : "s"}).`,
+      );
+
+      fetch("/api/audit-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "DOWNLOAD_PF_SALARY_EXCEL",
+          target: `PF Salary Excel: Downloaded PF salary register for ${month} (Location: ${activeLocation || "All Locations"}) containing ${recordCount} records in ${sheetCount} sheet(s).`,
+          details: {
+            format: "Excel",
+            month,
+            location: activeLocation,
+            recordCount,
+            sheetCount,
+          },
+        }),
+      })
+        .then(() => fetchAuditLogs())
+        .catch((err) => console.error("Audit log error:", err));
+    } catch (err: any) {
+      setErrorMessage("PF Salary Excel download error: " + err.message);
+    }
+  };
+
   // Fetch employees on component mount
   const patchEmployeeInState = useCallback(
     (id: string, updater: Partial<Employee> | ((emp: Employee) => Partial<Employee>)) => {
@@ -3922,7 +4191,10 @@ export function useHRMSApp() {
 
   const fetchEmployees = useCallback(async (options?: { forceLedger?: boolean }) => {
     const includeLedger =
-      options?.forceLedger ?? (activeSidebarTab === "Salary" || activeSidebarTab === "Ledger");
+      options?.forceLedger ??
+      (activeSidebarTab === "Salary" ||
+        activeSidebarTab === "Ledger" ||
+        activeSidebarTab === "Advance & Penalty");
     const params = new URLSearchParams();
     if (!includeLedger) {
       params.set("lite", "1");
@@ -4210,6 +4482,33 @@ export function useHRMSApp() {
     } catch (err: any) {
       setErrorMessage("Invoice generation failed: " + err.message);
       return null;
+    }
+  };
+
+  const handleDeleteSchoolBilling = async (billing: SchoolMonthlyBilling): Promise<boolean> => {
+    if (!ensureDeletePermission("schoolWork", "saved invoices")) return false;
+    const confirmed = await confirmAction({
+      title: "Delete saved invoice",
+      message: `Delete the saved invoice for ${billing.block} (${billing.monthKey}, ${billing.category})? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return false;
+    try {
+      setErrorMessage(null);
+      const res = await fetch(`/api/school-monthly-billings/${billing.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        throw await parseApiError(res, "Could not delete saved invoice.");
+      }
+      setRawSchoolBillings((prev) => prev.filter((item) => item.id !== billing.id));
+      void fetchSchoolBillings();
+      triggerSuccess(`Deleted saved invoice for ${billing.block} (${billing.monthKey}).`);
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to delete saved invoice: " + err.message);
+      return false;
     }
   };
 
@@ -4532,7 +4831,11 @@ export function useHRMSApp() {
 
   useEffect(() => {
     if (!isLoggedIn) return;
-    if (activeSidebarTab === "Salary" || activeSidebarTab === "Ledger") {
+    if (
+      activeSidebarTab === "Salary" ||
+      activeSidebarTab === "Ledger" ||
+      activeSidebarTab === "Advance & Penalty"
+    ) {
       void fetchEmployees({ forceLedger: true });
     }
   }, [isLoggedIn, activeSidebarTab, selectedMonth]);
@@ -4807,9 +5110,10 @@ export function useHRMSApp() {
 
   // Login handler
   const handleLoginSubmit = (e: React.FormEvent) =>
-    authHandleLoginSubmit(e, (username) =>
-      triggerSuccess(`Successfully authenticated. Welcome back, ${username}!`),
-    );
+    authHandleLoginSubmit(e, (username) => {
+      setSelectedMonthDirect(getDefaultSelectedMonth());
+      triggerSuccess(`Successfully authenticated. Welcome back, ${username}!`);
+    });
 
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -5114,6 +5418,7 @@ export function useHRMSApp() {
 
   // Delete a custom role
   const handleDeleteRole = async (name: string) => {
+    if (!ensureDeletePermission("admin", "custom roles")) return;
     const confirmed = await confirmAction({
       title: "Delete custom role",
       message: `Are you sure you want to delete the custom role "${name}"?`,
@@ -5504,6 +5809,7 @@ export function useHRMSApp() {
 
   // Single Delete Tracker
   const handleDeleteEmployee = async (id: string) => {
+    if (!ensureDeletePermission("employees", "employees")) return;
     const confirmed = await confirmAction({
       title: "Delete employee",
       message: `Are you sure you want to permanently remove employee "${id}"? This cannot be undone.`,
@@ -5583,6 +5889,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSchoolWork = async (id: string) => {
+    if (!ensureDeletePermission("schoolWork", "school records")) return;
     const confirmed = await confirmAction({
       title: "Delete school record",
       message: "Are you sure you want to permanently remove this school record? This cannot be undone.",
@@ -5608,6 +5915,7 @@ export function useHRMSApp() {
   };
 
   const handleBulkDeleteSchools = async (ids: string[]) => {
+    if (!ensureDeletePermission("schoolWork", "school records")) return;
     const confirmed = await confirmAction({
       title: "Delete school records",
       message: `You are about to permanently delete ${ids.length} selected school record(s). This cannot be undone.`,
@@ -5958,6 +6266,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSchoolDistricts = async (ids: string[]): Promise<boolean> => {
+    if (!ensureDeletePermission("schoolWork", "districts")) return false;
     const confirmed = await confirmAction({
       title: "Delete districts",
       message: `Remove ${ids.length} district(s) and their configured blocks? Existing school records keep their text values.`,
@@ -6029,6 +6338,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSchoolBlocks = async (ids: string[]): Promise<boolean> => {
+    if (!ensureDeletePermission("schoolWork", "blocks")) return false;
     const confirmed = await confirmAction({
       title: "Delete blocks",
       message: `Remove ${ids.length} block(s) from configuration?`,
@@ -6132,6 +6442,7 @@ export function useHRMSApp() {
     type: "Material" | "Trek" | "Miscellaneous";
     amount: number;
   }): Promise<boolean> => {
+    if (!ensureDeletePermission("schoolWork", "expense records")) return false;
     const typeLabel = row.type;
     const confirmed = await confirmAction({
       title: "Delete expense",
@@ -6336,6 +6647,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteTender = async (id: string): Promise<void> => {
+    if (!ensureDeletePermission("bids", "tenders")) return;
     const res = await fetch(`/api/tenders/${id}`, { method: "DELETE" });
     if (!res.ok) throw await parseApiError(res, "Failed to delete tender.");
     await fetchTenders();
@@ -6391,6 +6703,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteContract = async (id: string): Promise<void> => {
+    if (!ensureDeletePermission("bids", "contracts")) return;
     const res = await fetch(`/api/contracts/${id}`, { method: "DELETE" });
     if (!res.ok) throw await parseApiError(res, "Failed to delete contract.");
     await fetchContracts();
@@ -6447,6 +6760,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteRenewal = async (id: string): Promise<void> => {
+    if (!ensureDeletePermission("renewals", "renewals")) return;
     const res = await fetch(`/api/renewals/${id}`, { method: "DELETE" });
     if (!res.ok) throw await parseApiError(res, "Failed to delete renewal.");
     await fetchRenewals();
@@ -6504,6 +6818,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteBgDdRecord = async (id: string): Promise<void> => {
+    if (!ensureDeletePermission("bids", "BG/DD records")) return;
     const res = await fetch(`/api/bg-dd/${id}`, { method: "DELETE" });
     if (!res.ok) throw await parseApiError(res, "Failed to delete BG/DD record.");
     await fetchBgDdRecords();
@@ -6545,6 +6860,7 @@ export function useHRMSApp() {
   };
 
   const handleDeleteSchoolSupervisor = async (id: string) => {
+    if (!ensureDeletePermission("schoolWork", "school supervisors")) return;
     const confirmed = await confirmAction({
       title: "Delete school supervisor",
       message: "Remove this school supervisor record? Schools in their assigned blocks will no longer have supervisor coverage.",
@@ -6589,6 +6905,7 @@ export function useHRMSApp() {
 
   // Bulk Selection Delete Trigger
   const handleBulkDelete = async (ids: string[]) => {
+    if (!ensureDeletePermission("employees", "employees")) return;
     const confirmed = await confirmAction({
       title: "Delete employees",
       message: `You are about to permanently delete ${ids.length} selected employee(s). This cannot be undone.`,
@@ -7081,6 +7398,94 @@ export function useHRMSApp() {
       companyBranch.trim() !== savedPayrollConfig.companyBranch.trim()
     );
   }, [esicEligibilityLimit, basicSalaryPercentage, companyBranch, savedPayrollConfig]);
+
+  const setScreenUnsavedFlag = useCallback((key: string, dirty: boolean) => {
+    setScreenUnsavedFlags((prev) => {
+      if (!dirty) {
+        if (!(key in prev)) return prev;
+        const { [key]: _removed, ...rest } = prev;
+        return rest;
+      }
+      if (prev[key] === true) return prev;
+      return { ...prev, [key]: true };
+    });
+  }, []);
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (hasDraftRecords(bulkEditDrafts)) return true;
+    if (hasDraftRecords(schoolBulkEditDrafts)) return true;
+    if (hasDraftRecords(partnerBulkEditDrafts)) return true;
+    if (configHasUnsavedChanges) return true;
+    if (hasTempLedgerDrafts(tempLedgerEntries)) return true;
+    if (
+      hasBulkWizardProgress(
+        isBulkWizardOpen,
+        bulkSelEmployees,
+        bulkSelMonths,
+        bulkSelDates,
+      )
+    ) {
+      return true;
+    }
+    return Object.values(screenUnsavedFlags).some(Boolean);
+  }, [
+    bulkEditDrafts,
+    schoolBulkEditDrafts,
+    partnerBulkEditDrafts,
+    configHasUnsavedChanges,
+    tempLedgerEntries,
+    isBulkWizardOpen,
+    bulkSelEmployees,
+    bulkSelMonths,
+    bulkSelDates,
+    screenUnsavedFlags,
+  ]);
+
+  const confirmDiscardUnsavedChanges = useCallback(async (): Promise<boolean> => {
+    if (!hasUnsavedChanges) return true;
+    return confirmAction(UNSAVED_CHANGES_CONFIRM);
+  }, [hasUnsavedChanges, confirmAction]);
+
+  const setSelectedMonth = useCallback(
+    async (monthKey: string) => {
+      const normalized = normalizeMonthKey(monthKey);
+      if (normalized === selectedMonth) return;
+      const confirmed = await confirmDiscardUnsavedChanges();
+      if (!confirmed) return;
+      setSelectedMonthDirect(normalized);
+      setTempLedgerEntries((prev) => {
+        const next: Record<string, TempLedgerEntry> = {};
+        for (const empId of Object.keys(prev)) {
+          next[empId] = defaultTempLedgerEntry(normalized);
+        }
+        return next;
+      });
+    },
+    [selectedMonth, confirmDiscardUnsavedChanges],
+  );
+
+  const navigationBlocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isLoggedIn &&
+      hasUnsavedChanges &&
+      currentLocation.pathname !== nextLocation.pathname,
+  );
+  const navigationBlockerConfirmRef = useRef(false);
+
+  useEffect(() => {
+    if (navigationBlocker.state !== "blocked" || navigationBlockerConfirmRef.current) {
+      return;
+    }
+    navigationBlockerConfirmRef.current = true;
+    confirmAction(UNSAVED_CHANGES_CONFIRM).then((confirmed) => {
+      navigationBlockerConfirmRef.current = false;
+      if (confirmed) {
+        navigationBlocker.proceed?.();
+      } else {
+        navigationBlocker.reset?.();
+      }
+    });
+  }, [navigationBlocker, confirmAction]);
 
   const configSummary = useMemo(() => {
     const locationCounts: Record<string, number> = {};
@@ -7607,6 +8012,9 @@ export function useHRMSApp() {
     companyBranch,
     savedPayrollConfig,
     configHasUnsavedChanges,
+    hasUnsavedChanges,
+    setScreenUnsavedFlag,
+    confirmDiscardUnsavedChanges,
     configValidationError,
     isSavingPayrollConfig,
     configSummary,
@@ -7700,6 +8108,10 @@ export function useHRMSApp() {
     attendanceSearchQuery,
     hideAttendanceAbsentColumn,
     setHideAttendanceAbsentColumn,
+    attendanceStickyColumns,
+    setAttendanceStickyColumns,
+    salaryStickyEmployeeDetails,
+    setSalaryStickyEmployeeDetails,
     promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
@@ -7707,6 +8119,7 @@ export function useHRMSApp() {
     bulkWizardStep,
     isBulkWizardOpen,
     attendanceSubView,
+    individualAttendanceEmployeeId,
     attendanceRecordFilter,
     bulkSelLocations,
     bulkSelEmployees,
@@ -7775,6 +8188,10 @@ export function useHRMSApp() {
     handleCellAttendanceChange,
     handleApplyBulkAttendance,
     handleApplyBulkWizardAttendance,
+    handleApplyPdfAttendanceImport,
+    handleEmployeeBulkAttendanceChange,
+    openEmployeeAttendanceMarking,
+    closeEmployeeAttendanceMarking,
     downloadAttendanceExcel,
     downloadAttendancePDF,
     normalizeTemplates,
@@ -7789,6 +8206,7 @@ export function useHRMSApp() {
     handleAddRoleFromConfig,
     handleEditRoleFromConfig,
     handleDeleteRoles,
+    saveBatchLedgerRecords,
     handleSaveBatchLedgerRecords,
     handleDeleteLedgerItem,
     handleSaveLedgerRecord,
@@ -7803,6 +8221,7 @@ export function useHRMSApp() {
     downloadReportsPDF,
     downloadSalaryExcel,
     downloadSalaryPDF,
+    downloadPfSalaryExcel,
     fetchEmployees,
     fetchAdmins,
     fetchAdminProfile,
@@ -7937,6 +8356,7 @@ export function useHRMSApp() {
     handleResolveSupervisorEscalation,
     handleUpdateCommitmentDiary,
     handleGenerateSchoolBilling,
+    handleDeleteSchoolBilling,
     handleSaveSchoolWorkdays,
     handleSavePartnerPayUpdates,
     handleSavePartnerPayDetails,
@@ -8185,6 +8605,7 @@ export function useHRMSApp() {
     setBulkWizardStep,
     setIsBulkWizardOpen,
     setAttendanceSubView,
+    setIndividualAttendanceEmployeeId,
     setAttendanceRecordFilter,
     setBulkSelLocations,
     setBulkSelEmployees,

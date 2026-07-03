@@ -4,7 +4,16 @@
  */
 
 import React, { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  RouterProvider,
+  Routes,
+  Route,
+  Navigate,
+  useSearchParams,
+  useLocation,
+} from "react-router-dom";
 import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
 import "./index.css";
 import { HRMSProvider, useHRMS } from "./context/HRMSContext";
@@ -189,14 +198,24 @@ function AppRoutes() {
   );
 }
 
+function AppShell() {
+  return (
+    <>
+      <ActionButtonFeedback />
+      <AppRoutes />
+    </>
+  );
+}
+
+const router = createBrowserRouter(
+  createRoutesFromElements(<Route path="*" element={<AppShell />} />),
+);
+
 export default function App() {
   useTenantBranding();
   return (
     <AppErrorBoundary>
-      <BrowserRouter>
-        <ActionButtonFeedback />
-        <AppRoutes />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </AppErrorBoundary>
   );
 }

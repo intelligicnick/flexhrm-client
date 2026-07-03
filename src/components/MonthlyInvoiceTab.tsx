@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Eye, FileSpreadsheet, FileText, PlusCircle, MapPin, Calendar, Save, X } from "lucide-react";
+import { Eye, FileSpreadsheet, FileText, PlusCircle, MapPin, Calendar, Save, Trash2, X } from "lucide-react";
 import { SchoolMonthlyBilling, SchoolPartner, SchoolWork, SchoolDistrict, SchoolBlock } from "../types";
 import {
   STANDARD_MONTH_DAYS,
@@ -16,6 +16,7 @@ import {
 } from "../lib/govt-invoice-export";
 import GovtInvoicePreview from "./GovtInvoicePreview";
 import MonthlyPartnerPaymentsTab from "./MonthlyPartnerPaymentsTab";
+import { useHRMS } from "../context/HRMSContext";
 import {
   type AxisBulkPayRowInput,
   type BulkPayPartnerSheetInput,
@@ -40,6 +41,7 @@ interface MonthlyInvoiceTabProps {
     category: "elementary" | "secondary" | "all";
     billingId?: string;
   }) => Promise<SchoolMonthlyBilling | null>;
+  onDeleteBilling?: (billing: SchoolMonthlyBilling) => Promise<boolean>;
   onSaveWorkdays?: (payload: {
     block: string;
     district?: string;
@@ -120,6 +122,7 @@ export default function MonthlyInvoiceTab({
   monthsList,
   onMonthChange,
   onGenerate,
+  onDeleteBilling,
   onSaveWorkdays,
   onSavePayUpdates,
   onSavePartnerDetails,
@@ -131,6 +134,7 @@ export default function MonthlyInvoiceTab({
   onViewSavedBulkPay,
   readOnly = false,
 }: MonthlyInvoiceTabProps) {
+  const { setScreenUnsavedFlag } = useHRMS();
   const invoicePreviewRef = useRef<HTMLDivElement>(null);
   const viewInvoicePreviewRef = useRef<HTMLDivElement>(null);
   const wasViewModeRef = useRef(false);
@@ -179,6 +183,15 @@ export default function MonthlyInvoiceTab({
   const [exportingPdf, setExportingPdf] = useState(false);
   const [draftDaysBySchoolId, setDraftDaysBySchoolId] = useState<Record<string, number>>({});
   const [draftToiletsBySchoolId, setDraftToiletsBySchoolId] = useState<Record<string, number>>({});
+  const hasInvoiceDrafts =
+    Object.keys(draftDaysBySchoolId).length > 0 ||
+    Object.keys(draftToiletsBySchoolId).length > 0;
+
+  useEffect(() => {
+    setScreenUnsavedFlag("schoolInvoice", hasInvoiceDrafts);
+    return () => setScreenUnsavedFlag("schoolInvoice", false);
+  }, [hasInvoiceDrafts, setScreenUnsavedFlag]);
+
   const [manualDaysSchoolIds, setManualDaysSchoolIds] = useState<Set<string>>(() => new Set());
   const [viewBlockFilter, setViewBlockFilter] = useState("");
   const [viewCategoryFilter, setViewCategoryFilter] = useState("");
@@ -189,6 +202,7 @@ export default function MonthlyInvoiceTab({
   const [previewTab, setPreviewTab] = useState<PreviewTab>("elementary");
   const [viewPreviewTab, setViewPreviewTab] = useState<PreviewTab>("elementary");
   const [editingBillingId, setEditingBillingId] = useState<string | null>(null);
+  const [deletingBillingId, setDeletingBillingId] = useState<string | null>(null);
 
   const billingMonths = useMemo(
     () =>
@@ -519,6 +533,16 @@ export default function MonthlyInvoiceTab({
   };
 
   const closePreviewModal = () => setSelectedBillingId(null);
+
+  const handleDeleteBilling = async (billing: SchoolMonthlyBilling) => {
+    if (!onDeleteBilling || deletingBillingId) return;
+    setDeletingBillingId(billing.id);
+    try {
+      await onDeleteBilling(billing);
+    } finally {
+      setDeletingBillingId((current) => (current === billing.id ? null : current));
+    }
+  };
 
   return (
     <div className="space-y-4 -mb-4 md:-mb-6">
@@ -893,6 +917,17 @@ export default function MonthlyInvoiceTab({
                                   className="px-2 py-1 rounded text-[11px] font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer"
                                 >
                                   Edit
+                                </button>
+                              )}
+                              {!readOnly && onDeleteBilling && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteBilling(billing)}
+                                  disabled={deletingBillingId === billing.id}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-bold bg-red-50 text-red-700 hover:bg-red-100 cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                >
+                                  <Trash2 size={12} />
+                                  {deletingBillingId === billing.id ? "Deleting..." : "Delete"}
                                 </button>
                               )}
                             </div>

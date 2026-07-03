@@ -40,6 +40,7 @@ import {
   type SavedBulkPayRecord,
 } from "../utils";
 import PartnerPayBulkEditModal from "./PartnerPayBulkEditModal";
+import { useHRMS } from "../context/HRMSContext";
 
 interface MonthlyPartnerPaymentsTabProps {
   partners: SchoolPartner[];
@@ -143,6 +144,7 @@ export default function MonthlyPartnerPaymentsTab({
   onViewSavedBulkPay,
   readOnly = false,
 }: MonthlyPartnerPaymentsTabProps) {
+  const { setScreenUnsavedFlag } = useHRMS();
   const monthMultiplier = 1;
   const [districtFilter, setDistrictFilter] = useState("");
   const [blockFilter, setBlockFilter] = useState("");
@@ -154,6 +156,11 @@ export default function MonthlyPartnerPaymentsTab({
   const [columnSelection, setColumnSelection] = useState<ColumnSelection | null>(null);
   const [checkedPartnerIds, setCheckedPartnerIds] = useState<string[]>([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditSearchTerm, setBulkEditSearchTerm] = useState("");
+  const [bulkEditDistrictFilter, setBulkEditDistrictFilter] = useState("");
+  const [bulkEditBlockFilter, setBulkEditBlockFilter] = useState("");
+  const [bulkEditCategoryFilter, setBulkEditCategoryFilter] = useState("");
+  const [bulkEditStatusFilter, setBulkEditStatusFilter] = useState<PartnerPayStatus | "">("");
   const columnSelectionRef = useRef<ColumnSelection | null>(null);
   const selectedPartnerIdsRef = useRef<string[]>([]);
 
@@ -186,17 +193,6 @@ export default function MonthlyPartnerPaymentsTab({
     }
     return list.sort((a, b) => a.schoolName.localeCompare(b.schoolName));
   }, [partners, districtFilter, blockFilter]);
-
-  const selectedPartnerIds = useMemo(
-    () =>
-      columnSelection ? selectionToPartnerIds(columnSelection, filteredPartners) : [],
-    [columnSelection, filteredPartners],
-  );
-
-  useEffect(() => {
-    columnSelectionRef.current = columnSelection;
-    selectedPartnerIdsRef.current = selectedPartnerIds;
-  }, [columnSelection, selectedPartnerIds]);
 
   useEffect(() => {
     setNumericDrafts((prev) => {
@@ -245,6 +241,65 @@ export default function MonthlyPartnerPaymentsTab({
     [statusDrafts, selectedMonth],
   );
 
+  const bulkEditDistrictOptions = useMemo(
+    () => Array.from(new Set(filteredPartners.map((partner) => partner.district).filter(Boolean))).sort(),
+    [filteredPartners],
+  );
+
+  const bulkEditBlockOptions = useMemo(() => {
+    const source = bulkEditDistrictFilter
+      ? filteredPartners.filter((partner) => partner.district === bulkEditDistrictFilter)
+      : filteredPartners;
+    return Array.from(new Set(source.map((partner) => partner.block).filter(Boolean))).sort();
+  }, [filteredPartners, bulkEditDistrictFilter]);
+
+  const bulkEditCategoryOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filteredPartners
+            .map((partner) => resolveTextValues(partner).schoolCategory)
+            .filter(Boolean),
+        ),
+      ).sort(),
+    [filteredPartners, resolveTextValues],
+  );
+
+  const bulkEditPartners = useMemo(() => {
+    const query = bulkEditSearchTerm.trim().toLowerCase();
+    return filteredPartners.filter((partner) => {
+      const textValues = resolveTextValues(partner);
+      const paymentStatus = resolvePaymentStatus(partner);
+      if (query) {
+        const matches = [
+          textValues.schoolName,
+          textValues.partnerName,
+          textValues.schoolCategory,
+          textValues.accountHolderName,
+          textValues.accountNumber,
+          textValues.ifscCode,
+          partner.block,
+          partner.district,
+        ].some((value) => value?.toLowerCase().includes(query));
+        if (!matches) return false;
+      }
+      if (bulkEditDistrictFilter && partner.district !== bulkEditDistrictFilter) return false;
+      if (bulkEditBlockFilter && partner.block !== bulkEditBlockFilter) return false;
+      if (bulkEditCategoryFilter && textValues.schoolCategory !== bulkEditCategoryFilter) return false;
+      if (bulkEditStatusFilter && paymentStatus !== bulkEditStatusFilter) return false;
+      return true;
+    });
+  }, [
+    filteredPartners,
+    bulkEditSearchTerm,
+    bulkEditDistrictFilter,
+    bulkEditBlockFilter,
+    bulkEditCategoryFilter,
+    bulkEditStatusFilter,
+    resolveTextValues,
+    resolvePaymentStatus,
+  ]);
+
   const paymentRows = useMemo(
     () =>
       buildPartnerPaymentRowsFromPartners(
@@ -259,6 +314,31 @@ export default function MonthlyPartnerPaymentsTab({
     [filteredPartners, monthMultiplier, schoolsById, selectedMonth, defaultDays, numericDrafts, statusDrafts],
   );
 
+  const paymentRowsByPartnerId = useMemo(() => {
+    const rows = new Map<string, Array<string | number>>();
+    filteredPartners.forEach((partner, index) => {
+      const row = paymentRows[index];
+      if (row) rows.set(partner.id, row);
+    });
+    return rows;
+  }, [filteredPartners, paymentRows]);
+
+  const bulkEditPaymentRows = useMemo(
+    () => bulkEditPartners.map((partner) => paymentRowsByPartnerId.get(partner.id) || []),
+    [bulkEditPartners, paymentRowsByPartnerId],
+  );
+
+  const selectedPartnerIds = useMemo(
+    () =>
+      columnSelection ? selectionToPartnerIds(columnSelection, bulkEditPartners) : [],
+    [columnSelection, bulkEditPartners],
+  );
+
+  useEffect(() => {
+    columnSelectionRef.current = columnSelection;
+    selectedPartnerIdsRef.current = selectedPartnerIds;
+  }, [columnSelection, selectedPartnerIds]);
+
   const totalPayable = useMemo(
     () =>
       paymentRows.reduce(
@@ -269,6 +349,12 @@ export default function MonthlyPartnerPaymentsTab({
   );
 
   const changeCount = countDraftChanges(numericDrafts, textDrafts, statusDrafts);
+
+  useEffect(() => {
+    setScreenUnsavedFlag("partnerPayments", changeCount > 0);
+    return () => setScreenUnsavedFlag("partnerPayments", false);
+  }, [changeCount, setScreenUnsavedFlag]);
+
   const canEdit = !readOnly && Boolean(onSaveWorkdays || onSavePayUpdates || onSavePartnerDetails || onSavePaymentStatus);
 
   const applyNumericDraftUpdate = useCallback(
@@ -492,7 +578,7 @@ export default function MonthlyPartnerPaymentsTab({
 
   const activateCell = useCallback(
     (partnerId: string, field: PartnerPayColumnField, shiftKey: boolean) => {
-      const clickIdx = filteredPartners.findIndex((p) => p.id === partnerId);
+      const clickIdx = bulkEditPartners.findIndex((p) => p.id === partnerId);
       if (clickIdx === -1) return;
 
       const selection = columnSelectionRef.current;
@@ -500,24 +586,24 @@ export default function MonthlyPartnerPaymentsTab({
         if (selection?.field === field) {
           const next = { ...selection, focusPartnerId: partnerId };
           columnSelectionRef.current = next;
-          selectedPartnerIdsRef.current = selectionToPartnerIds(next, filteredPartners);
+          selectedPartnerIdsRef.current = selectionToPartnerIds(next, bulkEditPartners);
           setColumnSelection(next);
           return;
         }
         const anchorId =
           selection?.focusPartnerId ??
           selection?.anchorPartnerId ??
-          filteredPartners[0]?.id;
-        const anchorIdx = filteredPartners.findIndex((p) => p.id === anchorId);
+          bulkEditPartners[0]?.id;
+        const anchorIdx = bulkEditPartners.findIndex((p) => p.id === anchorId);
         const start = Math.min(anchorIdx >= 0 ? anchorIdx : 0, clickIdx);
         const end = Math.max(anchorIdx >= 0 ? anchorIdx : 0, clickIdx);
         const next = {
           field,
-          anchorPartnerId: filteredPartners[start].id,
-          focusPartnerId: filteredPartners[end].id,
+          anchorPartnerId: bulkEditPartners[start].id,
+          focusPartnerId: bulkEditPartners[end].id,
         };
         columnSelectionRef.current = next;
-        selectedPartnerIdsRef.current = selectionToPartnerIds(next, filteredPartners);
+        selectedPartnerIdsRef.current = selectionToPartnerIds(next, bulkEditPartners);
         setColumnSelection(next);
         return;
       }
@@ -526,7 +612,7 @@ export default function MonthlyPartnerPaymentsTab({
       selectedPartnerIdsRef.current = [partnerId];
       setColumnSelection(next);
     },
-    [filteredPartners],
+    [bulkEditPartners],
   );
 
   const handleBulkApplyValue = useCallback(
@@ -551,7 +637,7 @@ export default function MonthlyPartnerPaymentsTab({
   const handleColumnHeaderClick = useCallback(
     (field: PartnerPayColumnField) => {
       if (!canEdit) return;
-      const allIds = filteredPartners.map((p) => p.id);
+      const allIds = bulkEditPartners.map((p) => p.id);
       if (allIds.length === 0) return;
       const next = {
         field,
@@ -562,13 +648,30 @@ export default function MonthlyPartnerPaymentsTab({
       selectedPartnerIdsRef.current = allIds;
       setColumnSelection(next);
     },
-    [canEdit, filteredPartners],
+    [canEdit, bulkEditPartners],
   );
 
   useEffect(() => {
     clearColumnSelection();
     setCheckedPartnerIds([]);
   }, [districtFilter, blockFilter, clearColumnSelection]);
+
+  useEffect(() => {
+    if (bulkEditBlockFilter && !bulkEditBlockOptions.includes(bulkEditBlockFilter)) {
+      setBulkEditBlockFilter("");
+    }
+  }, [bulkEditBlockFilter, bulkEditBlockOptions]);
+
+  useEffect(() => {
+    clearColumnSelection();
+  }, [
+    bulkEditSearchTerm,
+    bulkEditDistrictFilter,
+    bulkEditBlockFilter,
+    bulkEditCategoryFilter,
+    bulkEditStatusFilter,
+    clearColumnSelection,
+  ]);
 
   const allFilteredChecked =
     filteredPartners.length > 0 &&
@@ -592,6 +695,14 @@ export default function MonthlyPartnerPaymentsTab({
       Array.from(new Set([...prev, ...filteredPartners.map((partner) => partner.id)])),
     );
   }, [allFilteredChecked, filteredPartners]);
+
+  const clearBulkEditFilters = useCallback(() => {
+    setBulkEditSearchTerm("");
+    setBulkEditDistrictFilter("");
+    setBulkEditBlockFilter("");
+    setBulkEditCategoryFilter("");
+    setBulkEditStatusFilter("");
+  }, []);
 
   const handleBulkPaymentStatus = useCallback(
     (status: PartnerPayStatus) => {
@@ -1258,10 +1369,28 @@ export default function MonthlyPartnerPaymentsTab({
           isOpen={isBulkEditOpen}
           onClose={() => setIsBulkEditOpen(false)}
           selectedMonth={selectedMonth}
-          filteredPartners={filteredPartners}
-          paymentRows={paymentRows}
+          partners={bulkEditPartners}
+          totalPartnerCount={filteredPartners.length}
+          paymentRows={bulkEditPaymentRows}
           changeCount={changeCount}
           saving={saving}
+          searchTerm={bulkEditSearchTerm}
+          districtFilter={bulkEditDistrictFilter}
+          blockFilter={bulkEditBlockFilter}
+          categoryFilter={bulkEditCategoryFilter}
+          statusFilter={bulkEditStatusFilter}
+          districtOptions={bulkEditDistrictOptions}
+          blockOptions={bulkEditBlockOptions}
+          categoryOptions={bulkEditCategoryOptions}
+          onSearchTermChange={setBulkEditSearchTerm}
+          onDistrictFilterChange={(value) => {
+            setBulkEditDistrictFilter(value);
+            setBulkEditBlockFilter("");
+          }}
+          onBlockFilterChange={setBulkEditBlockFilter}
+          onCategoryFilterChange={setBulkEditCategoryFilter}
+          onStatusFilterChange={(value) => setBulkEditStatusFilter(value as PartnerPayStatus | "")}
+          onClearFilters={clearBulkEditFilters}
           columnSelection={columnSelection}
           selectedPartnerIds={selectedPartnerIds}
           selectedFieldLabel={selectedFieldLabel}

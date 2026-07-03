@@ -1,3 +1,4 @@
+import { getDaysInMonthStatic, MONTH_NAME_LIST, normalizeMonthKey } from "./date-helpers";
 import { Employee } from "../types";
 
 export type LedgerItemType =
@@ -169,6 +170,54 @@ export function todayDateInputValue(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function formatDateInputValue(year: number, monthIndex: number, day: number): string {
+  const month = String(monthIndex + 1).padStart(2, "0");
+  const date = String(day).padStart(2, "0");
+  return `${year}-${month}-${date}`;
+}
+
+export function getLedgerDateBoundsForMonth(monthKey: string): { min: string; max: string } {
+  const normalized = normalizeMonthKey(monthKey);
+  const [monthName, yearText] = normalized.split(" ");
+  const monthIndex = MONTH_NAME_LIST.indexOf(monthName);
+  const year = parseInt(yearText, 10);
+
+  if (monthIndex < 0 || !Number.isFinite(year)) {
+    const today = todayDateInputValue();
+    return { min: today, max: today };
+  }
+
+  const maxDay = getDaysInMonthStatic(normalized);
+  return {
+    min: formatDateInputValue(year, monthIndex, 1),
+    max: formatDateInputValue(year, monthIndex, maxDay),
+  };
+}
+
+export function isLedgerDateWithinMonth(entryDate: string, monthKey: string): boolean {
+  if (!entryDate) return false;
+  const { min, max } = getLedgerDateBoundsForMonth(monthKey);
+  return entryDate >= min && entryDate <= max;
+}
+
+export function getDefaultLedgerEntryDate(monthKey?: string): string {
+  if (!monthKey) return todayDateInputValue();
+
+  const normalized = normalizeMonthKey(monthKey);
+  const [monthName, yearText] = normalized.split(" ");
+  const monthIndex = MONTH_NAME_LIST.indexOf(monthName);
+  const year = parseInt(yearText, 10);
+
+  if (monthIndex < 0 || !Number.isFinite(year)) {
+    return todayDateInputValue();
+  }
+
+  const today = new Date();
+  const maxDay = getDaysInMonthStatic(normalized);
+  const day = Math.min(today.getDate(), maxDay);
+  return formatDateInputValue(year, monthIndex, day);
+}
+
 export type TempLedgerEntry = {
   entryDate: string;
   advance: string;
@@ -180,9 +229,9 @@ export type TempLedgerEntry = {
   penaltyReason: string;
 };
 
-export function defaultTempLedgerEntry(): TempLedgerEntry {
+export function defaultTempLedgerEntry(monthKey?: string): TempLedgerEntry {
   return {
-    entryDate: todayDateInputValue(),
+    entryDate: getDefaultLedgerEntryDate(monthKey),
     advance: "0",
     penalty: "0",
     uniform: "0",

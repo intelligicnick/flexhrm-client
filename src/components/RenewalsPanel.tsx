@@ -2,17 +2,20 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   Car,
+  CheckSquare,
   CheckCircle2,
   Clock,
   Download,
   FileSpreadsheet,
   FileText,
   Filter,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
   Server,
   Shield,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -25,10 +28,12 @@ import {
 } from "../types";
 import {
   CAR_PAPER_SUBTYPE_LABELS,
+  deleteRenewal as deleteRenewalRecord,
   fetchRenewalDocuments,
   getSubtypeLabels,
   IT_RENEWAL_SUBTYPE_LABELS,
   LICENSE_SUBTYPE_LABELS,
+  updateRenewal as updateRenewalRecord,
   uploadRenewalDocumentsBulk,
 } from "../lib/renewals";
 import {
@@ -72,6 +77,21 @@ interface RenewalsPanelProps {
 type ExpiryFilter = "all" | "active" | "expiring_soon" | "expired" | "no_expiry";
 type DocsFilter = "" | "has_docs" | "missing_docs";
 type HasAmountFilter = "" | "with_amount" | "without_amount";
+type RenewalBulkEditableField = Exclude<keyof RenewalBulkEditRowDraft, "id">;
+
+interface RenewalBulkEditRowDraft {
+  id: string;
+  subType: string;
+  title: string;
+  ownerType: RenewalOwnerType;
+  clientName: string;
+  amount: string;
+  hasExpiry: boolean;
+  renewalPeriod: RenewalPeriod;
+  issuedOn: string;
+  expiresOn: string;
+  notes: string;
+}
 
 function expiryMeta(item: Pick<Renewal, "hasExpiry" | "expiresOn" | "expiryDate">): {
   label: string;
@@ -159,6 +179,26 @@ function normalizeRenewal(item: Renewal): Renewal {
   };
 }
 
+function renewalToForm(item: Renewal): CreateRenewalInput {
+  const n = normalizeRenewal(item);
+  return {
+    category: n.category,
+    subType: n.subType,
+    title: n.title,
+    clientName: n.clientName,
+    ownerType: n.ownerType,
+    amount: n.amount,
+    hasExpiry: n.hasExpiry,
+    issuedOn: n.issuedOn,
+    expiresOn: n.expiresOn,
+    renewalDate: n.issuedOn,
+    expiryDate: n.expiresOn,
+    notes: n.notes,
+    entryDate: n.entryDate,
+    renewalPeriod: n.renewalPeriod,
+  };
+}
+
 function applyAutoExpiry(form: CreateRenewalInput): CreateRenewalInput {
   if (form.hasExpiry === false || !form.issuedOn.trim()) return form;
   const expiresOn = computeNextExpiryDate(
@@ -166,6 +206,55 @@ function applyAutoExpiry(form: CreateRenewalInput): CreateRenewalInput {
     form.renewalPeriod === "monthly" ? "monthly" : "yearly",
   );
   return { ...form, expiresOn, expiryDate: expiresOn };
+}
+
+function toBulkEditRowDraft(item: Renewal): RenewalBulkEditRowDraft {
+  const base = renewalToForm(item);
+  return {
+    id: item.id,
+    subType: base.subType,
+    title: base.title,
+    ownerType: base.ownerType,
+    clientName: base.clientName,
+    amount: base.amount,
+    hasExpiry: base.hasExpiry,
+    renewalPeriod: base.renewalPeriod,
+    issuedOn: base.issuedOn,
+    expiresOn: base.expiresOn,
+    notes: base.notes,
+  };
+}
+
+function patchBulkEditRowDraft(
+  category: RenewalCategory,
+  prev: RenewalBulkEditRowDraft,
+  updates: Partial<Pick<RenewalBulkEditRowDraft, RenewalBulkEditableField>>,
+): RenewalBulkEditRowDraft {
+  let next = { ...prev, ...updates };
+  if (category === "car_papers" && updates.title !== undefined) {
+    next = { ...next, title: updates.title.toUpperCase() };
+  }
+  if (!next.hasExpiry) {
+    return { ...next, expiresOn: "" };
+  }
+  const shouldAutoExpiry =
+    updates.issuedOn !== undefined ||
+    updates.renewalPeriod !== undefined ||
+    updates.hasExpiry === true;
+  if (shouldAutoExpiry && updates.expiresOn === undefined && next.issuedOn.trim()) {
+    next = {
+      ...next,
+      expiresOn: computeNextExpiryDate(
+        next.issuedOn,
+        next.renewalPeriod === "monthly" ? "monthly" : "yearly",
+      ),
+    };
+  }
+  return next;
+}
+
+function buildBulkEditDraftMap(items: Renewal[]): Record<string, RenewalBulkEditRowDraft> {
+  return Object.fromEntries(items.map((item) => [item.id, toBulkEditRowDraft(item)]));
 }
 
 export default function RenewalsPanel({
@@ -224,8 +313,25 @@ export default function RenewalsPanel({
   const [formError, setFormError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importToast, setImportToast] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditRows, setBulkEditRows] = useState<Record<string, RenewalBulkEditRowDraft>>({});
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
+  const [bulkAction, setBulkAction] = useState<"edit" | "delete" | null>(null);
 
   const normalizedRenewals = useMemo(() => renewals.map(normalizeRenewal), [renewals]);
+  const selectedRenewals = useMemo(
+    () => normalizedRenewals.filter((item) => selectedIds.includes(item.id)),
+    [normalizedRenewals, selectedIds],
+  );
+  const selectedRenewalMap = useMemo(
+    () => new Map(selectedRenewals.map((item) => [item.id, item])),
+    [selectedRenewals],
+  );
+  const bulkEditRowsList = useMemo(
+    () => selectedRenewals.map((item) => bulkEditRows[item.id] ?? toBulkEditRowDraft(item)),
+    [selectedRenewals, bulkEditRows],
+  );
 
   const loadDocCounts = useCallback(async () => {
     if (!supportsDocuments) {
@@ -248,6 +354,14 @@ export default function RenewalsPanel({
   useEffect(() => {
     void loadDocCounts();
   }, [loadDocCounts]);
+
+  useEffect(() => {
+    const validIds = new Set(normalizedRenewals.map((item) => item.id));
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [normalizedRenewals]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -332,6 +446,42 @@ export default function RenewalsPanel({
     clientFilter, titleFilter, hasAmountFilter,
   ]);
 
+  const isAllFilteredSelected = useMemo(() => {
+    if (filtered.length === 0) return false;
+    return filtered.every((item) => selectedIds.includes(item.id));
+  }, [filtered, selectedIds]);
+
+  const bulkEditChangeStats = useMemo(() => {
+    let rows = 0;
+    let fields = 0;
+    const changedIds: string[] = [];
+
+    for (const item of selectedRenewals) {
+      const original = toBulkEditRowDraft(item);
+      const draft = bulkEditRows[item.id] ?? original;
+      let rowFieldCount = 0;
+
+      if (original.subType !== draft.subType) rowFieldCount += 1;
+      if (original.title !== draft.title) rowFieldCount += 1;
+      if (category === "it_renewals" && original.ownerType !== draft.ownerType) rowFieldCount += 1;
+      if (category === "it_renewals" && original.clientName !== draft.clientName) rowFieldCount += 1;
+      if (category === "it_renewals" && original.amount !== draft.amount) rowFieldCount += 1;
+      if (original.hasExpiry !== draft.hasExpiry) rowFieldCount += 1;
+      if (original.renewalPeriod !== draft.renewalPeriod) rowFieldCount += 1;
+      if (original.issuedOn !== draft.issuedOn) rowFieldCount += 1;
+      if (original.expiresOn !== draft.expiresOn) rowFieldCount += 1;
+      if (original.notes !== draft.notes) rowFieldCount += 1;
+
+      if (rowFieldCount > 0) {
+        rows += 1;
+        fields += rowFieldCount;
+        changedIds.push(item.id);
+      }
+    }
+
+    return { rows, fields, changedIds };
+  }, [selectedRenewals, bulkEditRows, category]);
+
   const nearingRenewals = useMemo(
     () => filtered.filter(isNearingRenewal),
     [filtered],
@@ -358,24 +508,62 @@ export default function RenewalsPanel({
   const openEdit = (item: Renewal) => {
     const n = normalizeRenewal(item);
     setEditingId(n.id);
-    setForm({
-      category: n.category,
-      subType: n.subType,
-      title: n.title,
-      clientName: n.clientName,
-      ownerType: n.ownerType,
-      amount: n.amount,
-      hasExpiry: n.hasExpiry,
-      issuedOn: n.issuedOn,
-      expiresOn: n.expiresOn,
-      renewalDate: n.issuedOn,
-      expiryDate: n.expiresOn,
-      notes: n.notes,
-      entryDate: n.entryDate,
-      renewalPeriod: n.renewalPeriod,
-    });
+    setForm(renewalToForm(item));
     setFormError(null);
     setIsFormOpen(true);
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const toggleSelectAllFiltered = () => {
+    if (isAllFilteredSelected) {
+      const filteredIds = new Set(filtered.map((item) => item.id));
+      setSelectedIds((prev) => prev.filter((id) => !filteredIds.has(id)));
+      return;
+    }
+    setSelectedIds((prev) => Array.from(new Set([...prev, ...filtered.map((item) => item.id)])));
+  };
+
+  const openBulkEdit = () => {
+    if (selectedRenewals.length === 0) return;
+    setBulkEditRows(buildBulkEditDraftMap(selectedRenewals));
+    setBulkEditError(null);
+    setIsBulkEditOpen(true);
+  };
+
+  const closeBulkEdit = () => {
+    if (bulkAction === "edit") return;
+    if (bulkEditChangeStats.fields > 0) {
+      const ok = window.confirm("Close bulk edit? Unsaved changes will be lost.");
+      if (!ok) return;
+    }
+    setIsBulkEditOpen(false);
+    setBulkEditRows({});
+    setBulkEditError(null);
+  };
+
+  const resetBulkEditRows = () => {
+    setBulkEditRows(buildBulkEditDraftMap(selectedRenewals));
+    setBulkEditError(null);
+  };
+
+  const handleBulkRowChange = (
+    id: string,
+    updates: Partial<Pick<RenewalBulkEditRowDraft, RenewalBulkEditableField>>,
+  ) => {
+    const source = selectedRenewalMap.get(id);
+    if (!source) return;
+    setBulkEditRows((prev) => {
+      const current = prev[id] ?? toBulkEditRowDraft(source);
+      return {
+        ...prev,
+        [id]: patchBulkEditRowDraft(category, current, updates),
+      };
+    });
   };
 
   const closeForm = () => {
@@ -459,6 +647,157 @@ export default function RenewalsPanel({
     await loadDocCounts();
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedRenewals.length === 0) return;
+    const label = `${selectedRenewals.length} ${tabLabel} renewal record${
+      selectedRenewals.length === 1 ? "" : "s"
+    }`;
+    if (!window.confirm(`Delete ${label}?`)) return;
+
+    setBulkAction("delete");
+    try {
+      const results = await Promise.allSettled(
+        selectedRenewals.map((item) => deleteRenewalRecord(item.id)),
+      );
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+
+      await onRefresh();
+      await loadDocCounts();
+
+      if (failed.length === 0) {
+        setSelectedIds([]);
+        setImportToast(`Deleted ${succeeded} renewal record${succeeded === 1 ? "" : "s"}.`);
+        return;
+      }
+
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to delete some renewal records.";
+      setImportToast(
+        succeeded > 0
+          ? `Deleted ${succeeded} renewal record${succeeded === 1 ? "" : "s"}. ${failed.length} failed: ${firstError}`
+          : firstError,
+      );
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const handleBulkSave = async () => {
+    if (selectedRenewals.length === 0) {
+      setBulkEditError("Select at least one renewal to update.");
+      return;
+    }
+    const updates = selectedRenewals
+      .map((item) => {
+        const original = renewalToForm(item);
+        const draft = bulkEditRows[item.id] ?? toBulkEditRowDraft(item);
+        const title = category === "car_papers" ? draft.title.toUpperCase() : draft.title;
+        const expiresOn = draft.hasExpiry ? draft.expiresOn : "";
+        const label = title.trim() || subtypeLabels[draft.subType] || draft.subType || "Renewal";
+
+        if (!draft.subType.trim()) {
+          throw new Error(`Please select a type for ${label}.`);
+        }
+        if (category === "car_papers" && !title.trim()) {
+          throw new Error(`Vehicle registration is required for ${label}.`);
+        }
+        if (category === "it_renewals" && !title.trim()) {
+          throw new Error(`Domain or server name is required for ${label}.`);
+        }
+        if (category === "it_renewals" && draft.ownerType === "client" && !draft.clientName.trim()) {
+          throw new Error(`Client name is required for ${label}.`);
+        }
+        if (draft.hasExpiry && !expiresOn.trim()) {
+          throw new Error(`Expires on date is required for ${label}.`);
+        }
+
+        const amountError = validateOptionalAmountString(draft.amount, "Amount");
+        if (amountError) {
+          throw new Error(`${label}: ${amountError}`);
+        }
+
+        const payload: Partial<CreateRenewalInput> = {};
+        if (original.subType !== draft.subType) payload.subType = draft.subType;
+        if (original.title !== title) payload.title = title;
+        if (category === "it_renewals" && original.ownerType !== draft.ownerType) {
+          payload.ownerType = draft.ownerType;
+        }
+        if (category === "it_renewals" && original.clientName !== draft.clientName) {
+          payload.clientName = draft.clientName;
+        }
+        if (category === "it_renewals" && original.amount !== draft.amount) {
+          payload.amount = draft.amount;
+        }
+        if (original.hasExpiry !== draft.hasExpiry) payload.hasExpiry = draft.hasExpiry;
+        if (original.renewalPeriod !== draft.renewalPeriod) {
+          payload.renewalPeriod = draft.renewalPeriod;
+        }
+        if (original.issuedOn !== draft.issuedOn) {
+          payload.issuedOn = draft.issuedOn;
+          payload.renewalDate = draft.issuedOn;
+        }
+        if (original.expiresOn !== expiresOn) {
+          payload.expiresOn = expiresOn;
+          payload.expiryDate = expiresOn;
+        }
+        if (original.notes !== draft.notes) payload.notes = draft.notes;
+
+        if (Object.keys(payload).length === 0) {
+          return null;
+        }
+
+        return { id: item.id, payload };
+      })
+      .filter((entry): entry is { id: string; payload: Partial<CreateRenewalInput> } => entry !== null);
+
+    if (updates.length === 0) {
+      setBulkEditError("No changes to save.");
+      return;
+    }
+
+    setBulkAction("edit");
+    setBulkEditError(null);
+    try {
+      const results = await Promise.allSettled(
+        updates.map(({ id, payload }) => updateRenewalRecord(id, payload)),
+      );
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+
+      await onRefresh();
+      await loadDocCounts();
+
+      if (failed.length === 0) {
+        setImportToast(`Updated ${succeeded} renewal record${succeeded === 1 ? "" : "s"}.`);
+        setSelectedIds([]);
+        setIsBulkEditOpen(false);
+        setBulkEditRows({});
+        return;
+      }
+
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to update some renewal records.";
+      setBulkEditError(
+        succeeded > 0
+          ? `Updated ${succeeded} renewal record${succeeded === 1 ? "" : "s"}, but ${failed.length} failed. ${firstError}`
+          : firstError,
+      );
+    } catch (err) {
+      setBulkEditError(err instanceof Error ? err.message : "Failed to update renewals.");
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
   const handleRenew = async (payload: {
     issuedOn: string;
     expiresOn: string;
@@ -492,6 +831,10 @@ export default function RenewalsPanel({
     setTitleFilter("");
     setHasAmountFilter("");
     setShowAdvancedFilters(false);
+    setSelectedIds([]);
+    setIsBulkEditOpen(false);
+    setBulkEditRows({});
+    setBulkEditError(null);
   }, [category]);
 
   const defaultDocLabel = subtypeLabels[form.subType] || form.subType || tabLabel;
@@ -892,6 +1235,50 @@ export default function RenewalsPanel({
           Showing {filtered.length} of {normalizedRenewals.length} records
         </p>
 
+        {!readOnly && selectedRenewals.length > 0 && (
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#ff791a] px-2.5 py-1 text-[11px] font-black text-white">
+                <CheckSquare size={12} />
+                {selectedRenewals.length}
+              </span>
+              <span className="text-xs font-semibold text-slate-200">
+                renewal{selectedRenewals.length === 1 ? "" : "s"} selected
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={openBulkEdit}
+                disabled={bulkAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-100 transition hover:bg-slate-700 disabled:opacity-50"
+              >
+                <Pencil size={14} />
+                Bulk Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleBulkDelete()}
+                disabled={bulkAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-700 bg-rose-900/80 px-3 py-2 text-xs font-bold text-rose-100 transition hover:bg-rose-900 disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                {bulkAction === "delete"
+                  ? "Deleting..."
+                  : `Delete Selected (${selectedRenewals.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                disabled={bulkAction !== null}
+                className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
+
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
             <FileText size={32} className="mx-auto mb-2 text-slate-300" />
@@ -903,6 +1290,17 @@ export default function RenewalsPanel({
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500 uppercase tracking-wide">
+                  {!readOnly && (
+                    <th className="py-2 pr-3 font-bold">
+                      <input
+                        type="checkbox"
+                        checked={isAllFilteredSelected}
+                        onChange={toggleSelectAllFiltered}
+                        className="h-4 w-4 rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]"
+                        aria-label="Select all filtered renewals"
+                      />
+                    </th>
+                  )}
                   <th className="py-2 pr-3 font-bold">Type</th>
                   <th className="py-2 pr-3 font-bold">
                     {category === "car_papers" ? "Vehicle" : "Name / Details"}
@@ -926,8 +1324,25 @@ export default function RenewalsPanel({
               <tbody>
                 {filtered.map((item) => {
                   const expiry = expiryMeta(item);
+                  const isSelected = selectedIds.includes(item.id);
                   return (
-                    <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/70">
+                    <tr
+                      key={item.id}
+                      className={`border-b border-slate-50 ${
+                        isSelected ? "bg-orange-50/60 hover:bg-orange-50" : "hover:bg-slate-50/70"
+                      }`}
+                    >
+                      {!readOnly && (
+                        <td className="py-2.5 pr-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectRow(item.id)}
+                            className="h-4 w-4 rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]"
+                            aria-label={`Select ${item.title || subtypeLabels[item.subType] || item.subType}`}
+                          />
+                        </td>
+                      )}
                       <td className="py-2.5 pr-3 font-semibold text-slate-700">
                         {subtypeLabels[item.subType] || item.subType}
                       </td>
@@ -1267,6 +1682,24 @@ export default function RenewalsPanel({
         </div>
       )}
 
+      {!readOnly && isBulkEditOpen && (
+        <RenewalBulkEditModal
+          count={selectedRenewals.length}
+          category={category}
+          subtypeLabels={subtypeLabels}
+          rows={bulkEditRowsList}
+          changedRowCount={bulkEditChangeStats.rows}
+          changeCount={bulkEditChangeStats.fields}
+          changedIds={bulkEditChangeStats.changedIds}
+          saving={bulkAction === "edit"}
+          error={bulkEditError}
+          onClose={closeBulkEdit}
+          onReset={resetBulkEditRows}
+          onRowChange={handleBulkRowChange}
+          onSave={() => void handleBulkSave()}
+        />
+      )}
+
       {supportsDocuments && isBulkUploadOpen && (
         <RenewalBulkUploadModal
           category={category}
@@ -1289,6 +1722,275 @@ export default function RenewalsPanel({
           onRenew={handleRenew}
         />
       )}
+    </div>
+  );
+}
+
+interface RenewalBulkEditModalProps {
+  count: number;
+  category: RenewalCategory;
+  subtypeLabels: Record<string, string>;
+  rows: RenewalBulkEditRowDraft[];
+  changedRowCount: number;
+  changeCount: number;
+  changedIds: string[];
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onReset: () => void;
+  onRowChange: (id: string, updates: Partial<Pick<RenewalBulkEditRowDraft, RenewalBulkEditableField>>) => void;
+  onSave: () => void;
+}
+
+function RenewalBulkEditModal({
+  count,
+  category,
+  subtypeLabels,
+  rows,
+  changedRowCount,
+  changeCount,
+  changedIds,
+  saving,
+  error,
+  onClose,
+  onReset,
+  onRowChange,
+  onSave,
+}: RenewalBulkEditModalProps) {
+  const titleFieldLabel = titleLabel(category);
+  const changedIdSet = useMemo(() => new Set(changedIds), [changedIds]);
+  const cellInputClass =
+    "w-full min-w-[120px] rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20";
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+      onClick={saving ? undefined : onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-[95vw] max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-orange-100 bg-orange-50 shrink-0">
+          <div className="min-w-0">
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <Pencil size={16} className="text-[#ff791a]" />
+              Bulk Edit Renewals
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Update {count} selected renewal{count === 1 ? "" : "s"} in tabular format, then save all changes at once.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-white disabled:opacity-40"
+            >
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white text-xs font-bold rounded-lg"
+            >
+              <Pencil size={14} />
+              {saving
+                ? "Saving..."
+                : `Save ${changeCount} change${changeCount === 1 ? "" : "s"}`}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-orange-100 transition disabled:opacity-50"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-slate-600">
+            <span className="font-semibold">
+              {count} selected
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changedRowCount} row{changedRowCount === 1 ? "" : "s"} changed
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changeCount} field change{changeCount === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Orange rows have unsaved changes. Schedule fields auto-fill expiry from issued date + period.
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-auto bg-slate-50/60 p-4">
+          <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[1300px] text-left text-xs border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-slate-200 bg-slate-100 text-slate-600 uppercase tracking-wide">
+                  <th className="px-3 py-2 font-bold">#</th>
+                  <th className="px-3 py-2 font-bold">Type</th>
+                  <th className="px-3 py-2 font-bold">{titleFieldLabel}</th>
+                  {category === "it_renewals" && (
+                    <>
+                      <th className="px-3 py-2 font-bold">Owner</th>
+                      <th className="px-3 py-2 font-bold">Client</th>
+                      <th className="px-3 py-2 font-bold">Amount</th>
+                    </>
+                  )}
+                  <th className="px-3 py-2 font-bold">Has Expiry</th>
+                  <th className="px-3 py-2 font-bold">Period</th>
+                  <th className="px-3 py-2 font-bold">Issued On</th>
+                  <th className="px-3 py-2 font-bold">Expires On</th>
+                  <th className="px-3 py-2 font-bold">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => {
+                  const autoScheduleLabel = renewalPeriodLabel(row.renewalPeriod);
+                  const rowChanged = changedIdSet.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-100 align-top ${
+                        rowChanged ? "bg-orange-50/35 hover:bg-orange-50/55" : "hover:bg-slate-50/80"
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-bold text-slate-500">{index + 1}</td>
+                      <td className="p-2">
+                        <select
+                          value={row.subType}
+                          onChange={(e) => onRowChange(row.id, { subType: e.target.value })}
+                          className={cellInputClass}
+                        >
+                          {Object.entries(subtypeLabels).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          value={row.title}
+                          onChange={(e) => onRowChange(row.id, { title: e.target.value })}
+                          className={`${cellInputClass}${category === "car_papers" ? " uppercase" : ""}`}
+                          placeholder={titleFieldLabel}
+                        />
+                      </td>
+                      {category === "it_renewals" && (
+                        <>
+                          <td className="p-2">
+                            <select
+                              value={row.ownerType}
+                              onChange={(e) =>
+                                onRowChange(row.id, {
+                                  ownerType: e.target.value as RenewalOwnerType,
+                                })
+                              }
+                              className={cellInputClass}
+                            >
+                              <option value="mine">Mine</option>
+                              <option value="client">Client</option>
+                            </select>
+                          </td>
+                          <td className="p-2">
+                            <input
+                              value={row.clientName}
+                              onChange={(e) => onRowChange(row.id, { clientName: e.target.value })}
+                              disabled={row.ownerType !== "client"}
+                              className={`${cellInputClass} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                              placeholder="Client name"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={row.amount}
+                              onChange={(e) => onRowChange(row.id, { amount: e.target.value })}
+                              disabled={row.ownerType !== "client"}
+                              className={`${cellInputClass} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                              placeholder="Amount"
+                            />
+                          </td>
+                        </>
+                      )}
+                      <td className="p-2">
+                        <select
+                          value={row.hasExpiry ? "yes" : "no"}
+                          onChange={(e) => onRowChange(row.id, { hasExpiry: e.target.value === "yes" })}
+                          className={`${cellInputClass} min-w-[110px]`}
+                        >
+                          <option value="yes">Yes</option>
+                          <option value="no">No</option>
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={row.renewalPeriod}
+                          onChange={(e) =>
+                            onRowChange(row.id, { renewalPeriod: e.target.value as RenewalPeriod })
+                          }
+                          disabled={!row.hasExpiry}
+                          className={`${cellInputClass} min-w-[150px] disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                        >
+                          <option value="monthly">Monthly Renewal</option>
+                          <option value="yearly">Yearly Renewal</option>
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <DateInput
+                          value={row.issuedOn}
+                          onChange={(e) => onRowChange(row.id, { issuedOn: e.target.value })}
+                          className="w-full min-w-[140px]"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <div className="min-w-[150px]">
+                          <DateInput
+                            value={row.expiresOn}
+                            onChange={(e) => onRowChange(row.id, { expiresOn: e.target.value })}
+                            className="w-full"
+                          />
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            {row.hasExpiry ? `Auto: ${autoScheduleLabel}` : "No expiry"}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="p-2">
+                        <textarea
+                          value={row.notes}
+                          onChange={(e) => onRowChange(row.id, { notes: e.target.value })}
+                          rows={2}
+                          className="min-w-[220px] rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20"
+                          placeholder="Notes"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {error && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 font-medium">
+              {error}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

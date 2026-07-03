@@ -34,6 +34,8 @@ import {
   findContractsForLocation,
   formatContractLabel,
 } from "../lib/contract-locations";
+import { useHRMS } from "../context/HRMSContext";
+import { UNSAVED_CHANGES_CONFIRM } from "../lib/unsaved-changes";
 
 interface EmployeeFormModalProps {
   employee?: Employee | null; // null if adding
@@ -89,10 +91,13 @@ export default function EmployeeFormModal({
   onCreateLocation,
   onCreateRole,
 }: EmployeeFormModalProps) {
+  const { confirmAction, setScreenUnsavedFlag } = useHRMS();
   const isEdit = !!employee;
   const [activeTab, setActiveTab] = useState<FormTab>("basic");
   const [createdEmployee, setCreatedEmployee] = useState<Employee | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
   const documentsEmployee = employee ?? createdEmployee;
+  const markDirty = () => setIsDirty(true);
   
   // Custom locations state
   const [localLocations, setLocalLocations] = useState<string[]>([]);
@@ -226,6 +231,7 @@ export default function EmployeeFormModal({
     setLocationPtEnabled((prev) => ({ ...prev, [val]: newLocationPtEnabled }));
 
     setLocalLocations((prev) => Array.from(new Set([...prev, val])));
+    markDirty();
     setFormData((prev) => ({ ...prev, location: val }));
     onLocationRegistryUpdate?.();
     resetQuickAddLocationForm();
@@ -250,6 +256,7 @@ export default function EmployeeFormModal({
     if (!val) return false;
     await onCreateRole?.(val);
     setLocalRoles(prev => Array.from(new Set([...prev, val])));
+    markDirty();
     setFormData(prev => ({ ...prev, role: val }));
     setShowAddRoleInput(false);
     setNewRoleName("");
@@ -281,6 +288,7 @@ export default function EmployeeFormModal({
 
   // Load existing employee
   useEffect(() => {
+    setIsDirty(false);
     if (employee) {
       setFormData({
         ...employee,
@@ -297,6 +305,19 @@ export default function EmployeeFormModal({
       setPhotoRemoveConfirm(false);
     }
   }, [employee]);
+
+  useEffect(() => {
+    setScreenUnsavedFlag("employeeForm", isDirty);
+    return () => setScreenUnsavedFlag("employeeForm", false);
+  }, [isDirty, setScreenUnsavedFlag]);
+
+  const requestClose = async () => {
+    if (isDirty) {
+      const confirmed = await confirmAction(UNSAVED_CHANGES_CONFIRM);
+      if (!confirmed) return;
+    }
+    onClose();
+  };
 
   const locationContracts = useMemo(
     () => findContractsForLocation(formData.location || "", contracts),
@@ -324,6 +345,7 @@ export default function EmployeeFormModal({
     }
     try {
       const dataUrl = await prepareCardPhoto(file);
+      markDirty();
       setFormData((prev) => ({ ...prev, photo: dataUrl }));
       setPhotoPreview(dataUrl);
       setPhotoRemoved(false);
@@ -336,6 +358,7 @@ export default function EmployeeFormModal({
   };
 
   const handleConfirmRemovePhoto = () => {
+    markDirty();
     setFormData((prev) => ({ ...prev, photo: "" }));
     setPhotoPreview(null);
     setPhotoRemoved(true);
@@ -344,6 +367,7 @@ export default function EmployeeFormModal({
 
   // Handle standard field change
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    markDirty();
     const { name, value } = e.target;
     setFormData((prev) => {
       const updated = { ...prev, [name]: value };
@@ -372,6 +396,7 @@ export default function EmployeeFormModal({
     field: "grossSalary" | "dailyWage" | "basicSalary" | "workingDaysType",
     value: string,
   ) => {
+    markDirty();
     setFormData((prev) => {
       const currentSalary = toSalaryFieldValues(prev);
       const wageMode = inferSalaryWageMode(prev);
@@ -542,7 +567,7 @@ export default function EmployeeFormModal({
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
-      onClose();
+      void requestClose();
     }
   };
 
@@ -667,7 +692,7 @@ export default function EmployeeFormModal({
                 </div>
               </div>
               <button
-                onClick={onClose}
+                onClick={() => void requestClose()}
                 className="cursor-pointer rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white shrink-0"
                 id="close-form-modal"
                 type="button"
@@ -2084,7 +2109,13 @@ export default function EmployeeFormModal({
           </div>
           <div className="ml-auto flex gap-2">
             <button
-              onClick={onClose}
+              onClick={() => {
+                if (createdEmployee && !isEdit && activeTab === "documents") {
+                  onClose();
+                  return;
+                }
+                void requestClose();
+              }}
               type="button"
               className="cursor-pointer rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
               id="btn-cancel-onboard"
