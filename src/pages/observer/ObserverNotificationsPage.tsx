@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useHRMS } from "../../context/HRMSContext";
 import { AppNotification } from "../../types";
 import { getObserverNotificationTarget } from "../../lib/notification-navigation";
+import { useObserverStats } from "./useObserverStats";
+import { ObserverEmptyState } from "./ObserverUI";
 
 function formatWhen(iso?: string) {
   if (!iso) return "";
@@ -38,6 +40,7 @@ function typeLabel(type: AppNotification["type"]): string {
 
 export default function ObserverNotificationsPage() {
   const navigate = useNavigate();
+  const { canViewObserverModule } = useObserverStats();
   const {
     adminNotifications,
     adminNotificationUnreadCount,
@@ -56,11 +59,21 @@ export default function ObserverNotificationsPage() {
       if (!notif.readAt) {
         await handleMarkAdminNotificationRead(notif.id);
       }
-      const target = getObserverNotificationTarget(notif);
+      const target = getObserverNotificationTarget(notif, canViewObserverModule);
       if (target) navigate(target);
     },
-    [handleMarkAdminNotificationRead, navigate],
+    [canViewObserverModule, handleMarkAdminNotificationRead, navigate],
   );
+
+  if (!canViewObserverModule("notifications")) {
+    return (
+      <ObserverEmptyState
+        icon={Bell}
+        title="Access denied"
+        hint="You don't have permission to view notifications."
+      />
+    );
+  }
 
   return (
     <div className="space-y-4 pb-2">
@@ -97,7 +110,7 @@ export default function ObserverNotificationsPage() {
         ) : (
           adminNotifications.map((n) => {
             const unread = !n.readAt;
-            const target = getObserverNotificationTarget(n);
+            const target = getObserverNotificationTarget(n, canViewObserverModule);
             return (
               <button
                 key={n.id}

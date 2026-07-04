@@ -159,7 +159,7 @@ export default function ObserverModulePage() {
     employees,
   } = useHRMS();
   const {
-    canView,
+    canViewObserverModule,
     canEdit,
     selectedMonth,
     payrollNet,
@@ -168,7 +168,7 @@ export default function ObserverModulePage() {
     commitmentStats,
     tenderStats,
     rawTenders,
-    rawContracts,
+    observerContracts,
     rawRenewals,
     expenseStats,
     partnerPayStats,
@@ -370,10 +370,10 @@ export default function ObserverModulePage() {
 
   const filteredContracts = useMemo(
     () =>
-      rawContracts.filter((c) =>
+      observerContracts.filter((c) =>
         matchesSearch(moduleSearch, c.contractNo, c.companyName, c.officeName, c.officerName, c.status),
       ),
-    [rawContracts, moduleSearch],
+    [observerContracts, moduleSearch],
   );
 
   const openDetail = (
@@ -425,7 +425,7 @@ export default function ObserverModulePage() {
     return <ObserverEmptyState icon={ClipboardList} title="Module not found" />;
   }
 
-  if (!canView(config.permission)) {
+  if (!canViewObserverModule(moduleId)) {
     return (
       <ObserverEmptyState
         icon={config.icon}
@@ -772,7 +772,7 @@ export default function ObserverModulePage() {
     return (
       <div className="space-y-4 pb-2">
         <ObserverStatGrid>
-          <ObserverStatCard icon={FileText} label="Total Contracts" value={rawContracts.length} accent="slate" />
+          <ObserverStatCard icon={FileText} label="Total Contracts" value={observerContracts.length} accent="slate" />
         </ObserverStatGrid>
         <ObserverSection title="Contracts">
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} />

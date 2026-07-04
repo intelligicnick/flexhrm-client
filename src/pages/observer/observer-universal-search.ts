@@ -47,7 +47,7 @@ export type UniversalSearchResult = {
 
 type SearchInput = {
   query: string;
-  canView: (tab: string) => boolean;
+  canViewObserverModule: (moduleId: string) => boolean;
   employees: Employee[];
   supervisors: SchoolSupervisor[];
   visits: SchoolVisit[];
@@ -135,7 +135,7 @@ export function groupUniversalSearchResults(
 }
 
 export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] {
-  const { query, canView } = input;
+  const { query, canViewObserverModule } = input;
   const q = query.trim();
   if (!q) return [];
 
@@ -147,7 +147,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
   const match = (...parts: (string | number | undefined | null)[]) =>
     tokens.length > 1 ? matchesTokens(tokens, ...parts) : matchesSearch(q, ...parts);
 
-  if (canView("Salary") || canView("Employees")) {
+  if (canViewObserverModule("employees") || canViewObserverModule("salary")) {
     for (const emp of input.employees) {
       const name = emp.nameAsPerAadhar || emp.employeeCode;
       if (
@@ -165,19 +165,21 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
         continue;
       }
 
-      pushResult(results, {
-        id: `emp-${emp.id}`,
-        category: "Employees",
-        title: name,
-        subtitle: `${emp.role || "Staff"} · ${emp.location || "—"}`,
-        dateLabel: emp.exitDate ? formatDate(emp.exitDate) : "Active",
-        to: "/observer/employees",
-        kind: "employee",
-        entity: emp,
-        score: 100,
-      }, limit);
+      if (canViewObserverModule("employees")) {
+        pushResult(results, {
+          id: `emp-${emp.id}`,
+          category: "Employees",
+          title: name,
+          subtitle: `${emp.role || "Staff"} · ${emp.location || "—"}`,
+          dateLabel: emp.exitDate ? formatDate(emp.exitDate) : "Active",
+          to: "/observer/employees",
+          kind: "employee",
+          entity: emp,
+          score: 100,
+        }, limit);
+      }
 
-      if (canView("Salary")) {
+      if (canViewObserverModule("salary")) {
         const net =
           Number(
             getSalaryColumnValue(
@@ -208,7 +210,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Field Team")) {
+  if (canViewObserverModule("supervisors")) {
     for (const sup of input.supervisors) {
       if (!match(sup.name, sup.phone, sup.designation, sup.email, sup.assignedBlocks?.join(" "))) {
         continue;
@@ -226,7 +228,9 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
       }, limit);
       if (results.length >= limit) return results.sort((a, b) => b.score - a.score);
     }
+  }
 
+  if (canViewObserverModule("visits")) {
     for (const visit of input.visits) {
       if (!match(visit.schoolName, visit.supervisorName, visit.block, visit.udise, visit.status, visit.notes)) {
         continue;
@@ -244,7 +248,9 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
       }, limit);
       if (results.length >= limit) return results.sort((a, b) => b.score - a.score);
     }
+  }
 
+  if (canViewObserverModule("commitments")) {
     for (const c of input.commitments) {
       if (!match(c.schoolName, c.supervisorName, c.block, c.status, c.notes, c.adminNotes)) {
         continue;
@@ -264,7 +270,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Tenders")) {
+  if (canViewObserverModule("tenders")) {
     for (const t of input.tenders.filter((x) => !x.deletedAt?.trim())) {
       if (!match(t.bidNo, t.department, t.officerName, t.status, t.category, t.description, t.notes)) {
         continue;
@@ -284,7 +290,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Contracts")) {
+  if (canViewObserverModule("contracts")) {
     for (const c of input.contracts) {
       const worksite = c.linkedLocations?.[0] || c.officeName || c.correspondingOffice;
       if (
@@ -315,15 +321,19 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Car Papers") || canView("IT Renewals") || canView("Licenses")) {
+  if (
+    canViewObserverModule("car-papers") ||
+    canViewObserverModule("it-renewals") ||
+    canViewObserverModule("licenses")
+  ) {
     for (const r of input.renewals) {
-      const perm =
+      const moduleId =
         r.category === "car_papers"
-          ? "Car Papers"
+          ? "car-papers"
           : r.category === "it_renewals"
-            ? "IT Renewals"
-            : "Licenses";
-      if (!canView(perm)) continue;
+            ? "it-renewals"
+            : "licenses";
+      if (!canViewObserverModule(moduleId)) continue;
       if (!match(r.title, r.subType, r.clientName, r.ownerType, r.amount, r.notes)) {
         continue;
       }
@@ -335,7 +345,12 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
             : "/observer/licenses";
       pushResult(results, {
         id: `renewal-${r.id}`,
-        category: perm,
+        category:
+          moduleId === "car-papers"
+            ? "Car Papers"
+            : moduleId === "it-renewals"
+              ? "IT Renewals"
+              : "Licenses",
         title: r.title || r.subType || "Renewal",
         subtitle: `${r.clientName || r.ownerType || "—"}`,
         dateLabel: `Exp ${formatDate(r.expiresOn || r.expiryDate || "")}`,
@@ -348,7 +363,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Expenses")) {
+  if (canViewObserverModule("expenses")) {
     for (const school of input.schools) {
       const entry = school.monthlyExpenseLedger?.[input.selectedMonth];
       const total =
@@ -374,7 +389,7 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
     }
   }
 
-  if (canView("Monthly Billing")) {
+  if (canViewObserverModule("partner-pay")) {
     for (const p of input.partners) {
       if (!match(p.partnerName, p.schoolName, p.accountHolderName, p.block, p.district)) {
         continue;

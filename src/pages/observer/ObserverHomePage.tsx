@@ -31,6 +31,7 @@ export default function ObserverHomePage() {
   const stats = useObserverStats();
   const {
     canView,
+    canViewObserverModule,
     selectedMonth,
     isLoading,
     payrollNet,
@@ -59,19 +60,19 @@ export default function ObserverHomePage() {
   const monthLabel = formatMonthLabel(selectedMonth);
   const alerts: { label: string; count: number; to: string }[] = [];
 
-  if (visitStats.pending > 0 && canView("Field Team")) {
+  if (visitStats.pending > 0 && canViewObserverModule("visits")) {
     alerts.push({ label: "Visits pending approval", count: visitStats.pending, to: "/observer/visits" });
   }
-  if (commitmentStats.overdue > 0 && canView("Field Team")) {
+  if (commitmentStats.overdue > 0 && canViewObserverModule("commitments")) {
     alerts.push({ label: "Overdue commitments", count: commitmentStats.overdue, to: "/observer/commitments" });
   }
-  if (renewalStats.all.alert > 0 && canView("Car Papers")) {
+  if (renewalStats.all.alert > 0 && canViewObserverModule("car-papers")) {
     alerts.push({ label: "Renewals expiring/expired", count: renewalStats.all.alert, to: "/observer/car-papers" });
   }
-  if (pendingSupervisorRequestCount > 0 && canView("Field Team")) {
+  if (pendingSupervisorRequestCount > 0 && canViewObserverModule("visits")) {
     alerts.push({ label: "Supervisor requests", count: pendingSupervisorRequestCount, to: "/observer/visits" });
   }
-  if (partnerPayStats.unpaid > 0 && canView("Monthly Billing")) {
+  if (partnerPayStats.unpaid > 0 && canViewObserverModule("partner-pay")) {
     alerts.push({ label: "Partners unpaid", count: partnerPayStats.unpaid, to: "/observer/partner-pay" });
   }
 
@@ -102,7 +103,7 @@ export default function ObserverHomePage() {
 
       <ObserverSection title="Key Numbers">
         <ObserverStatGrid>
-          {canView("Employees") && (
+          {canViewObserverModule("employees") && (
             <ObserverStatCard
               icon={Users}
               label="Employees"
@@ -112,7 +113,7 @@ export default function ObserverHomePage() {
               to="/observer/salary"
             />
           )}
-          {canView("Salary") && (
+          {canViewObserverModule("salary") && (
             <ObserverStatCard
               icon={IndianRupee}
               label="Net Payroll"
@@ -140,7 +141,7 @@ export default function ObserverHomePage() {
               accent="indigo"
             />
           )}
-          {canView("Field Team") && (
+          {canViewObserverModule("supervisors") && (
             <ObserverStatCard
               icon={MapPin}
               label="Supervisors"
@@ -150,7 +151,7 @@ export default function ObserverHomePage() {
               to="/observer/supervisors"
             />
           )}
-          {canView("Field Team") && (
+          {canViewObserverModule("visits") && (
             <ObserverStatCard
               icon={ClipboardList}
               label="Visits"
@@ -161,7 +162,7 @@ export default function ObserverHomePage() {
               alert={visitStats.pending > 0}
             />
           )}
-          {canView("Field Team") && (
+          {canViewObserverModule("commitments") && (
             <ObserverStatCard
               icon={BookOpen}
               label="Commitments"
@@ -172,7 +173,7 @@ export default function ObserverHomePage() {
               alert={commitmentStats.overdue > 0}
             />
           )}
-          {canView("Tenders") && (
+          {canViewObserverModule("tenders") && (
             <ObserverStatCard
               icon={Gavel}
               label="Tenders"
@@ -182,7 +183,7 @@ export default function ObserverHomePage() {
               to="/observer/tenders"
             />
           )}
-          {canView("Contracts") && (
+          {canViewObserverModule("contracts") && (
             <ObserverStatCard
               icon={FileText}
               label="Contracts"
@@ -191,7 +192,7 @@ export default function ObserverHomePage() {
               to="/observer/contracts"
             />
           )}
-          {canView("Car Papers") && (
+          {canViewObserverModule("car-papers") && (
             <ObserverStatCard
               icon={Car}
               label="Car Papers"
@@ -202,7 +203,7 @@ export default function ObserverHomePage() {
               alert={renewalStats.carPapers.alert > 0}
             />
           )}
-          {canView("IT Renewals") && (
+          {canViewObserverModule("it-renewals") && (
             <ObserverStatCard
               icon={Monitor}
               label="IT Renewals"
@@ -213,7 +214,7 @@ export default function ObserverHomePage() {
               alert={renewalStats.itRenewals.alert > 0}
             />
           )}
-          {canView("Licenses") && (
+          {canViewObserverModule("licenses") && (
             <ObserverStatCard
               icon={BadgeCheck}
               label="Licenses"
@@ -224,7 +225,7 @@ export default function ObserverHomePage() {
               alert={renewalStats.licenses.alert > 0}
             />
           )}
-          {canView("Expenses") && (
+          {canViewObserverModule("expenses") && (
             <ObserverStatCard
               icon={Receipt}
               label="Expenses"
@@ -234,7 +235,7 @@ export default function ObserverHomePage() {
               to="/observer/expenses"
             />
           )}
-          {canView("Monthly Billing") && (
+          {canViewObserverModule("partner-pay") && (
             <ObserverStatCard
               icon={HandCoins}
               label="Partner Pay"
@@ -248,7 +249,7 @@ export default function ObserverHomePage() {
         </ObserverStatGrid>
       </ObserverSection>
 
-      {adminNotificationUnreadCount > 0 && (
+      {adminNotificationUnreadCount > 0 && canViewObserverModule("notifications") && (
         <ObserverSection title="Notifications">
           <Link
             to="/observer/notifications"

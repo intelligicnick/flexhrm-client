@@ -20,7 +20,7 @@ import { ObserverMenuTile, formatInr } from "./ObserverUI";
 export default function ObserverMenuPage() {
   const stats = useObserverStats();
   const {
-    canView,
+    canViewObserverModule,
     canEdit,
     payrollNet,
     visitStats,
@@ -47,7 +47,7 @@ export default function ObserverMenuPage() {
   );
 
   const modules = [
-    {
+    canViewObserverModule("notifications") && {
       icon: Bell,
       label: "Notifications",
       count: adminNotificationUnreadCount > 0 ? adminNotificationUnreadCount : "—",
@@ -55,35 +55,35 @@ export default function ObserverMenuPage() {
       color: "orange" as const,
       alert: adminNotificationUnreadCount > 0,
     },
-    canView("Employees") && {
+    canViewObserverModule("employees") && {
       icon: Users,
       label: "Employees",
       count: "Staff list",
       to: "/observer/employees",
       color: "blue" as const,
     },
-    canView("Salary") && {
+    canViewObserverModule("salary") && {
       icon: IndianRupee,
       label: "Salary",
       count: formatInr(payrollNet),
       to: "/observer/salary",
       color: "orange" as const,
     },
-    canView("Field Team") && {
+    canViewObserverModule("supervisors") && {
       icon: MapPin,
       label: "Supervisors",
       count: `${supervisorStats.online} online`,
       to: "/observer/supervisors",
       color: "indigo" as const,
     },
-    canView("Field Team") && {
+    canViewObserverModule("map") && {
       icon: MapPin,
       label: "Supervisors Map",
       count: "Live GPS",
       to: "/observer/map",
       color: "blue" as const,
     },
-    canView("Field Team") && {
+    canViewObserverModule("visits") && {
       icon: ClipboardList,
       label: "Visits",
       count: visitStats.pending > 0 ? `${visitStats.pending} pending` : visitStats.total,
@@ -91,7 +91,7 @@ export default function ObserverMenuPage() {
       color: "slate" as const,
       alert: visitStats.pending > 0,
     },
-    canView("Field Team") && {
+    canViewObserverModule("commitments") && {
       icon: BookOpen,
       label: "Commitment Diary",
       count: commitmentStats.overdue > 0 ? `${commitmentStats.overdue} overdue` : commitmentStats.active,
@@ -99,21 +99,21 @@ export default function ObserverMenuPage() {
       color: "amber" as const,
       alert: commitmentStats.overdue > 0,
     },
-    canView("Tenders") && {
+    canViewObserverModule("tenders") && {
       icon: Gavel,
       label: "Tenders",
       count: tenderStats.total,
       to: "/observer/tenders",
       color: "indigo" as const,
     },
-    canView("Contracts") && {
+    canViewObserverModule("contracts") && {
       icon: FileText,
       label: "Contracts",
       count: contractCount,
       to: "/observer/contracts",
       color: "slate" as const,
     },
-    canView("Car Papers") && {
+    canViewObserverModule("car-papers") && {
       icon: Car,
       label: "Car Papers",
       count: renewalStats.carPapers.alert > 0 ? `${renewalStats.carPapers.alert} alerts` : renewalStats.carPapers.total,
@@ -121,7 +121,7 @@ export default function ObserverMenuPage() {
       color: "rose" as const,
       alert: renewalStats.carPapers.alert > 0,
     },
-    canView("IT Renewals") && {
+    canViewObserverModule("it-renewals") && {
       icon: Monitor,
       label: "IT Renewals",
       count: renewalStats.itRenewals.alert > 0 ? `${renewalStats.itRenewals.alert} alerts` : renewalStats.itRenewals.total,
@@ -129,7 +129,7 @@ export default function ObserverMenuPage() {
       color: "blue" as const,
       alert: renewalStats.itRenewals.alert > 0,
     },
-    canView("Licenses") && {
+    canViewObserverModule("licenses") && {
       icon: BadgeCheck,
       label: "Licenses",
       count: renewalStats.licenses.alert > 0 ? `${renewalStats.licenses.alert} alerts` : renewalStats.licenses.total,
@@ -137,14 +137,14 @@ export default function ObserverMenuPage() {
       color: "emerald" as const,
       alert: renewalStats.licenses.alert > 0,
     },
-    canView("Expenses") && {
+    canViewObserverModule("expenses") && {
       icon: Receipt,
       label: "Expenses",
       count: formatInr(expenseStats.total),
       to: "/observer/expenses",
       color: "amber" as const,
     },
-    canView("Monthly Billing") && {
+    canViewObserverModule("partner-pay") && {
       icon: HandCoins,
       label: "Partner Pay",
       count: partnerPayStats.unpaid > 0 ? `${partnerPayStats.unpaid} unpaid` : formatInr(partnerPayStats.totalPay),

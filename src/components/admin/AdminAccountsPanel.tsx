@@ -320,6 +320,9 @@ export default function AdminAccountsPanel() {
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate-500 block mb-1.5">Worksite locations</label>
+              <p className="text-[10px] text-slate-400 mb-2">
+                Also limits employee, salary, and contract data in Observer Admin.
+              </p>
               <WorksiteLocationPicker
                 key={showInvitePanel ? "invite-open" : "invite-closed"}
                 locations={customLocations}
@@ -516,6 +519,9 @@ export default function AdminAccountsPanel() {
 
               <div>
                 <label className="text-[10px] font-bold text-slate-500 block mb-1">Worksite locations</label>
+                <p className="text-[9px] text-slate-400 mb-1.5">
+                  Also limits employee, salary, and contract data in Observer Admin.
+                </p>
                 <WorksiteLocationPicker
                   key={editingAdminUsername ?? "edit-closed"}
                   locations={rawCustomLocations}

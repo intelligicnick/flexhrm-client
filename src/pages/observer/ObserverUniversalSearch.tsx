@@ -22,6 +22,7 @@ import {
   type DetailField,
   type ObserverDocumentLink,
 } from "./observer-details";
+import type { Contract } from "../../types";
 import { fetchRenewalDocuments, getRenewalDocumentUrl } from "../../lib/renewals";
 import { buildObserverSearchActions } from "./ObserverEditActions";
 
@@ -102,13 +103,13 @@ export default function ObserverUniversalSearch({
     () =>
       runUniversalSearch({
         query: debouncedQuery,
-        canView: stats.canView,
+        canViewObserverModule: stats.canViewObserverModule,
         employees,
         supervisors: stats.rawSchoolSupervisors,
         visits: stats.rawSchoolVisits,
         commitments: stats.rawCommitmentDiary,
         tenders: stats.rawTenders,
-        contracts: stats.rawContracts,
+        contracts: stats.observerContracts,
         renewals: stats.rawRenewals,
         schools: stats.rawSchoolWorks,
         partners: stats.rawSchoolPartners,
@@ -201,8 +202,8 @@ export default function ObserverUniversalSearch({
         };
       case "contract":
         return {
-          title: (result.entity as typeof stats.rawContracts[0]).contractNo || "Contract",
-          fields: buildContractDetails(result.entity as typeof stats.rawContracts[0]),
+          title: (result.entity as Contract).contractNo || "Contract",
+          fields: buildContractDetails(result.entity as Contract),
           actions,
         };
       case "renewal": {

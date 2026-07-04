@@ -1,9 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useHRMS } from "../../context/HRMSContext";
 import { countMonthAttendance } from "../../lib/attendance-helpers";
 import { getDaysInMonthStatic, parseFlexibleDateMs } from "../../lib/date-helpers";
 import { isEmployeeExitedForMonth, isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
+import {
+  filterContractsByWorksite,
+  isObserverModuleAllowed,
+} from "../../lib/observer-access";
 import { canEditModule, canViewModule } from "../../lib/permissions";
+import { getObserverUiRestrictions } from "../../lib/role-ui-restrictions";
 import { expiryBand } from "../../lib/renewal-helpers";
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { computePartnerMonthlyPay } from "../../lib/school-work-helpers";
@@ -39,11 +44,28 @@ export function useObserverStats() {
     adminNotificationUnreadCount,
     userPermissions,
     sessionUser,
+    sessionLocations,
+    userUiRestrictions,
     isLoading,
   } = useHRMS();
 
+  const observerRestrictions = useMemo(
+    () => getObserverUiRestrictions(userUiRestrictions),
+    [userUiRestrictions],
+  );
+
   const canView = (tab: string) => canViewModule(userPermissions, tab);
   const canEdit = (tab: string) => canEditModule(userPermissions, tab);
+  const canViewObserverModule = useCallback(
+    (moduleId: string) =>
+      isObserverModuleAllowed(moduleId, userPermissions, observerRestrictions),
+    [userPermissions, observerRestrictions],
+  );
+
+  const observerContracts = useMemo(
+    () => filterContractsByWorksite(rawContracts, sessionUser, sessionLocations),
+    [rawContracts, sessionUser, sessionLocations],
+  );
 
   const payrollNet = useMemo(
     () =>
@@ -207,7 +229,7 @@ export function useObserverStats() {
     return { total: rawSchoolSupervisors.length, online };
   }, [rawSchoolSupervisors]);
 
-  const contractCount = rawContracts.length;
+  const contractCount = observerContracts.length;
 
   const alertCount = useMemo(() => {
     let count = 0;
@@ -228,8 +250,11 @@ export function useObserverStats() {
   return {
     canView,
     canEdit,
+    canViewObserverModule,
+    observerRestrictions,
     userPermissions,
     sessionUser,
+    sessionLocations,
     selectedMonth,
     isLoading,
     payrollNet,
@@ -243,6 +268,7 @@ export function useObserverStats() {
     supervisorStats,
     schoolDashboardStats,
     contractCount,
+    observerContracts,
     pendingSupervisorRequestCount,
     adminNotificationUnreadCount,
     alertCount,
@@ -250,7 +276,6 @@ export function useObserverStats() {
     rawSchoolSupervisors,
     rawRenewals,
     rawTenders,
-    rawContracts,
     rawSchoolWorks,
     rawSchoolPartners,
     rawCommitmentDiary,

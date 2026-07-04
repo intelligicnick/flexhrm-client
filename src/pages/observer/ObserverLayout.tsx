@@ -42,7 +42,7 @@ function ObserverLayoutInner() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isLoggedIn, authBootstrapping, sessionUser, adminProfileInfo, handleLogout } = useHRMS();
-  const { alertCount, adminNotificationUnreadCount } = useObserverStats();
+  const { alertCount, adminNotificationUnreadCount, canViewObserverModule } = useObserverStats();
   const [searchOpen, setSearchOpen] = React.useState(false);
 
   const pageTitle = useMemo(() => getPageTitle(location.pathname), [location.pathname]);
@@ -132,18 +132,20 @@ function ObserverLayoutInner() {
               >
                 <Search size={20} />
               </button>
-              <Link
-                to="/observer/notifications"
-                className="relative p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
-                title="Notifications"
-              >
-                <Bell size={20} />
-                {adminNotificationUnreadCount > 0 && (
-                  <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
-                    {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
-                  </span>
-                )}
-              </Link>
+              {canViewObserverModule("notifications") && (
+                <Link
+                  to="/observer/notifications"
+                  className="relative p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl cursor-pointer"
+                  title="Notifications"
+                >
+                  <Bell size={20} />
+                  {adminNotificationUnreadCount > 0 && (
+                    <span className="absolute top-0.5 right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">
+                      {adminNotificationUnreadCount > 9 ? "9+" : adminNotificationUnreadCount}
+                    </span>
+                  )}
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={logout}

@@ -13,7 +13,7 @@ function MapFallback() {
 }
 
 export default function ObserverMapPage() {
-  const { rawSchoolSupervisors, rawSchoolVisits, canView } = useObserverStats();
+  const { rawSchoolSupervisors, rawSchoolVisits, canViewObserverModule } = useObserverStats();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export default function ObserverMapPage() {
     });
   }, [isFullscreen]);
 
-  if (!canView("Field Team")) {
+  if (!canViewObserverModule("map")) {
     return (
       <div className="px-4 py-8">
         <p className="text-sm text-slate-500 text-center">

@@ -11,7 +11,14 @@ export interface ModuleUiRestrictions {
   hideColumnPicker?: boolean;
 }
 
-export type RoleUiRestrictions = Partial<Record<PermissionModuleKey, ModuleUiRestrictions>>;
+export interface ObserverUiRestrictions {
+  /** Whitelist of observer module IDs. Undefined/empty = all RBAC-visible modules. */
+  allowedModules?: string[];
+}
+
+export type RoleUiRestrictions = Partial<Record<PermissionModuleKey, ModuleUiRestrictions>> & {
+  observer?: ObserverUiRestrictions;
+};
 
 export const SALARY_COLUMNS = [
   "Employee Code",
@@ -90,6 +97,12 @@ export function getModuleUiRestrictions(
   module: PermissionModuleKey,
 ): ModuleUiRestrictions | undefined {
   return restrictions?.[module];
+}
+
+export function getObserverUiRestrictions(
+  restrictions: RoleUiRestrictions | null | undefined,
+): ObserverUiRestrictions | undefined {
+  return restrictions?.observer;
 }
 
 export function isFilterVisible(
