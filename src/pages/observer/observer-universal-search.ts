@@ -10,7 +10,9 @@ import type {
   Tender,
 } from "../../types";
 import { getSalaryColumnValue } from "../../lib/salary-columns";
-import { parseFlexibleDateMs } from "../../lib/date-helpers";
+import { countMonthAttendance } from "../../lib/attendance-helpers";
+import { getDaysInMonthStatic, parseDateOfBirth, parseFlexibleDateMs } from "../../lib/date-helpers";
+import { getMonthLedger, getTotalByType } from "../../lib/ledger-helpers";
 import { formatInr, formatMonthLabel } from "./ObserverUI";
 import { matchesSearch, getLastPaidSalaryLabel } from "./observer-details";
 
@@ -147,7 +149,14 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
   const match = (...parts: (string | number | undefined | null)[]) =>
     tokens.length > 1 ? matchesTokens(tokens, ...parts) : matchesSearch(q, ...parts);
 
-  if (canViewObserverModule("employees") || canViewObserverModule("salary")) {
+  if (
+    canViewObserverModule("employees") ||
+    canViewObserverModule("salary") ||
+    canViewObserverModule("advance-penalty") ||
+    canViewObserverModule("attendance") ||
+    canViewObserverModule("directory") ||
+    canViewObserverModule("birthdays")
+  ) {
     for (const emp of input.employees) {
       const name = emp.nameAsPerAadhar || emp.employeeCode;
       if (
@@ -204,6 +213,74 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
           entity: emp,
           score: 95,
         }, limit);
+      }
+
+      if (canViewObserverModule("advance-penalty")) {
+        const ledger = getMonthLedger(emp, input.selectedMonth);
+        const advance = getTotalByType(ledger, "advance");
+        const penalty = getTotalByType(ledger, "penalty");
+        if (advance + penalty > 0) {
+          pushResult(results, {
+            id: `ledger-${emp.id}-${input.selectedMonth}`,
+            category: "Advance & Penalty",
+            title: name,
+            subtitle: `Adv ${formatInr(advance)} · Pen ${formatInr(penalty)}`,
+            dateLabel: monthLabel,
+            to: "/observer/advance-penalty",
+            kind: "employee",
+            entity: emp,
+            score: 92,
+          }, limit);
+        }
+      }
+
+      if (canViewObserverModule("attendance")) {
+        const daysInMonth = getDaysInMonthStatic(input.selectedMonth);
+        const empData = input.attendanceDb[input.selectedMonth]?.[emp.id] || {};
+        const counts = countMonthAttendance(empData, daysInMonth, () => false, {
+          workingDaysType: emp.workingDaysType,
+          monthStr: input.selectedMonth,
+        });
+        pushResult(results, {
+          id: `attendance-${emp.id}-${input.selectedMonth}`,
+          category: "Attendance",
+          title: name,
+          subtitle: `${counts.presents} present · ${counts.absents} absent`,
+          dateLabel: monthLabel,
+          to: "/observer/attendance",
+          kind: "employee",
+          entity: emp,
+          score: 88,
+        }, limit);
+      }
+
+      if (canViewObserverModule("directory")) {
+        pushResult(results, {
+          id: `directory-${emp.id}`,
+          category: "Directory",
+          title: name,
+          subtitle: `${emp.role || "Staff"} · ${emp.employeeMobile || "No phone"}`,
+          to: "/observer/directory",
+          kind: "employee",
+          entity: emp,
+          score: 70,
+        }, limit);
+      }
+
+      if (canViewObserverModule("birthdays")) {
+        const dob = parseDateOfBirth(emp.dateOfBirth);
+        if (dob) {
+          pushResult(results, {
+            id: `birthday-${emp.id}`,
+            category: "Birthdays",
+            title: name,
+            subtitle: `${dob.day}/${dob.month} · ${emp.role || "Staff"}`,
+            to: "/observer/birthdays",
+            kind: "employee",
+            entity: emp,
+            score: 65,
+          }, limit);
+        }
       }
 
       if (results.length >= limit) return results.sort((a, b) => b.score - a.score);

@@ -1,9 +1,16 @@
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { expiryBand } from "../../lib/renewal-helpers";
-import { MONTH_NAME_LIST, normalizeMonthKey, parseFlexibleDateMs } from "../../lib/date-helpers";
+import { MONTH_NAME_LIST, normalizeMonthKey, parseFlexibleDateMs, formatEmployeeBirthDate, parseDateOfBirth } from "../../lib/date-helpers";
 import { resolveGemBidPdfUrl, resolveGemContractPdfUrl, resolveGemContractNoLabel } from "../../lib/gem-helpers";
 import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
 import { buildAllExpenseRecords, type ExpenseRecordRow } from "../../lib/school-work-helpers";
+import {
+  getMonthLedger,
+  getTotalByType,
+  LEDGER_TYPE_LABELS,
+  type LedgerItemType,
+} from "../../lib/ledger-helpers";
+import type { MonitorWorkSession } from "../../lib/monitor-api";
 import type {
   CommitmentDiary,
   Contract,
@@ -386,6 +393,123 @@ export function buildPartnerDetails(partner: SchoolPartner, selectedMonth: strin
     { label: "Account Holder", value: partner.accountHolderName || "—" },
     { label: "Account Number", value: partner.accountNumber || "—" },
     { label: "IFSC", value: partner.ifscCode || "—" },
+  ];
+}
+
+export function buildLedgerDetails(emp: Employee, monthKey: string): DetailField[] {
+  const ledger = getMonthLedger(emp, monthKey);
+  const fields: DetailField[] = [
+    { label: "Name", value: emp.nameAsPerAadhar || emp.employeeCode || "—" },
+    { label: "Employee Code", value: emp.employeeCode || "—" },
+    { label: "Location", value: emp.location || "—" },
+    { label: "Month", value: formatMonthLabel(monthKey) },
+  ];
+
+  (["advance", "penalty", "uniform", "foodPerk", "accommodationPerk", "conveyancePerk"] as LedgerItemType[]).forEach(
+    (type) => {
+      const total = getTotalByType(ledger, type);
+      if (total > 0) {
+        fields.push({ label: LEDGER_TYPE_LABELS[type], value: formatInr(total) });
+      }
+    },
+  );
+
+  ledger.ledgerItems.forEach((item, index) => {
+    fields.push(
+      { label: `Entry ${index + 1}`, value: `${LEDGER_TYPE_LABELS[item.type]} · ${formatInr(item.amount)}` },
+      { label: `Entry ${index + 1} Date`, value: formatDate(item.entryDate) },
+      { label: `Entry ${index + 1} Note`, value: item.note || "—" },
+    );
+  });
+
+  if (ledger.penaltyReason?.trim()) {
+    fields.push({ label: "Penalty Reason", value: ledger.penaltyReason });
+  }
+
+  return fields;
+}
+
+export function buildAttendanceDetails(
+  emp: Employee,
+  monthKey: string,
+  presents: number,
+  absents: number,
+): DetailField[] {
+  const total = presents + absents;
+  const presentPct = total > 0 ? `${Math.round((presents / total) * 100)}%` : "—";
+
+  return [
+    { label: "Name", value: emp.nameAsPerAadhar || emp.employeeCode || "—" },
+    { label: "Employee Code", value: emp.employeeCode || "—" },
+    { label: "Role", value: emp.role || "—" },
+    { label: "Location", value: emp.location || "—" },
+    { label: "Month", value: formatMonthLabel(monthKey) },
+    { label: "Present Days", value: String(presents), tone: "green" },
+    { label: "Absent Days", value: String(absents), tone: absents > 0 ? "red" : "slate" },
+    { label: "Attendance Rate", value: presentPct },
+    { label: "Working Days Type", value: emp.workingDaysType || "—" },
+  ];
+}
+
+export function buildDirectoryEmployeeDetails(emp: Employee): DetailField[] {
+  const photoSrc = resolvePhotoSrc({ photoUrl: emp.photoUrl || emp.photo });
+  const photoThumb = resolvePhotoThumbnailSrc({ photoUrl: emp.photoUrl || emp.photo });
+
+  return [
+    ...(photoSrc
+      ? [{ label: "Photo", value: emp.nameAsPerAadhar || "Employee", imageSrc: photoSrc, imageThumbSrc: photoThumb, hideLabel: true }]
+      : []),
+    { label: "Name", value: emp.nameAsPerAadhar || "—" },
+    { label: "Employee Code", value: emp.employeeCode || "—" },
+    { label: "Designation", value: emp.role || "—" },
+    { label: "Location", value: emp.location || "—" },
+    { label: "Mobile", value: emp.employeeMobile || "—", href: emp.employeeMobile ? `tel:${emp.employeeMobile}` : undefined },
+    { label: "Aadhar Linked Mobile", value: emp.aadharLinkMobNo || "—", href: emp.aadharLinkMobNo ? `tel:${emp.aadharLinkMobNo}` : undefined },
+    { label: "Gender", value: emp.gender || "—" },
+  ];
+}
+
+export function buildHelplineDetails(helpline: {
+  name?: string;
+  phone?: string;
+  location?: string;
+  category?: string;
+}): DetailField[] {
+  return [
+    { label: "Name", value: helpline.name || "—" },
+    { label: "Phone", value: helpline.phone || "—", href: helpline.phone ? `tel:${helpline.phone}` : undefined },
+    { label: "Location", value: helpline.location || "—" },
+    { label: "Category", value: helpline.category || "—" },
+  ];
+}
+
+export function buildBirthdayDetails(emp: Employee, age?: number): DetailField[] {
+  const dob = parseDateOfBirth(emp.dateOfBirth);
+  const resolvedAge = age ?? (dob ? new Date().getFullYear() - dob.year : undefined);
+
+  return [
+    { label: "Name", value: emp.nameAsPerAadhar || emp.employeeCode || "—" },
+    { label: "Employee Code", value: emp.employeeCode || "—" },
+    { label: "Date of Birth", value: formatEmployeeBirthDate(emp.dateOfBirth) },
+    { label: "Age", value: resolvedAge != null ? String(resolvedAge) : "—" },
+    { label: "Role", value: emp.role || "—" },
+    { label: "Location", value: emp.location || "—" },
+    { label: "Mobile", value: emp.employeeMobile || "—", href: emp.employeeMobile ? `tel:${emp.employeeMobile}` : undefined },
+  ];
+}
+
+export function buildMonitorSessionDetails(session: MonitorWorkSession): DetailField[] {
+  const hours = session.totalHoursWorkedSeconds
+    ? `${(session.totalHoursWorkedSeconds / 3600).toFixed(1)}h`
+    : `${session.totalHoursWorked.toFixed(1)}h`;
+
+  return [
+    { label: "Employee", value: session.employeeName || "—" },
+    { label: "Employee Code", value: session.employeeCode || "—" },
+    { label: "Login", value: formatDateTime(session.loginTime || "") },
+    { label: "Logout", value: formatDateTime(session.logoutTime || "") },
+    { label: "Hours Worked", value: hours },
+    { label: "Breaks", value: String(session.totalBreaks ?? 0) },
   ];
 }
 

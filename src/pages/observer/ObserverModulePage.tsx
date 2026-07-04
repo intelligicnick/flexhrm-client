@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   IndianRupee,
@@ -13,9 +13,21 @@ import {
   HandCoins,
   MapPin,
   Users,
+  Calculator,
+  Clock,
+  Contact,
+  Cake,
+  Activity,
 } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
+import { countMonthAttendance } from "../../lib/attendance-helpers";
+import { getDaysInMonthStatic, MONTH_NAME_LIST } from "../../lib/date-helpers";
+import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
+import { filterEmployeesWithLedgerEntries } from "../../components/LedgerOverviewRow";
+import { getMonthLedger, getTotalByType } from "../../lib/ledger-helpers";
+import { monitorApi, type MonitorOverview } from "../../lib/monitor-api";
+import { parseApiError } from "../../api";
 import {
   ObserverEmptyState,
   ObserverListRow,
@@ -55,6 +67,12 @@ import {
   buildSupervisorDetails,
   buildTenderDetails,
   buildVisitDetails,
+  buildLedgerDetails,
+  buildAttendanceDetails,
+  buildDirectoryEmployeeDetails,
+  buildHelplineDetails,
+  buildBirthdayDetails,
+  buildMonitorSessionDetails,
   contractWorksite,
   formatDateTime,
   getSalaryStatusTone,
@@ -71,6 +89,11 @@ const MODULE_CONFIG: Record<
 > = {
   salary: { title: "Salary", icon: IndianRupee, permission: "Salary" },
   employees: { title: "Employees & Guards", icon: Users, permission: "Employees" },
+  "advance-penalty": { title: "Advance & Penalty", icon: Calculator, permission: "Advance & Penalty" },
+  attendance: { title: "Attendance", icon: Clock, permission: "Attendance" },
+  directory: { title: "Directory", icon: Contact, permission: "Directory" },
+  birthdays: { title: "Birthdays", icon: Cake, permission: "Birthdays" },
+  monitor: { title: "Employee Monitor", icon: Activity, permission: "Monitor" },
   supervisors: { title: "Supervisors", icon: MapPin, permission: "Field Team" },
   visits: { title: "Visits", icon: ClipboardList, permission: "Field Team" },
   commitments: { title: "Commitment Diary", icon: BookOpen, permission: "Field Team" },
@@ -178,7 +201,11 @@ export default function ObserverModulePage() {
     rawSchoolVisits,
     rawCommitmentDiary,
     supervisorStats,
+    ledgerStats,
+    attendanceSummary,
   } = stats;
+
+  const { fetchHelplines, helplines } = useHRMS();
 
   const {
     handleUpdateVisitStatus,
@@ -196,8 +223,74 @@ export default function ObserverModulePage() {
   const [visitSupervisorId, setVisitSupervisorId] = useState("all");
   const [commitmentPeriod, setCommitmentPeriod] = useState<ObserverPeriod>("month");
   const [commitmentSupervisorId, setCommitmentSupervisorId] = useState("all");
+  const [directorySubTab, setDirectorySubTab] = useState<"employees" | "contacts">("employees");
+  const [birthdayTodayList, setBirthdayTodayList] = useState<Array<Employee & { age?: number }>>([]);
+  const [birthdayMonthList, setBirthdayMonthList] = useState<Array<Employee & { birthdayDay?: number; age?: number }>>([]);
+  const [birthdaysLoading, setBirthdaysLoading] = useState(false);
+  const [monitorOverview, setMonitorOverview] = useState<MonitorOverview | null>(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorError, setMonitorError] = useState<string | null>(null);
 
   const monthLabel = formatMonthLabel(selectedMonth);
+
+  useEffect(() => {
+    if (moduleId !== "directory") return;
+    void fetchHelplines();
+  }, [moduleId, fetchHelplines]);
+
+  useEffect(() => {
+    if (moduleId !== "birthdays") return;
+    const monthParts = selectedMonth.split(" ");
+    const monthNum = MONTH_NAME_LIST.indexOf(monthParts[0]) + 1;
+    if (monthNum < 1) return;
+
+    let cancelled = false;
+    setBirthdaysLoading(true);
+    fetch(`/api/employees/birthdays?month=${monthNum}`, { credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) throw await parseApiError(res, "Failed to fetch birthdays.");
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setBirthdayTodayList(Array.isArray(data.today) ? data.today : []);
+        setBirthdayMonthList(Array.isArray(data.month) ? data.month : []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBirthdayTodayList([]);
+          setBirthdayMonthList([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBirthdaysLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleId, selectedMonth]);
+
+  useEffect(() => {
+    if (moduleId !== "monitor") return;
+    let cancelled = false;
+    setMonitorLoading(true);
+    setMonitorError(null);
+    monitorApi
+      .getOverview()
+      .then((data) => {
+        if (!cancelled) setMonitorOverview(data);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setMonitorError(err.message || "Could not load monitor data.");
+      })
+      .finally(() => {
+        if (!cancelled) setMonitorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleId]);
 
   const salaryRows = useMemo(() => {
     return salarySheetEmployees
@@ -375,6 +468,122 @@ export default function ObserverModulePage() {
       ),
     [observerContracts, moduleSearch],
   );
+
+  const ledgerRows = useMemo(() => {
+    return filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger)
+      .map((emp) => {
+        const ledger = getMonthLedger(emp, selectedMonth);
+        const advance = getTotalByType(ledger, "advance");
+        const penalty = getTotalByType(ledger, "penalty");
+        return {
+          emp,
+          id: emp.id,
+          name: emp.nameAsPerAadhar || emp.employeeCode,
+          advance,
+          penalty,
+          total: advance + penalty,
+        };
+      })
+      .filter((row) =>
+        matchesSearch(moduleSearch, row.name, row.emp.employeeCode, row.emp.location, row.advance, row.penalty),
+      )
+      .sort((a, b) => b.total - a.total);
+  }, [employees, selectedMonth, moduleSearch]);
+
+  const attendanceRows = useMemo(() => {
+    const daysInMonth = getDaysInMonthStatic(selectedMonth);
+    const monthData = attendanceDb[selectedMonth] || {};
+    return salarySheetEmployees
+      .map((emp) => {
+        const empData = monthData[emp.id] || {};
+        const counts = countMonthAttendance(
+          empData,
+          daysInMonth,
+          (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+          { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+        );
+        const total = counts.presents + counts.absents;
+        const presentPct = total > 0 ? Math.round((counts.presents / total) * 100) : 0;
+        return {
+          emp,
+          id: emp.id,
+          name: emp.nameAsPerAadhar || emp.employeeCode,
+          presents: counts.presents,
+          absents: counts.absents,
+          presentPct,
+        };
+      })
+      .filter((row) =>
+        matchesSearch(
+          moduleSearch,
+          row.name,
+          row.emp.employeeCode,
+          row.emp.role,
+          row.emp.location,
+          row.presents,
+          row.absents,
+        ),
+      )
+      .sort((a, b) => b.presentPct - a.presentPct || b.presents - a.presents);
+  }, [salarySheetEmployees, attendanceDb, selectedMonth, moduleSearch]);
+
+  const directoryEmployeeRows = useMemo(() => {
+    return employees
+      .filter((emp) => !emp.exitDate?.trim())
+      .map((emp) => ({
+        emp,
+        id: emp.id,
+        name: emp.nameAsPerAadhar || emp.employeeCode,
+        role: emp.role || "—",
+        phone: emp.employeeMobile || "—",
+        location: emp.location || "—",
+      }))
+      .filter((row) =>
+        matchesSearch(moduleSearch, row.name, row.role, row.phone, row.location, row.emp.employeeCode),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [employees, moduleSearch]);
+
+  const helplineRows = useMemo(() => {
+    return (helplines || [])
+      .map((line: { _id?: string; name?: string; phone?: string; location?: string; category?: string }, index: number) => ({
+        line,
+        id: line._id || `helpline-${index}`,
+        name: line.name || "Helpline",
+        phone: line.phone || "—",
+        location: line.location || "—",
+      }))
+      .filter((row) => matchesSearch(moduleSearch, row.name, row.phone, row.location, row.line.category))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [helplines, moduleSearch]);
+
+  const birthdayMonthRows = useMemo(() => {
+    return birthdayMonthList
+      .map((emp) => ({
+        emp,
+        id: emp.id,
+        name: emp.nameAsPerAadhar || emp.employeeCode,
+        day: emp.birthdayDay,
+        age: emp.age,
+      }))
+      .filter((row) => matchesSearch(moduleSearch, row.name, row.emp.employeeCode, row.emp.role, row.emp.location, row.day))
+      .sort((a, b) => (a.day ?? 0) - (b.day ?? 0));
+  }, [birthdayMonthList, moduleSearch]);
+
+  const monitorSessionRows = useMemo(() => {
+    return (monitorOverview?.workSessions || [])
+      .map((session) => ({
+        session,
+        id: `${session.employeeId}-${session.loginTime || "unknown"}`,
+        name: session.employeeName || session.employeeCode,
+        hours: session.totalHoursWorkedSeconds
+          ? `${(session.totalHoursWorkedSeconds / 3600).toFixed(1)}h`
+          : `${session.totalHoursWorked.toFixed(1)}h`,
+      }))
+      .filter((row) =>
+        matchesSearch(moduleSearch, row.name, row.session.employeeCode, row.session.loginTime, row.hours),
+      );
+  }, [monitorOverview, moduleSearch]);
 
   const openDetail = (
     title: string,
@@ -959,6 +1168,228 @@ export default function ObserverModulePage() {
             actions={detail.actions}
             onClose={closeDetail}
           />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "advance-penalty") {
+    return (
+      <div className="space-y-4 pb-2">
+        <ObserverStatGrid>
+          <ObserverStatCard icon={Calculator} label="Advances" value={formatInr(ledgerStats.advanceTotal)} sub={monthLabel} accent="blue" />
+          <ObserverStatCard icon={Calculator} label="Penalties" value={formatInr(ledgerStats.penaltyTotal)} sub={monthLabel} accent="rose" />
+          <ObserverStatCard icon={Calculator} label="Perks" value={formatInr(ledgerStats.perkTotal)} sub={monthLabel} accent="indigo" />
+        </ObserverStatGrid>
+        <ObserverSection title={`Ledger · ${monthLabel}`}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, code, location…" />
+          {ledgerRows.length === 0 ? (
+            <ObserverEmptyState icon={Calculator} title="No ledger entries this month" />
+          ) : (
+            ledgerRows.map((row) => (
+              <ObserverListRow
+                key={row.id}
+                title={row.name}
+                subtitle={`${row.emp.location || "—"} · Adv ${formatInr(row.advance)} · Pen ${formatInr(row.penalty)}`}
+                value={formatInr(row.total)}
+                onClick={() => openDetail(row.name, buildLedgerDetails(row.emp, selectedMonth))}
+              />
+            ))
+          )}
+        </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "attendance") {
+    return (
+      <div className="space-y-4 pb-2">
+        <ObserverStatGrid>
+          <ObserverStatCard icon={Clock} label="Present Rate" value={`${attendanceSummary.presentPct}%`} sub={monthLabel} accent="emerald" />
+          <ObserverStatCard icon={Clock} label="Present Days" value={attendanceSummary.presents} accent="blue" />
+          <ObserverStatCard icon={Clock} label="Absent Days" value={attendanceSummary.absents} accent="rose" alert={attendanceSummary.absents > 0} />
+        </ObserverStatGrid>
+        <ObserverSection title={`Attendance · ${monthLabel}`}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, role, code…" />
+          {attendanceRows.length === 0 ? (
+            <ObserverEmptyState icon={Clock} title="No attendance data" />
+          ) : (
+            attendanceRows.map((row) => (
+              <ObserverListRow
+                key={row.id}
+                title={row.name}
+                subtitle={`${row.emp.role || "—"} · ${row.emp.location || "—"}`}
+                badge={`${row.presentPct}%`}
+                badgeTone={row.presentPct >= 80 ? "green" : row.presentPct >= 50 ? "amber" : "red"}
+                value={`${row.presents}P / ${row.absents}A`}
+                onClick={() =>
+                  openDetail(row.name, buildAttendanceDetails(row.emp, selectedMonth, row.presents, row.absents))
+                }
+              />
+            ))
+          )}
+        </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "directory") {
+    return (
+      <div className="space-y-4 pb-2">
+        <div className="flex bg-white border border-slate-200 rounded-xl p-1">
+          <button
+            type="button"
+            onClick={() => setDirectorySubTab("employees")}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
+              directorySubTab === "employees" ? "bg-[#ff791a] text-white" : "text-slate-600"
+            }`}
+          >
+            Employees
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirectorySubTab("contacts")}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
+              directorySubTab === "contacts" ? "bg-[#ff791a] text-white" : "text-slate-600"
+            }`}
+          >
+            Helplines
+          </button>
+        </div>
+        <ObserverSection title={directorySubTab === "employees" ? "Employee Directory" : "Important Helplines"}>
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search contacts…" />
+          {directorySubTab === "employees" ? (
+            directoryEmployeeRows.length === 0 ? (
+              <ObserverEmptyState icon={Contact} title="No employees found" />
+            ) : (
+              directoryEmployeeRows.map((row) => (
+                <ObserverListRow
+                  key={row.id}
+                  title={row.name}
+                  subtitle={`${row.role} · ${row.location}`}
+                  value={row.phone}
+                  onClick={() => openDetail(row.name, buildDirectoryEmployeeDetails(row.emp))}
+                />
+              ))
+            )
+          ) : helplineRows.length === 0 ? (
+            <ObserverEmptyState icon={Contact} title="No helplines found" />
+          ) : (
+            helplineRows.map((row) => (
+              <ObserverListRow
+                key={row.id}
+                title={row.name}
+                subtitle={row.location}
+                value={row.phone}
+                onClick={() => openDetail(row.name, buildHelplineDetails(row.line))}
+              />
+            ))
+          )}
+        </ObserverSection>
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "birthdays") {
+    return (
+      <div className="space-y-4 pb-2">
+        <ObserverStatGrid>
+          <ObserverStatCard icon={Cake} label="Today" value={birthdayTodayList.length} accent="orange" alert={birthdayTodayList.length > 0} />
+          <ObserverStatCard icon={Cake} label="This Month" value={birthdayMonthRows.length} sub={monthLabel} accent="amber" />
+        </ObserverStatGrid>
+        {birthdaysLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+          </div>
+        ) : (
+          <>
+            {birthdayTodayList.length > 0 && (
+              <ObserverSection title="Today's Birthdays">
+                {birthdayTodayList.map((emp) => (
+                  <ObserverListRow
+                    key={emp.id}
+                    title={emp.nameAsPerAadhar || emp.employeeCode}
+                    subtitle={emp.role || emp.location || "—"}
+                    badge="Today"
+                    badgeTone="amber"
+                    onClick={() => openDetail(emp.nameAsPerAadhar || emp.employeeCode, buildBirthdayDetails(emp, emp.age))}
+                  />
+                ))}
+              </ObserverSection>
+            )}
+            <ObserverSection title={`Birthdays · ${monthLabel}`}>
+              <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search birthdays…" />
+              {birthdayMonthRows.length === 0 ? (
+                <ObserverEmptyState icon={Cake} title="No birthdays this month" />
+              ) : (
+                birthdayMonthRows.map((row) => (
+                  <ObserverListRow
+                    key={row.id}
+                    title={row.name}
+                    subtitle={row.emp.role || row.emp.location || "—"}
+                    badge={row.day ? `Day ${row.day}` : "—"}
+                    badgeTone="blue"
+                    onClick={() => openDetail(row.name, buildBirthdayDetails(row.emp, row.age))}
+                  />
+                ))
+              )}
+            </ObserverSection>
+          </>
+        )}
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        )}
+      </div>
+    );
+  }
+
+  if (moduleId === "monitor") {
+    return (
+      <div className="space-y-4 pb-2">
+        {monitorLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-8 h-8 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+          </div>
+        ) : monitorError ? (
+          <ObserverEmptyState icon={Activity} title="Monitor unavailable" hint={monitorError} />
+        ) : (
+          <>
+            <ObserverStatGrid>
+              <ObserverStatCard icon={Activity} label="Online" value={monitorOverview?.employeesOnline ?? 0} accent="emerald" />
+              <ObserverStatCard icon={Activity} label="Offline" value={monitorOverview?.employeesOffline ?? 0} accent="slate" />
+              <ObserverStatCard icon={Activity} label="Productivity" value={`${monitorOverview?.productivityScore ?? 0}%`} accent="blue" />
+              <ObserverStatCard icon={Activity} label="Alerts" value={monitorOverview?.openAlerts ?? 0} accent="rose" alert={(monitorOverview?.openAlerts ?? 0) > 0} />
+            </ObserverStatGrid>
+            <ObserverSection title="Work Sessions Today">
+              <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search employees…" />
+              {monitorSessionRows.length === 0 ? (
+                <ObserverEmptyState icon={Activity} title="No work sessions yet" />
+              ) : (
+                monitorSessionRows.map((row) => (
+                  <ObserverListRow
+                    key={row.id}
+                    title={row.name}
+                    subtitle={row.session.employeeCode || "—"}
+                    badge={row.hours}
+                    badgeTone="blue"
+                    onClick={() => openDetail(row.name, buildMonitorSessionDetails(row.session))}
+                  />
+                ))
+              )}
+            </ObserverSection>
+          </>
+        )}
+        {detail && (
+          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
         )}
       </div>
     );

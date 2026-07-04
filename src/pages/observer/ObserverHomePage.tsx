@@ -17,6 +17,8 @@ import {
   HandCoins,
   AlertTriangle,
   Bell,
+  Calculator,
+  Cake,
 } from "lucide-react";
 import { useObserverStats } from "./useObserverStats";
 import {
@@ -47,6 +49,8 @@ export default function ObserverHomePage() {
     partnerPayStats,
     pendingSupervisorRequestCount,
     adminNotificationUnreadCount,
+    ledgerStats,
+    birthdayTodayCount,
   } = stats;
 
   if (isLoading) {
@@ -123,13 +127,34 @@ export default function ObserverHomePage() {
               to="/observer/salary"
             />
           )}
-          {canView("Attendance") && (
+          {canViewObserverModule("attendance") && (
             <ObserverStatCard
               icon={Clock}
               label="Attendance"
               value={`${attendanceSummary.presentPct}%`}
               sub={`${attendanceSummary.presents} present days`}
               accent="emerald"
+              to="/observer/attendance"
+            />
+          )}
+          {canViewObserverModule("advance-penalty") && (
+            <ObserverStatCard
+              icon={Calculator}
+              label="Advances"
+              value={formatInr(ledgerStats.advanceTotal)}
+              sub={monthLabel}
+              accent="blue"
+              to="/observer/advance-penalty"
+            />
+          )}
+          {canViewObserverModule("birthdays") && birthdayTodayCount > 0 && (
+            <ObserverStatCard
+              icon={Cake}
+              label="Birthdays"
+              value={birthdayTodayCount}
+              sub="Today"
+              accent="amber"
+              to="/observer/birthdays"
             />
           )}
           {canView("Schools") && (

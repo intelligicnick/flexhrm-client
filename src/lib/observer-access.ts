@@ -6,6 +6,11 @@ export type ObserverModuleId =
   | "notifications"
   | "employees"
   | "salary"
+  | "advance-penalty"
+  | "attendance"
+  | "directory"
+  | "birthdays"
+  | "monitor"
   | "supervisors"
   | "map"
   | "visits"
@@ -28,6 +33,11 @@ export const OBSERVER_MODULE_ROWS: ObserverModuleRow[] = [
   { id: "notifications", label: "Notifications", permissionTab: "Admin" },
   { id: "employees", label: "Employees", permissionTab: "Employees" },
   { id: "salary", label: "Salary", permissionTab: "Salary" },
+  { id: "advance-penalty", label: "Advance & Penalty", permissionTab: "Advance & Penalty" },
+  { id: "attendance", label: "Attendance", permissionTab: "Attendance" },
+  { id: "directory", label: "Directory", permissionTab: "Directory" },
+  { id: "birthdays", label: "Birthdays", permissionTab: "Birthdays" },
+  { id: "monitor", label: "Monitor", permissionTab: "Monitor" },
   { id: "supervisors", label: "Supervisors", permissionTab: "Field Team" },
   { id: "map", label: "Supervisors Map", permissionTab: "Field Team" },
   { id: "visits", label: "Visits", permissionTab: "Field Team" },

@@ -1,8 +1,9 @@
 import { useMemo, useCallback } from "react";
 import { useHRMS } from "../../context/HRMSContext";
 import { countMonthAttendance } from "../../lib/attendance-helpers";
-import { getDaysInMonthStatic, parseFlexibleDateMs } from "../../lib/date-helpers";
+import { getDaysInMonthStatic, parseDateOfBirth, parseFlexibleDateMs } from "../../lib/date-helpers";
 import { isEmployeeExitedForMonth, isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
+import { sumMonthTotals } from "../../lib/ledger-helpers";
 import {
   filterContractsByWorksite,
   isObserverModuleAllowed,
@@ -116,6 +117,29 @@ export function useObserverStats() {
     const presentPct = total > 0 ? Math.round((presents / total) * 100) : 0;
     return { presents, absents, presentPct, activeEmployees: salarySheetEmployees.length };
   }, [employees, attendanceDb, selectedMonth, salarySheetEmployees.length]);
+
+  const ledgerStats = useMemo(
+    () => ({
+      advanceTotal: sumMonthTotals(employees, selectedMonth, "advance"),
+      penaltyTotal: sumMonthTotals(employees, selectedMonth, "penalty"),
+      perkTotal:
+        sumMonthTotals(employees, selectedMonth, "foodPerk") +
+        sumMonthTotals(employees, selectedMonth, "accommodationPerk") +
+        sumMonthTotals(employees, selectedMonth, "conveyancePerk"),
+    }),
+    [employees, selectedMonth],
+  );
+
+  const birthdayTodayCount = useMemo(() => {
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
+    return employees.filter((emp) => {
+      if (emp.exitDate?.trim()) return false;
+      const dob = parseDateOfBirth(emp.dateOfBirth);
+      return dob?.month === month && dob?.day === day;
+    }).length;
+  }, [employees]);
 
   const tenderStats = useMemo(() => {
     const active = rawTenders.filter((t) => !isTenderDeleted(t));
@@ -259,6 +283,8 @@ export function useObserverStats() {
     isLoading,
     payrollNet,
     attendanceSummary,
+    ledgerStats,
+    birthdayTodayCount,
     tenderStats,
     renewalStats,
     visitStats,

@@ -13,6 +13,11 @@ import {
   MapPin,
   Users,
   Bell,
+  Calculator,
+  Clock,
+  Contact,
+  Cake,
+  Activity,
 } from "lucide-react";
 import { useObserverStats } from "./useObserverStats";
 import { ObserverMenuTile, formatInr } from "./ObserverUI";
@@ -32,12 +37,16 @@ export default function ObserverMenuPage() {
     partnerPayStats,
     supervisorStats,
     adminNotificationUnreadCount,
+    ledgerStats,
+    attendanceSummary,
+    birthdayTodayCount,
   } = stats;
 
   const editableModules = new Set(
     [
       canEdit("Employees") && "employees",
       canEdit("Salary") && "salary",
+      canEdit("Advance & Penalty") && "ledger",
       canEdit("Field Team") && "field-team",
       canEdit("Tenders") && "tenders",
       canEdit("Contracts") && "contracts",
@@ -68,6 +77,42 @@ export default function ObserverMenuPage() {
       count: formatInr(payrollNet),
       to: "/observer/salary",
       color: "orange" as const,
+    },
+    canViewObserverModule("advance-penalty") && {
+      icon: Calculator,
+      label: "Advance & Penalty",
+      count: formatInr(ledgerStats.advanceTotal + ledgerStats.penaltyTotal),
+      to: "/observer/advance-penalty",
+      color: "rose" as const,
+    },
+    canViewObserverModule("attendance") && {
+      icon: Clock,
+      label: "Attendance",
+      count: `${attendanceSummary.presentPct}% present`,
+      to: "/observer/attendance",
+      color: "emerald" as const,
+    },
+    canViewObserverModule("directory") && {
+      icon: Contact,
+      label: "Directory",
+      count: "Contacts",
+      to: "/observer/directory",
+      color: "blue" as const,
+    },
+    canViewObserverModule("birthdays") && {
+      icon: Cake,
+      label: "Birthdays",
+      count: birthdayTodayCount > 0 ? `${birthdayTodayCount} today` : "Calendar",
+      to: "/observer/birthdays",
+      color: "amber" as const,
+      alert: birthdayTodayCount > 0,
+    },
+    canViewObserverModule("monitor") && {
+      icon: Activity,
+      label: "Monitor",
+      count: "Live activity",
+      to: "/observer/monitor",
+      color: "indigo" as const,
     },
     canViewObserverModule("supervisors") && {
       icon: MapPin,
@@ -165,6 +210,7 @@ export default function ObserverMenuPage() {
   const moduleEditable = (to: string): boolean => {
     if (to.includes("/employees")) return editableModules.has("employees") || editableModules.has("salary");
     if (to.includes("/salary")) return editableModules.has("salary");
+    if (to.includes("/advance-penalty")) return editableModules.has("ledger");
     if (to.includes("/visits") || to.includes("/commitments") || to.includes("/supervisors") || to.includes("/map")) {
       return editableModules.has("field-team");
     }

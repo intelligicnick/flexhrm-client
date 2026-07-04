@@ -15,6 +15,11 @@ function getPageTitle(pathname: string): string {
   if (pathname.startsWith("/observer/supervisors")) return "Supervisors";
   if (pathname.startsWith("/observer/employees")) return "Employees & Guards";
   if (pathname.startsWith("/observer/salary")) return "Salary";
+  if (pathname.startsWith("/observer/advance-penalty")) return "Advance & Penalty";
+  if (pathname.startsWith("/observer/attendance")) return "Attendance";
+  if (pathname.startsWith("/observer/directory")) return "Directory";
+  if (pathname.startsWith("/observer/birthdays")) return "Birthdays";
+  if (pathname.startsWith("/observer/monitor")) return "Employee Monitor";
   if (pathname.startsWith("/observer/visits")) return "Visits";
   if (pathname.startsWith("/observer/commitments")) return "Commitment Diary";
   if (pathname.startsWith("/observer/tenders")) return "Tenders";
