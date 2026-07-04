@@ -1,8 +1,9 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
+import { useHRMS } from "../../context/HRMSContext";
 import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import { useObserverStats } from "./useObserverStats";
 
-const SupervisorMapPanel = lazy(() => import("../../components/SupervisorMapPanel"));
+const FieldTrackingMap = lazy(() => import("../../components/FieldTrackingMap"));
 
 function MapFallback() {
   return (
@@ -13,7 +14,8 @@ function MapFallback() {
 }
 
 export default function ObserverMapPage() {
-  const { rawSchoolSupervisors, rawSchoolVisits, canViewObserverModule } = useObserverStats();
+  const { employees } = useHRMS();
+  const { rawSchoolSupervisors, rawSchoolVisits, canViewObserverModule, canView } = useObserverStats();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -28,7 +30,7 @@ export default function ObserverMapPage() {
     return (
       <div className="px-4 py-8">
         <p className="text-sm text-slate-500 text-center">
-          You don&apos;t have access to view the supervisor map.
+          You don&apos;t have access to view the field tracking map.
         </p>
       </div>
     );
@@ -36,12 +38,12 @@ export default function ObserverMapPage() {
 
   const mapPanel = (
     <Suspense fallback={<MapFallback />}>
-      <SupervisorMapPanel
+      <FieldTrackingMap
         supervisors={rawSchoolSupervisors}
         visits={rawSchoolVisits}
-        layoutRevision={`observer-mobile-${isFullscreen ? "fs" : "std"}`}
+        employees={employees}
+        showEmployeeTracking={canView("Attendance")}
         variant="embedded"
-        mapVariant="trajectory"
         mapHeightClass={
           isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-14rem)] min-h-[340px]"
         }

@@ -166,6 +166,29 @@ export function removeLedgerItem(ledger: MonthLedger, itemId: string): MonthLedg
   return { ...ledger, ...totals, ledgerItems: items };
 }
 
+export function updateLedgerItem(
+  ledger: MonthLedger,
+  itemId: string,
+  patch: Partial<Pick<LedgerItem, "type" | "amount" | "entryDate" | "note">>,
+): MonthLedger {
+  const items = ledger.ledgerItems
+    .map((item) => {
+      if (item.id !== itemId) return item;
+      return {
+        ...item,
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.amount !== undefined ? { amount: toAmount(patch.amount) } : {}),
+        ...(patch.entryDate !== undefined
+          ? { entryDate: String(patch.entryDate || "").slice(0, 10) || todayDateInputValue() }
+          : {}),
+        ...(patch.note !== undefined ? { note: String(patch.note || "").trim() } : {}),
+      };
+    })
+    .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.id.localeCompare(b.id));
+  const totals = computeTotals(items);
+  return { ...ledger, ...totals, ledgerItems: items };
+}
+
 export function todayDateInputValue(): string {
   return new Date().toISOString().slice(0, 10);
 }

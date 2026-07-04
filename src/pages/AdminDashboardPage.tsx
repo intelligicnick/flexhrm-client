@@ -37,7 +37,7 @@ import { getDaysInMonthStatic, parseFlexibleDateMs } from "../lib/date-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
 import { expiryBand } from "../lib/renewal-helpers";
 import { Tender } from "../types";
-const SupervisorMapPanel = lazy(() => import("../components/SupervisorMapPanel"));
+const FieldTrackingMap = lazy(() => import("../components/FieldTrackingMap"));
 import DashboardDraggableSection from "../components/DashboardDraggableSection";
 import {
   loadDashboardWidgetOrder,
@@ -493,7 +493,7 @@ export default function AdminDashboardPage() {
       "kpi-eligible-exit": canView("Employees"),
       "kpi-exited-employees": canView("Employees"),
       charts: canView("Attendance") || canView("Employees"),
-      map: canView("Field Team"),
+      map: canView("Field Team") || canView("Attendance"),
       payroll: canView("Salary") || canView("Schools"),
       actions: pendingActions.length > 0,
       birthdays: canView("Birthdays") && birthdayTodayList.length > 0,
@@ -774,12 +774,13 @@ export default function AdminDashboardPage() {
                 </div>
               }
             >
-              <SupervisorMapPanel
+              <FieldTrackingMap
                 supervisors={rawSchoolSupervisors}
                 visits={rawSchoolVisits}
+                employees={employees}
+                showEmployeeTracking={canView("Attendance")}
                 onOpenFieldTeam={() => goToFieldTeam("supervisors")}
                 layoutRevision={widgetOrder.join("-")}
-                mapVariant="trajectory"
               />
             </Suspense>
           </section>

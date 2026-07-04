@@ -157,6 +157,7 @@ import {
   isLedgerDateWithinMonth,
   monthLedgerToPayload,
   removeLedgerItem,
+  updateLedgerItem,
   TempLedgerEntry,
   todayDateInputValue,
   LedgerItemType,
@@ -3157,16 +3158,126 @@ export function useHRMSApp() {
   };
 
   const handleDeleteLedgerItem = async (employeeId: string, itemId: string) => {
-    if (!ensureDeletePermission("ledger", "ledger entries")) return;
+    if (!ensureDeletePermission("ledger", "ledger entries")) return false;
     try {
       setErrorMessage(null);
       const emp = employees.find((e) => e.id === employeeId);
       if (!emp) throw new Error("Employee not found.");
       const ledger = removeLedgerItem(getMonthLedger(emp, selectedMonth), itemId);
       await persistEmployeeMonthLedger(employeeId, selectedMonth, ledger);
-      await fetchEmployees();
+      await fetchEmployees({ forceLedger: true });
+      return true;
     } catch (err: any) {
       setErrorMessage("Failed to delete entry: " + err.message);
+      return false;
+    }
+  };
+
+  const handleObserverAddLedgerEntry = async (
+    employeeId: string,
+    entry: { type: LedgerItemType; amount: number; entryDate: string; note?: string },
+  ): Promise<boolean> => {
+    if (!userPermissions.ledger?.edit) {
+      alert("Action locked: You do not have write permissions for Advance & Penalty.");
+      return false;
+    }
+    if (!entry.entryDate) {
+      setErrorMessage("Please select an entry date.");
+      return false;
+    }
+    if (!isLedgerDateWithinMonth(entry.entryDate, selectedMonth)) {
+      setErrorMessage(`Entry date must be within ${selectedMonth}.`);
+      return false;
+    }
+    const amount = parseNonNegativeNumber(entry.amount, NaN);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setErrorMessage("Please enter a valid amount greater than zero.");
+      return false;
+    }
+    if (entry.type === "penalty" && !entry.note?.trim()) {
+      setErrorMessage("Enter a reason for the penalty.");
+      return false;
+    }
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/employees/payroll-ledger/add-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthKey: selectedMonth,
+          entries: [
+            {
+              employeeId,
+              type: entry.type,
+              amount,
+              entryDate: entry.entryDate,
+              note: entry.note?.trim() || "",
+            },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Server rejected ledger entry.");
+      }
+      await fetchEmployees({ forceLedger: true });
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save ledger entry: " + err.message);
+      return false;
+    }
+  };
+
+  const handleObserverUpdateLedgerItem = async (
+    employeeId: string,
+    itemId: string,
+    patch: { type?: LedgerItemType; amount?: number; entryDate?: string; note?: string },
+  ): Promise<boolean> => {
+    if (!userPermissions.ledger?.edit) {
+      alert("Action locked: You do not have write permissions for Advance & Penalty.");
+      return false;
+    }
+    if (patch.entryDate && !isLedgerDateWithinMonth(patch.entryDate, selectedMonth)) {
+      setErrorMessage(`Entry date must be within ${selectedMonth}.`);
+      return false;
+    }
+    const emp = employees.find((e) => e.id === employeeId);
+    if (!emp) {
+      setErrorMessage("Employee not found.");
+      return false;
+    }
+    const currentLedger = getMonthLedger(emp, selectedMonth);
+    const existing = currentLedger.ledgerItems.find((item) => item.id === itemId);
+    if (!existing) {
+      setErrorMessage("Ledger entry not found.");
+      return false;
+    }
+    const nextType = patch.type ?? existing.type;
+    const nextAmount = patch.amount !== undefined ? parseNonNegativeNumber(patch.amount, NaN) : existing.amount;
+    const nextDate = patch.entryDate ?? existing.entryDate;
+    const nextNote = patch.note !== undefined ? patch.note.trim() : existing.note;
+    if (!Number.isFinite(nextAmount) || nextAmount <= 0) {
+      setErrorMessage("Please enter a valid amount greater than zero.");
+      return false;
+    }
+    if (nextType === "penalty" && !nextNote) {
+      setErrorMessage("Enter a reason for the penalty.");
+      return false;
+    }
+    try {
+      setErrorMessage(null);
+      const ledger = updateLedgerItem(currentLedger, itemId, {
+        type: nextType,
+        amount: nextAmount,
+        entryDate: nextDate,
+        note: nextNote,
+      });
+      await persistEmployeeMonthLedger(employeeId, selectedMonth, ledger);
+      await fetchEmployees({ forceLedger: true });
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to update entry: " + err.message);
+      return false;
     }
   };
 
@@ -4356,11 +4467,15 @@ export function useHRMSApp() {
   );
 
   const fetchEmployees = useCallback(async (options?: { forceLedger?: boolean }) => {
+    const onObserverLedger =
+      location.pathname.startsWith("/observer/advance-penalty") ||
+      location.pathname.startsWith("/observer/salary");
     const includeLedger =
       options?.forceLedger ??
       (activeSidebarTab === "Salary" ||
         activeSidebarTab === "Ledger" ||
-        activeSidebarTab === "Advance & Penalty");
+        activeSidebarTab === "Advance & Penalty" ||
+        onObserverLedger);
     const params = new URLSearchParams();
     if (!includeLedger) {
       params.set("lite", "1");
@@ -4400,7 +4515,7 @@ export function useHRMSApp() {
     } finally {
       employeesFetchInFlightRef.current.delete(url);
     }
-  }, [activeSidebarTab, selectedMonth]);
+  }, [activeSidebarTab, selectedMonth, location.pathname]);
 
   const fetchSchoolWorks = async () => {
     setIsSchoolLoading(true);
@@ -5000,11 +5115,13 @@ export function useHRMSApp() {
     if (
       activeSidebarTab === "Salary" ||
       activeSidebarTab === "Ledger" ||
-      activeSidebarTab === "Advance & Penalty"
+      activeSidebarTab === "Advance & Penalty" ||
+      location.pathname.startsWith("/observer/advance-penalty") ||
+      location.pathname.startsWith("/observer/salary")
     ) {
       void fetchEmployees({ forceLedger: true });
     }
-  }, [isLoggedIn, activeSidebarTab, selectedMonth]);
+  }, [isLoggedIn, activeSidebarTab, selectedMonth, location.pathname]);
 
   useEffect(() => {
     if (!isLoggedIn || !selectedMonth || !shouldTrackExitEligibility) return;
@@ -8419,6 +8536,8 @@ export function useHRMSApp() {
     saveBatchLedgerRecords,
     handleSaveBatchLedgerRecords,
     handleDeleteLedgerItem,
+    handleObserverAddLedgerEntry,
+    handleObserverUpdateLedgerItem,
     handleSaveLedgerRecord,
     handleClearLedgerValue,
     renderClearButtonOrConfirm,

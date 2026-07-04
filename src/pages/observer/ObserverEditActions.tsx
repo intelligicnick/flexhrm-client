@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, Loader2, X } from "lucide-react";
+import { Check, Loader2, Trash2, X } from "lucide-react";
 import type {
   CommitmentDiary,
   Contract,
@@ -11,6 +11,21 @@ import type {
   Tender,
   TenderStatus,
 } from "../../types";
+import {
+  getDayOfWeekForMonthDay,
+  getEffectiveAttendanceStatus,
+  isWeeklyOffDay,
+} from "../../lib/attendance-helpers";
+import { getDaysInMonthStatic } from "../../lib/date-helpers";
+import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
+import {
+  getDefaultLedgerEntryDate,
+  getLedgerDateBoundsForMonth,
+  getMonthLedger,
+  LEDGER_TYPE_LABELS,
+  type LedgerItem,
+  type LedgerItemType,
+} from "../../lib/ledger-helpers";
 
 type PaymentStatus = "Unpaid" | "Paid" | "Hold";
 
@@ -390,6 +405,363 @@ export function ObserverRenewalActions({
   );
 }
 
+const OBSERVER_LEDGER_TYPES: LedgerItemType[] = ["advance", "penalty"];
+
+function attendanceCellClass(status: string): string {
+  switch (status) {
+    case "P":
+      return "bg-emerald-50 border-emerald-200 text-emerald-800";
+    case "A":
+      return "bg-rose-50 border-rose-200 text-rose-800";
+    case "L":
+      return "bg-amber-50 border-amber-200 text-amber-800";
+    case "H":
+      return "bg-blue-50 border-blue-200 text-blue-800";
+    case "WO":
+      return "bg-red-50 border-red-200 text-red-800";
+    default:
+      return "bg-white border-slate-200 text-slate-400";
+  }
+}
+
+function LedgerItemEditor({
+  item,
+  monthKey,
+  onSave,
+  onDelete,
+  canDelete,
+}: {
+  item: LedgerItem;
+  monthKey: string;
+  onSave: (patch: { type: LedgerItemType; amount: number; entryDate: string; note: string }) => Promise<boolean>;
+  onDelete?: () => Promise<boolean>;
+  canDelete: boolean;
+}) {
+  const dateBounds = getLedgerDateBoundsForMonth(monthKey);
+  const [type, setType] = useState<LedgerItemType>(item.type);
+  const [amount, setAmount] = useState(String(item.amount));
+  const [entryDate, setEntryDate] = useState(item.entryDate);
+  const [note, setNote] = useState(item.note || "");
+  const [busy, setBusy] = useState<"save" | "delete" | null>(null);
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        {LEDGER_TYPE_LABELS[item.type]} · {entryDate}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Type</label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as LedgerItemType)}
+            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
+          >
+            {OBSERVER_LEDGER_TYPES.map((option) => (
+              <option key={option} value={option}>
+                {LEDGER_TYPE_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Amount</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
+        <input
+          type="date"
+          value={entryDate}
+          min={dateBounds.min}
+          max={dateBounds.max}
+          onChange={(e) => setEntryDate(e.target.value)}
+          className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
+        />
+      </div>
+      {type === "penalty" && (
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reason</label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs bg-white"
+            placeholder="Penalty reason…"
+          />
+        </div>
+      )}
+      <div className="flex gap-2">
+        <PrimaryButton
+          disabled={!!busy}
+          onClick={async () => {
+            setBusy("save");
+            const ok = await onSave({
+              type,
+              amount: Number(amount),
+              entryDate,
+              note: note.trim(),
+            });
+            setBusy(null);
+          }}
+        >
+          {busy === "save" ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Save"}
+        </PrimaryButton>
+        {canDelete && onDelete && (
+          <PrimaryButton
+            tone="rose"
+            disabled={!!busy}
+            onClick={async () => {
+              setBusy("delete");
+              await onDelete();
+              setBusy(null);
+            }}
+          >
+            {busy === "delete" ? <Loader2 size={14} className="animate-spin mx-auto" /> : <Trash2 size={14} className="mx-auto" />}
+          </PrimaryButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ObserverLedgerActions({
+  employee,
+  monthKey,
+  onAdd,
+  onUpdate,
+  onDelete,
+  canDelete,
+}: {
+  employee: Employee;
+  monthKey: string;
+  onAdd: (entry: { type: LedgerItemType; amount: number; entryDate: string; note?: string }) => Promise<boolean>;
+  onUpdate: (
+    itemId: string,
+    patch: { type: LedgerItemType; amount: number; entryDate: string; note: string },
+  ) => Promise<boolean>;
+  onDelete: (itemId: string) => Promise<boolean>;
+  canDelete: boolean;
+}) {
+  const ledger = getMonthLedger(employee, monthKey);
+  const dateBounds = getLedgerDateBoundsForMonth(monthKey);
+  const [entryType, setEntryType] = useState<LedgerItemType>("advance");
+  const [amount, setAmount] = useState("");
+  const [entryDate, setEntryDate] = useState(getDefaultLedgerEntryDate(monthKey));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const relevantItems = ledger.ledgerItems.filter((item) =>
+    OBSERVER_LEDGER_TYPES.includes(item.type),
+  );
+
+  const refresh = () => {
+    setRefreshKey((k) => k + 1);
+  };
+
+  return (
+    <ActionShell key={refreshKey}>
+      {relevantItems.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Existing Entries</p>
+          {relevantItems.map((item) => (
+            <LedgerItemEditor
+              key={item.id}
+              item={item}
+              monthKey={monthKey}
+              canDelete={canDelete}
+              onSave={(patch) => onUpdate(item.id, patch).then((ok) => { if (ok) refresh(); return ok; })}
+              onDelete={canDelete ? () => onDelete(item.id).then((ok) => { if (ok) refresh(); return ok; }) : undefined}
+            />
+          ))}
+        </div>
+      )}
+
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Add Entry</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Type</label>
+          <select
+            value={entryType}
+            onChange={(e) => setEntryType(e.target.value as LedgerItemType)}
+            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
+          >
+            {OBSERVER_LEDGER_TYPES.map((option) => (
+              <option key={option} value={option}>
+                {LEDGER_TYPE_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Amount</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0"
+            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
+        <input
+          type="date"
+          value={entryDate}
+          min={dateBounds.min}
+          max={dateBounds.max}
+          onChange={(e) => setEntryDate(e.target.value)}
+          className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
+        />
+      </div>
+      {entryType === "penalty" && (
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reason</label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-xs bg-white"
+            placeholder="Penalty reason…"
+          />
+        </div>
+      )}
+      <PrimaryButton
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const ok = await onAdd({
+            type: entryType,
+            amount: Number(amount),
+            entryDate,
+            note: note.trim() || undefined,
+          });
+          setBusy(false);
+          if (ok) {
+            setAmount("");
+            setNote("");
+            setEntryDate(getDefaultLedgerEntryDate(monthKey));
+            refresh();
+          }
+        }}
+      >
+        {busy ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Add Entry"}
+      </PrimaryButton>
+    </ActionShell>
+  );
+}
+
+export function ObserverAttendanceActions({
+  employee,
+  monthKey,
+  attendanceDb,
+  onCellChange,
+}: {
+  employee: Employee;
+  monthKey: string;
+  attendanceDb: Record<string, Record<string, Record<number, string>>>;
+  onCellChange: (empId: string, day: number, status: string, monthKey?: string) => Promise<void>;
+}) {
+  const daysInMonth = getDaysInMonthStatic(monthKey);
+  const empData = attendanceDb[monthKey]?.[employee.id] || {};
+
+  return (
+    <ActionShell>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Mark Attendance</p>
+      <div className="grid grid-cols-7 gap-1.5">
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((dayNum) => {
+          const isExited = isEmployeeExitedOnDayStatic(employee, monthKey, dayNum);
+          const currentStatus = empData[dayNum] || "";
+          const isWeeklyOff = isWeeklyOffDay(employee.workingDaysType, monthKey, dayNum);
+          const isSunday = getDayOfWeekForMonthDay(monthKey, dayNum) === 0;
+          const effectiveStatus = getEffectiveAttendanceStatus(
+            employee.workingDaysType,
+            monthKey,
+            dayNum,
+            currentStatus,
+          );
+
+          if (isExited) {
+            return (
+              <div
+                key={dayNum}
+                className="h-11 flex flex-col items-center justify-center rounded-lg border bg-slate-100 border-slate-200 text-slate-400"
+              >
+                <span className="text-[9px] font-bold">{dayNum}</span>
+                <span className="text-[8px]">—</span>
+              </div>
+            );
+          }
+
+          const displayStatus =
+            isWeeklyOff && currentStatus !== "P" ? "WO" : effectiveStatus || currentStatus;
+          const cellClass = attendanceCellClass(displayStatus);
+
+          return (
+            <div
+              key={dayNum}
+              className={`h-11 flex flex-col items-center justify-center rounded-lg border gap-0.5 ${cellClass} ${isSunday ? "ring-1 ring-red-100" : ""}`}
+            >
+              <span className="text-[9px] font-bold opacity-70">{dayNum}</span>
+              {isWeeklyOff && currentStatus !== "P" ? (
+                <select
+                  value="WO"
+                  onChange={(e) => {
+                    if (e.target.value === "P") {
+                      void onCellChange(employee.id, dayNum, "P", monthKey);
+                    }
+                  }}
+                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
+                >
+                  <option value="WO">WO</option>
+                  <option value="P">P</option>
+                </select>
+              ) : isWeeklyOff && currentStatus === "P" ? (
+                <select
+                  value="P"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    void onCellChange(employee.id, dayNum, val === "WO" ? "" : val, monthKey);
+                  }}
+                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
+                >
+                  <option value="WO">WO</option>
+                  <option value="P">P</option>
+                </select>
+              ) : (
+                <select
+                  value={currentStatus}
+                  onChange={(e) => void onCellChange(employee.id, dayNum, e.target.value, monthKey)}
+                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
+                >
+                  <option value="">—</option>
+                  <option value="P">P</option>
+                  <option value="A">A</option>
+                  <option value="L">L</option>
+                  <option value="H">H</option>
+                </select>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-slate-400 font-medium">P = Present · A = Absent · L = Leave · H = Holiday · WO = Weekly Off</p>
+    </ActionShell>
+  );
+}
+
 export type ObserverEditHandlers = {
   handleUpdateVisitStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
   handleUpdateCommitmentDiary: (
@@ -403,6 +775,22 @@ export type ObserverEditHandlers = {
   handleUpdateTender: (id: string, payload: Partial<Tender>) => Promise<void>;
   handleUpdateContract: (id: string, payload: Partial<Contract>) => Promise<void>;
   handleUpdateRenewal: (id: string, payload: Partial<Renewal>) => Promise<void>;
+  handleObserverAddLedgerEntry?: (
+    employeeId: string,
+    entry: { type: LedgerItemType; amount: number; entryDate: string; note?: string },
+  ) => Promise<boolean>;
+  handleObserverUpdateLedgerItem?: (
+    employeeId: string,
+    itemId: string,
+    patch: { type?: LedgerItemType; amount?: number; entryDate?: string; note?: string },
+  ) => Promise<boolean>;
+  handleDeleteLedgerItem?: (employeeId: string, itemId: string) => Promise<boolean>;
+  handleCellAttendanceChange?: (
+    empId: string,
+    day: number,
+    status: string,
+    monthKey?: string,
+  ) => Promise<void>;
 };
 
 export function buildObserverSearchActions(

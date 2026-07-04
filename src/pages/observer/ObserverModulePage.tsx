@@ -56,6 +56,8 @@ import {
   ObserverRenewalActions,
   ObserverTenderStatusActions,
   ObserverVisitActions,
+  ObserverLedgerActions,
+  ObserverAttendanceActions,
 } from "./ObserverEditActions";
 import {
   buildCommitmentDetails,
@@ -160,6 +162,7 @@ type DetailState = {
   fields: DetailField[];
   documents?: ObserverDocumentLink[];
   actions?: React.ReactNode;
+  employeeId?: string;
 };
 
 function salaryPaymentStatus(emp: Employee, month: string): "Paid" | "Unpaid" | "Hold" {
@@ -215,6 +218,12 @@ export default function ObserverModulePage() {
     handleUpdateTender,
     handleUpdateContract,
     handleUpdateRenewal,
+    handleObserverAddLedgerEntry,
+    handleObserverUpdateLedgerItem,
+    handleDeleteLedgerItem,
+    handleCellAttendanceChange,
+    fetchEmployees,
+    userPermissions,
   } = useHRMS();
 
   const [moduleSearch, setModuleSearch] = useState("");
@@ -270,6 +279,11 @@ export default function ObserverModulePage() {
       cancelled = true;
     };
   }, [moduleId, selectedMonth]);
+
+  useEffect(() => {
+    if (moduleId !== "advance-penalty" && moduleId !== "salary") return;
+    void fetchEmployees({ forceLedger: true });
+  }, [moduleId, selectedMonth, fetchEmployees]);
 
   useEffect(() => {
     if (moduleId !== "monitor") return;
@@ -590,9 +604,73 @@ export default function ObserverModulePage() {
     fields: DetailField[],
     documents?: ObserverDocumentLink[],
     actions?: React.ReactNode,
-  ) => setDetail({ title, fields, documents, actions });
+    employeeId?: string,
+  ) => setDetail({ title, fields, documents, actions, employeeId });
 
   const closeDetail = () => setDetail(null);
+
+  const buildLedgerActions = (emp: Employee) =>
+    canEdit("Advance & Penalty") ? (
+      <ObserverLedgerActions
+        employee={emp}
+        monthKey={selectedMonth}
+        canDelete={!!userPermissions.ledger?.delete}
+        onAdd={(entry) => handleObserverAddLedgerEntry(emp.id, entry)}
+        onUpdate={(itemId, patch) => handleObserverUpdateLedgerItem(emp.id, itemId, patch)}
+        onDelete={(itemId) => handleDeleteLedgerItem(emp.id, itemId)}
+      />
+    ) : undefined;
+
+  const buildAttendanceActions = (emp: Employee) =>
+    canEdit("Attendance") ? (
+      <ObserverAttendanceActions
+        employee={emp}
+        monthKey={selectedMonth}
+        attendanceDb={attendanceDb}
+        onCellChange={handleCellAttendanceChange}
+      />
+    ) : undefined;
+
+  const resolvedDetail = useMemo(() => {
+    if (!detail?.employeeId) return detail;
+    const emp = employees.find((e) => e.id === detail.employeeId);
+    if (!emp) return detail;
+    if (moduleId === "advance-penalty") {
+      return {
+        ...detail,
+        fields: buildLedgerDetails(emp, selectedMonth),
+        actions: buildLedgerActions(emp),
+      };
+    }
+    if (moduleId === "attendance") {
+      const daysInMonth = getDaysInMonthStatic(selectedMonth);
+      const monthData = attendanceDb[selectedMonth] || {};
+      const empData = monthData[emp.id] || {};
+      const counts = countMonthAttendance(
+        empData,
+        daysInMonth,
+        (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+        { workingDaysType: emp.workingDaysType, monthStr: selectedMonth },
+      );
+      return {
+        ...detail,
+        fields: buildAttendanceDetails(emp, selectedMonth, counts.presents, counts.absents),
+        actions: buildAttendanceActions(emp),
+      };
+    }
+    return detail;
+  }, [
+    detail,
+    employees,
+    attendanceDb,
+    selectedMonth,
+    moduleId,
+    canEdit,
+    handleObserverAddLedgerEntry,
+    handleObserverUpdateLedgerItem,
+    handleDeleteLedgerItem,
+    handleCellAttendanceChange,
+  ]);
 
   const openRenewalDetail = async (title: string, renewal: Renewal) => {
     try {
@@ -1192,13 +1270,21 @@ export default function ObserverModulePage() {
                 title={row.name}
                 subtitle={`${row.emp.location || "—"} · Adv ${formatInr(row.advance)} · Pen ${formatInr(row.penalty)}`}
                 value={formatInr(row.total)}
-                onClick={() => openDetail(row.name, buildLedgerDetails(row.emp, selectedMonth))}
+                onClick={() =>
+                  openDetail(
+                    row.name,
+                    buildLedgerDetails(row.emp, selectedMonth),
+                    undefined,
+                    buildLedgerActions(row.emp),
+                    row.emp.id,
+                  )
+                }
               />
             ))
           )}
         </ObserverSection>
-        {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        {resolvedDetail && (
+          <ObserverDetailSheet title={resolvedDetail.title} fields={resolvedDetail.fields} documents={resolvedDetail.documents} actions={resolvedDetail.actions} onClose={closeDetail} />
         )}
       </div>
     );
@@ -1226,14 +1312,20 @@ export default function ObserverModulePage() {
                 badgeTone={row.presentPct >= 80 ? "green" : row.presentPct >= 50 ? "amber" : "red"}
                 value={`${row.presents}P / ${row.absents}A`}
                 onClick={() =>
-                  openDetail(row.name, buildAttendanceDetails(row.emp, selectedMonth, row.presents, row.absents))
+                  openDetail(
+                    row.name,
+                    buildAttendanceDetails(row.emp, selectedMonth, row.presents, row.absents),
+                    undefined,
+                    buildAttendanceActions(row.emp),
+                    row.emp.id,
+                  )
                 }
               />
             ))
           )}
         </ObserverSection>
-        {detail && (
-          <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        {resolvedDetail && (
+          <ObserverDetailSheet title={resolvedDetail.title} fields={resolvedDetail.fields} documents={resolvedDetail.documents} actions={resolvedDetail.actions} onClose={closeDetail} />
         )}
       </div>
     );

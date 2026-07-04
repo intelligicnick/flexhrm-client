@@ -286,3 +286,69 @@ export function buildSupervisorMapPins(
       lastActiveAt: path.lastActiveAt,
     }));
 }
+
+/** Latest known GPS position per supervisor (all-time visits, not period-filtered). */
+export type SupervisorLiveLocation = {
+  supervisorId: string;
+  name: string;
+  color: string;
+  lat: number;
+  lng: number;
+  locationLabel?: string;
+  visitDate: string;
+  schoolName: string;
+  isOnline?: boolean;
+  lastActiveAt?: string | null;
+  hasTrailInPeriod: boolean;
+};
+
+export function buildSupervisorLiveLocations(
+  supervisors: SchoolSupervisor[],
+  visits: SchoolVisit[],
+  pathsInPeriod: SupervisorPath[],
+): SupervisorLiveLocation[] {
+  const pathBySupervisor = new Map(pathsInPeriod.map((path) => [path.supervisorId, path]));
+  const latestBySupervisor = new Map<string, Omit<SupervisorPathPoint, "step">>();
+
+  for (const visit of visits) {
+    const visitPoints = extractVisitPathPoints(visit);
+    if (visitPoints.length === 0) continue;
+    const latestVisitPoint = [...visitPoints].sort((a, b) => {
+      const dateCmp = a.visitDate.localeCompare(b.visitDate);
+      if (dateCmp !== 0) return dateCmp;
+      return a.at.localeCompare(b.at);
+    }).at(-1);
+    if (!latestVisitPoint) continue;
+    const existing = latestBySupervisor.get(visit.supervisorId);
+    if (!existing) {
+      latestBySupervisor.set(visit.supervisorId, latestVisitPoint);
+      continue;
+    }
+    const dateCmp = latestVisitPoint.visitDate.localeCompare(existing.visitDate);
+    if (dateCmp > 0 || (dateCmp === 0 && latestVisitPoint.at.localeCompare(existing.at) > 0)) {
+      latestBySupervisor.set(visit.supervisorId, latestVisitPoint);
+    }
+  }
+
+  return supervisors
+    .filter((supervisor) => supervisor.status !== "inactive")
+    .map((supervisor, index) => {
+      const latest = latestBySupervisor.get(supervisor.id);
+      if (!latest) return null;
+      const path = pathBySupervisor.get(supervisor.id);
+      return {
+        supervisorId: supervisor.id,
+        name: supervisor.name || supervisor.phone || "Supervisor",
+        color: path?.color ?? SUPERVISOR_PATH_COLORS[index % SUPERVISOR_PATH_COLORS.length],
+        lat: latest.lat,
+        lng: latest.lng,
+        locationLabel: latest.locationLabel,
+        visitDate: latest.visitDate,
+        schoolName: latest.schoolName,
+        isOnline: supervisor.isOnline,
+        lastActiveAt: supervisor.lastActiveAt,
+        hasTrailInPeriod: !!path,
+      } as SupervisorLiveLocation;
+    })
+    .filter((row): row is SupervisorLiveLocation => row !== null);
+}
