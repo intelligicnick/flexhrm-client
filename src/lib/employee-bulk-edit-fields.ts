@@ -1,4 +1,10 @@
 import { Employee } from "../types";
+import {
+  ESIC_STATUS_APPLY_ABOVE_LIMIT,
+  ESIC_STATUS_EXEMPT,
+  ESIC_STATUS_NO,
+  ESIC_STATUS_YES,
+} from "./esic";
 import { inferSalaryWageMode } from "./salary-calc";
 
 export type BulkEditFieldType = "text" | "number" | "select" | "boolean";
@@ -20,7 +26,12 @@ export const WORKING_DAYS_OPTIONS = [
   "30/31 Days (No Off)",
 ];
 
-export const ESIC_OPTIONS = ["Yes", "No"];
+export const ESIC_OPTIONS = [
+  ESIC_STATUS_YES,
+  ESIC_STATUS_APPLY_ABOVE_LIMIT,
+  ESIC_STATUS_NO,
+  ESIC_STATUS_EXEMPT,
+];
 export const GENDER_OPTIONS = ["Male", "Female", "Other"];
 export const MARITAL_OPTIONS = ["Single", "Married", "Divorced", "Widowed"];
 export const SKILL_OPTIONS = [

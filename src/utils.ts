@@ -13,6 +13,11 @@ import {
   inferSalaryWageMode,
   type SalaryWageMode,
 } from "./lib/salary-calc";
+import {
+  computeEsicStatusFromGross,
+  isEsicCoveredStatus,
+  normalizeEsicStatus,
+} from "./lib/esic";
 import { validateNonNegativeNumberField } from "./lib/number-validation";
 
 // State-machine CSV Line Parser supporting quotes, double-quotes escaping, and customized delimiters (comma, semicolon, tab)
@@ -387,7 +392,7 @@ function buildImportedEmployeeFromRow(
     nameAsPerAadhar: getVal("EMPLOYEE NAME AS PER AADHAR ***"),
     grossSalary: grossVal,
     basicSalary: basicVal || Math.round(grossVal * 0.5),
-    esic: getVal("ESIC") || (grossVal <= 21000 && grossVal > 0 ? "Yes" : "No"),
+    esic: normalizeEsicStatus(getVal("ESIC")) || computeEsicStatusFromGross(grossVal, 21000),
     workingDaysType: workingDaysCycle,
     uan: getVal("UAN"),
     aadharNo: getVal("AADHAR NO **"),
@@ -582,7 +587,7 @@ export function isEmployeeEsicCovered(
   esicFlag?: string
 ): boolean {
   if (!isCompliant) return false;
-  return gross > 0 && (esicFlag || "").toLowerCase() === "yes";
+  return gross > 0 && isEsicCoveredStatus(esicFlag);
 }
 
 // Generate the CSV file download string matching EXCEL_ROW_HEADERS order exactly
@@ -837,7 +842,7 @@ export function calculateSalaryDetails(
 ): { basic: number; esic: string } {
   const pct = Math.min(100, Math.max(0, basicPercentOfGross)) / 100;
   const basic = Math.round(gross * pct);
-  const esic = gross > 0 && gross <= esicEligibilityLimit ? "Yes" : "No";
+  const esic = computeEsicStatusFromGross(gross, esicEligibilityLimit);
   return { basic, esic };
 }
 

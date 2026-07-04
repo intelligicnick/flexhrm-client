@@ -13,7 +13,7 @@ export interface Employee {
   nameAsPerAadhar: string; // EMPLOYEE NAME AS PER AADHAR ***
   grossSalary: number; // Gross Salary***
   basicSalary: number; // Basic Salary***
-  esic: string; // ESIC (e.g. Yes / No / Exempt)
+  esic: string; // ESIC (e.g. Yes / Apply Above 21000 / No / Exempt)
   uan: string; // UAN
   aadharNo: string; // AADHAR NO **
   nameAsPerAadharColumn: string; // NAME AS PER AADHAR **

@@ -7,6 +7,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, LogOut, X, Briefcase } from "lucide-react";
 import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
+import { getEsicDisplayLabel, matchesEsicCoverageFilter } from "../lib/esic";
 import EmployeeViewModal from "./EmployeeViewModal";
 import { formatLastPresentDate } from "../lib/exit-eligibility-helpers";
 import {
@@ -198,7 +199,7 @@ export default function EmployeeTable({
 
     // ESIC Filter
     if (esicFilter) {
-      result = result.filter((e) => e.esic?.toLowerCase() === esicFilter.toLowerCase());
+      result = result.filter((e) => matchesEsicCoverageFilter(e.esic, esicFilter));
     }
 
     // Sort
@@ -717,9 +718,11 @@ export default function EmployeeTable({
                         </td>
                         <td className="p-3 border-r border-slate-200 text-center">
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black ${
-                            emp.esic === "Yes" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-500"
+                            matchesEsicCoverageFilter(emp.esic, "Yes")
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                              : "bg-slate-100 text-slate-500"
                           }`}>
-                            {emp.esic || "No"}
+                            {getEsicDisplayLabel(emp.esic)}
                           </span>
                         </td>
                         <td className="p-3 border-r border-slate-200 text-slate-600 font-mono text-[11px]">{emp.uan || "—"}</td>
@@ -796,9 +799,11 @@ export default function EmployeeTable({
                         </td>
                         <td className="p-3 border-r border-slate-200 text-center">
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black ${
-                            emp.esic === "Yes" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-slate-100 text-slate-500"
+                            matchesEsicCoverageFilter(emp.esic, "Yes")
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                              : "bg-slate-100 text-slate-500"
                           }`}>
-                            {emp.esic || "No"}
+                            {getEsicDisplayLabel(emp.esic)}
                           </span>
                         </td>
                         <td className="p-3 border-r border-slate-200 font-mono text-[11px]">{emp.uan || "—"}</td>

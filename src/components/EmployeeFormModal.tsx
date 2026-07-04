@@ -9,7 +9,6 @@ import { X, Check, Calculator, UserCheck, CreditCard, Users, Link, MapPin, Plus,
 import { Employee } from "../types";
 import type { Contract } from "../types";
 import {
-  calculateSalaryDetails,
   validateEmployee,
   normalizeSkillCategory,
   calculatePfAmounts,
@@ -27,6 +26,11 @@ import {
   toSalaryFieldValues,
   type SalaryWageMode,
 } from "../lib/salary-calc";
+import {
+  ESIC_STATUS_APPLY_ABOVE_LIMIT,
+  getEsicDisplayLabel,
+  isEsicCoveredStatus,
+} from "../lib/esic";
 import { CARD_PHOTO, prepareCardPhoto } from "./id-card";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 import EmployeeDocumentsPanel from "./EmployeeDocumentsPanel";
@@ -717,7 +721,9 @@ export default function EmployeeFormModal({
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">ESIC</p>
-                  <p className="text-sm font-bold text-white">{formData.esic === "Yes" ? "Covered" : "Not covered"}</p>
+                  <p className="text-sm font-bold text-white">
+                    {isEsicCoveredStatus(formData.esic) ? "Covered" : "Not covered"}
+                  </p>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Skill</p>
@@ -1187,7 +1193,7 @@ export default function EmployeeFormModal({
 
                   <div>
                     <label className="text-xs font-bold text-slate-600 flex items-end h-10 mb-1">
-                      <span>ESIC Covered? (Auto-Triggered)</span>
+                      <span>ESIC Covered? (Auto + manual override)</span>
                     </label>
                     <select
                       name="esic"
@@ -1197,9 +1203,13 @@ export default function EmployeeFormModal({
                       id="field-esic"
                     >
                       <option value="Yes">Yes (Gross Salary ≤ Rs. 21,000)</option>
+                      <option value={ESIC_STATUS_APPLY_ABOVE_LIMIT}>Apply above Rs. 21,000</option>
                       <option value="No">No (Gross Salary &gt; Rs. 21,000)</option>
                       <option value="Exempt">Exempt / Custom Exception</option>
                     </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Selected: <span className="font-semibold text-slate-700">{getEsicDisplayLabel(formData.esic)}</span>
+                    </p>
                   </div>
 
                   <div>
@@ -1326,7 +1336,7 @@ export default function EmployeeFormModal({
                 </div>
 
                 <p className="text-[10px] text-slate-400 mt-2.5">
-                  💡 <strong>Indian Payroll Rule Check:</strong> ESIC eligibility is auto-enabled for monthly salaries of Rs. 21,000 or below. Basic Salary is mapped as 50% of gross as default. PF uses gross for the active salary month (prorated by attendance on the salary sheet). PF/ESIC applies when enabled on the employee or office location. PT applies when enabled on the employee or a PT-levying office location.
+                  💡 <strong>Indian Payroll Rule Check:</strong> ESIC eligibility is auto-enabled for monthly salaries of Rs. 21,000 or below, and you can now manually apply ESIC above Rs. 21,000 from the dropdown when needed. Basic Salary is mapped as 50% of gross as default. PF uses gross for the active salary month (prorated by attendance on the salary sheet). PF/ESIC applies when enabled on the employee or office location. PT applies when enabled on the employee or a PT-levying office location.
                 </p>
               </div>
 

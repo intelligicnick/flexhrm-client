@@ -160,7 +160,7 @@ export async function buildEmployeeOnboardingWorkbook(
   const roleFormula = registryRoles.length > 0 ? `"${registryRoles.join(",")}"` : null;
   const genderFormula = '"Male,Female,Other"';
   const maritalFormula = '"Single,Married,Divorced,Widowed"';
-  const esicFormula = '"Yes,No"';
+  const esicFormula = '"Yes,Apply Above 21000,No,Exempt"';
   const skillFormula = '"Highly Skilled,Skilled,Semi Skilled,Unskilled"';
   const yesNoFormula = '"Yes,No"';
   const pfModeFormula = '"gross,ceiling_15000"';
@@ -258,7 +258,7 @@ export async function buildEmployeeOnboardingWorkbook(
         formulae: [esicFormula],
         showErrorMessage: true,
         errorTitle: "Invalid ESIC Answer",
-        error: "Allowed answers: Yes or No.",
+        error: "Allowed answers: Yes, Apply Above 21000, No, or Exempt.",
       };
     }
 

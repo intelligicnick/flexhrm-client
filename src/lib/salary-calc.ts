@@ -1,3 +1,4 @@
+import { computeEsicStatusFromGross, normalizeEsicStatus, ESIC_STATUS_NO } from "./esic";
 import { getDaysInMonthStatic } from "./date-helpers";
 
 export type SalaryAnchor = "gross" | "daily" | "basic";
@@ -80,7 +81,7 @@ export function getMonthlySalaryProrationDays(
 }
 
 export function computeEsic(gross: number, esicLimit: number): string {
-  return gross > 0 && gross <= esicLimit ? "Yes" : "No";
+  return computeEsicStatusFromGross(gross, esicLimit);
 }
 
 export function wageModeToAnchor(mode: SalaryWageMode): Exclude<SalaryAnchor, "basic"> {
@@ -160,7 +161,7 @@ export function toSalaryFieldValues(
     basicSalary: Number(source.basicSalary ?? defaults?.basicSalary ?? 0) || 0,
     workingDaysType:
       source.workingDaysType ?? defaults?.workingDaysType ?? "26 Days (Sun Off)",
-    esic: source.esic ?? defaults?.esic ?? "No",
+    esic: normalizeEsicStatus(source.esic ?? defaults?.esic ?? ESIC_STATUS_NO) || ESIC_STATUS_NO,
   };
 }
 

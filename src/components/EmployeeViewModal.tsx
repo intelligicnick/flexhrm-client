@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Employee } from "../types";
 import { normalizeSkillCategory, calculatePfAmounts, isEmployeePtEnabled, isPfEsicCompliant, isProfessionalTaxApplicable, resolveLocationCompliance, resolveLocationPtEnabled } from "../utils";
+import { getEsicDisplayLabel, isEsicCoveredStatus } from "../lib/esic";
 import EmployeePhoto from "./EmployeePhoto";
 import { useEmployeePhotoUrl } from "../hooks/useEmployeePhotoUrl";
 import IdCardPanel from "./id-card/IdCardPanel";
@@ -337,7 +338,9 @@ export default function EmployeeViewModal({
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">ESIC</p>
-              <p className="text-sm font-bold text-white">{employee.esic === "Yes" ? "Covered" : "Not covered"}</p>
+              <p className="text-sm font-bold text-white">
+                {isEsicCoveredStatus(employee.esic) ? "Covered" : "Not covered"}
+              </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Location</p>
@@ -520,11 +523,11 @@ export default function EmployeeViewModal({
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">ESIC Coverage</p>
                   <span className={`mt-2 inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase ${
-                    employee.esic === "Yes"
+                    isEsicCoveredStatus(employee.esic)
                       ? "border-emerald-200 bg-emerald-100 text-emerald-800"
                       : "border-slate-200 bg-slate-100 text-slate-600"
                   }`}>
-                    {employee.esic === "Yes" ? "Covered" : "Non-Covered"}
+                    {isEsicCoveredStatus(employee.esic) ? getEsicDisplayLabel(employee.esic) : "Non-Covered"}
                   </span>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">

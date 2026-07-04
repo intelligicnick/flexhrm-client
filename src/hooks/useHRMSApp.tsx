@@ -120,6 +120,7 @@ import {
   type PayrollConfig,
   type FinancialYearSelectionConfig,
 } from "../lib/hrms-config";
+import { matchesEsicCoverageFilter } from "../lib/esic";
 import {
   getCurrentFY, getCurrentFYRange, getSelectableFinancialYears, financialYearHasData, MONTH_NAME_LIST, getMonthsForFY,
   getCalendarYearFromFYRange, normalizeMonthKey, safeNumber, getDaysInMonthStatic,
@@ -7585,7 +7586,15 @@ export function useHRMSApp() {
   const dashboardStats = useMemo(() => {
     const totalCount = employees.length;
     const totalGrossPayroll = employees.reduce((acc, curr) => acc + (curr.grossSalary || 0), 0);
-    const esicCoveredCount = employees.filter((e) => (e.grossSalary || 0) <= esicEligibilityLimit && (e.grossSalary || 0) > 0).length;
+    const esicCoveredCount = employees.filter((e) => {
+      const isCompliant = isPfEsicCompliant(e, locationCompliance);
+      return isEmployeeEsicCovered(
+        e.grossSalary || 0,
+        esicEligibilityLimit,
+        isCompliant,
+        e.esic,
+      );
+    }).length;
     const uniqueLocsCount = new Set(employees.map((e) => e.location).filter(Boolean)).size;
 
     return {
@@ -7594,7 +7603,7 @@ export function useHRMSApp() {
       esicCoveredCount,
       uniqueLocsCount,
     };
-  }, [employees, esicEligibilityLimit]);
+  }, [employees, esicEligibilityLimit, locationCompliance]);
 
   const configHasUnsavedChanges = useMemo(() => {
     return (
@@ -7904,7 +7913,7 @@ export function useHRMSApp() {
 
       // 8. ESIC Coverage Filter
       if (salaryEsicFilter && salaryEsicFilter !== "All") {
-        if ((emp.esic || "").toLowerCase() !== salaryEsicFilter.toLowerCase()) {
+        if (!matchesEsicCoverageFilter(emp.esic, salaryEsicFilter)) {
           return false;
         }
       }

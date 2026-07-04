@@ -209,10 +209,22 @@ describe("isEmployeeEsicCovered", () => {
     expect(isEmployeeEsicCovered(25000, 21000, true, "Yes")).toBe(true);
   });
 
+  it("covers employee when ESIC is explicitly applied above the limit", () => {
+    expect(isEmployeeEsicCovered(25000, 21000, true, "Apply Above 21000")).toBe(true);
+  });
+
   it("does not cover when ESIC flag is No, even below eligibility limit", () => {
     expect(isEmployeeEsicCovered(21000, 21000, true, "No")).toBe(false);
     expect(isEmployeeEsicCovered(15000, 21000, true, "No")).toBe(false);
     expect(isEmployeeEsicCovered(21000, 21000, true)).toBe(false);
+  });
+
+  it("does not cover above-limit salary when ESIC remains No", () => {
+    expect(isEmployeeEsicCovered(22000, 21000, true, "No")).toBe(false);
+  });
+
+  it("does not cover exempt employees even below the eligibility limit", () => {
+    expect(isEmployeeEsicCovered(18000, 21000, true, "Exempt")).toBe(false);
   });
 
   it("returns false when not compliant", () => {
