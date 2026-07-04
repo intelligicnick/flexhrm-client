@@ -18,16 +18,19 @@ import {
   Contact,
   Cake,
   Activity,
+  Camera,
 } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
 import { countMonthAttendance } from "../../lib/attendance-helpers";
 import { getDaysInMonthStatic, MONTH_NAME_LIST } from "../../lib/date-helpers";
-import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
-import { filterEmployeesWithLedgerEntries } from "../../components/LedgerOverviewRow";
+import { isEmployeeExitedForMonth, isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
 import { getMonthLedger, getTotalByType } from "../../lib/ledger-helpers";
-import { monitorApi, type MonitorOverview } from "../../lib/monitor-api";
+import { monitorApi, todayKey, type MonitorOverview, type MonitoredEmployee } from "../../lib/monitor-api";
+import { formatClock } from "../../lib/monitor-time";
+import MonitorScreenshotLightbox from "../../components/monitor/MonitorScreenshotLightbox";
 import { parseApiError } from "../../api";
+import { phoneToTelHref } from "../../lib/phone-helpers";
 import {
   ObserverEmptyState,
   ObserverListRow,
@@ -218,7 +221,7 @@ export default function ObserverModulePage() {
     handleUpdateTender,
     handleUpdateContract,
     handleUpdateRenewal,
-    handleObserverAddLedgerEntry,
+    handleObserverSaveLedgerBatch,
     handleObserverUpdateLedgerItem,
     handleDeleteLedgerItem,
     handleCellAttendanceChange,
@@ -237,8 +240,17 @@ export default function ObserverModulePage() {
   const [birthdayMonthList, setBirthdayMonthList] = useState<Array<Employee & { birthdayDay?: number; age?: number }>>([]);
   const [birthdaysLoading, setBirthdaysLoading] = useState(false);
   const [monitorOverview, setMonitorOverview] = useState<MonitorOverview | null>(null);
+  const [monitoredEmployees, setMonitoredEmployees] = useState<MonitoredEmployee[]>([]);
   const [monitorLoading, setMonitorLoading] = useState(false);
   const [monitorError, setMonitorError] = useState<string | null>(null);
+  const [monitorSubTab, setMonitorSubTab] = useState<"sessions" | "screenshots">("sessions");
+  const [monitorScreenshots, setMonitorScreenshots] = useState<
+    Array<{ id: string; imageUrl: string; timestamp: string; appName: string; employeeId: string; employeeName?: string }>
+  >([]);
+  const [monitorScreenshotsLoading, setMonitorScreenshotsLoading] = useState(false);
+  const [monitorEmployeeFilter, setMonitorEmployeeFilter] = useState("");
+  const [monitorScreenshotDate, setMonitorScreenshotDate] = useState(todayKey());
+  const [screenshotViewerIndex, setScreenshotViewerIndex] = useState<number | null>(null);
 
   const monthLabel = formatMonthLabel(selectedMonth);
 
@@ -290,10 +302,11 @@ export default function ObserverModulePage() {
     let cancelled = false;
     setMonitorLoading(true);
     setMonitorError(null);
-    monitorApi
-      .getOverview()
-      .then((data) => {
-        if (!cancelled) setMonitorOverview(data);
+    Promise.all([monitorApi.getOverview(), monitorApi.getEmployees()])
+      .then(([overview, employees]) => {
+        if (cancelled) return;
+        setMonitorOverview(overview);
+        setMonitoredEmployees(employees);
       })
       .catch((err: Error) => {
         if (!cancelled) setMonitorError(err.message || "Could not load monitor data.");
@@ -305,6 +318,34 @@ export default function ObserverModulePage() {
       cancelled = true;
     };
   }, [moduleId]);
+
+  useEffect(() => {
+    if (moduleId !== "monitor" || monitorSubTab !== "screenshots") return;
+    let cancelled = false;
+    setMonitorScreenshotsLoading(true);
+    monitorApi
+      .getScreenshots({
+        employeeId: monitorEmployeeFilter || undefined,
+        date: monitorScreenshotDate,
+        period: "daily",
+      })
+      .then((data) => {
+        if (!cancelled) setMonitorScreenshots(data);
+      })
+      .catch(() => {
+        if (!cancelled) setMonitorScreenshots([]);
+      })
+      .finally(() => {
+        if (!cancelled) setMonitorScreenshotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [moduleId, monitorSubTab, monitorEmployeeFilter, monitorScreenshotDate]);
+
+  useEffect(() => {
+    if (monitorSubTab !== "screenshots") setScreenshotViewerIndex(null);
+  }, [monitorSubTab, monitorEmployeeFilter, monitorScreenshotDate, moduleSearch]);
 
   const salaryRows = useMemo(() => {
     return salarySheetEmployees
@@ -483,31 +524,44 @@ export default function ObserverModulePage() {
     [observerContracts, moduleSearch],
   );
 
+  const activeRosterEmployees = useMemo(
+    () => employees.filter((emp) => !isEmployeeExitedForMonth(emp, selectedMonth)),
+    [employees, selectedMonth],
+  );
+
   const ledgerRows = useMemo(() => {
-    return filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger)
+    return activeRosterEmployees
       .map((emp) => {
         const ledger = getMonthLedger(emp, selectedMonth);
         const advance = getTotalByType(ledger, "advance");
         const penalty = getTotalByType(ledger, "penalty");
+        const uniform = getTotalByType(ledger, "uniform");
+        const food = getTotalByType(ledger, "foodPerk");
+        const accom = getTotalByType(ledger, "accommodationPerk");
+        const conveyance = getTotalByType(ledger, "conveyancePerk");
         return {
           emp,
           id: emp.id,
           name: emp.nameAsPerAadhar || emp.employeeCode,
           advance,
           penalty,
-          total: advance + penalty,
+          uniform,
+          food,
+          accom,
+          conveyance,
+          total: advance + penalty + uniform + food + accom + conveyance,
         };
       })
       .filter((row) =>
         matchesSearch(moduleSearch, row.name, row.emp.employeeCode, row.emp.location, row.advance, row.penalty),
       )
-      .sort((a, b) => b.total - a.total);
-  }, [employees, selectedMonth, moduleSearch]);
+      .sort((a, b) => a.name.localeCompare(b.name) || b.total - a.total);
+  }, [activeRosterEmployees, selectedMonth, moduleSearch]);
 
   const attendanceRows = useMemo(() => {
     const daysInMonth = getDaysInMonthStatic(selectedMonth);
     const monthData = attendanceDb[selectedMonth] || {};
-    return salarySheetEmployees
+    return activeRosterEmployees
       .map((emp) => {
         const empData = monthData[emp.id] || {};
         const counts = countMonthAttendance(
@@ -538,8 +592,8 @@ export default function ObserverModulePage() {
           row.absents,
         ),
       )
-      .sort((a, b) => b.presentPct - a.presentPct || b.presents - a.presents);
-  }, [salarySheetEmployees, attendanceDb, selectedMonth, moduleSearch]);
+      .sort((a, b) => a.name.localeCompare(b.name) || b.presentPct - a.presentPct || b.presents - a.presents);
+  }, [activeRosterEmployees, attendanceDb, selectedMonth, moduleSearch]);
 
   const directoryEmployeeRows = useMemo(() => {
     return employees
@@ -599,6 +653,24 @@ export default function ObserverModulePage() {
       );
   }, [monitorOverview, moduleSearch]);
 
+  const monitorScreenshotRows = useMemo(() => {
+    const empMap = new Map(monitoredEmployees.map((e) => [e.id, e.name || e.employeeCode]));
+    return monitorScreenshots
+      .map((shot) => ({
+        ...shot,
+        employeeName: shot.employeeName || empMap.get(shot.employeeId) || "",
+      }))
+      .filter((shot) =>
+        matchesSearch(
+          moduleSearch,
+          shot.appName,
+          shot.employeeName,
+          shot.employeeId,
+          formatClock(shot.timestamp),
+        ),
+      );
+  }, [monitorScreenshots, monitoredEmployees, moduleSearch]);
+
   const openDetail = (
     title: string,
     fields: DetailField[],
@@ -615,7 +687,7 @@ export default function ObserverModulePage() {
         employee={emp}
         monthKey={selectedMonth}
         canDelete={!!userPermissions.ledger?.delete}
-        onAdd={(entry) => handleObserverAddLedgerEntry(emp.id, entry)}
+        onSaveBatch={(entry) => handleObserverSaveLedgerBatch(emp.id, entry)}
         onUpdate={(itemId, patch) => handleObserverUpdateLedgerItem(emp.id, itemId, patch)}
         onDelete={(itemId) => handleDeleteLedgerItem(emp.id, itemId)}
       />
@@ -666,8 +738,7 @@ export default function ObserverModulePage() {
     selectedMonth,
     moduleId,
     canEdit,
-    handleObserverAddLedgerEntry,
-    handleObserverUpdateLedgerItem,
+    handleObserverSaveLedgerBatch,
     handleDeleteLedgerItem,
     handleCellAttendanceChange,
   ]);
@@ -1255,21 +1326,28 @@ export default function ObserverModulePage() {
     return (
       <div className="space-y-4 pb-2">
         <ObserverStatGrid>
+          <ObserverStatCard icon={Calculator} label="Employees" value={activeRosterEmployees.length} sub="Active roster" accent="slate" />
           <ObserverStatCard icon={Calculator} label="Advances" value={formatInr(ledgerStats.advanceTotal)} sub={monthLabel} accent="blue" />
           <ObserverStatCard icon={Calculator} label="Penalties" value={formatInr(ledgerStats.penaltyTotal)} sub={monthLabel} accent="rose" />
           <ObserverStatCard icon={Calculator} label="Perks" value={formatInr(ledgerStats.perkTotal)} sub={monthLabel} accent="indigo" />
         </ObserverStatGrid>
-        <ObserverSection title={`Ledger · ${monthLabel}`}>
+        <ObserverSection title={`Advance & Penalty · ${monthLabel}`}>
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, code, location…" />
           {ledgerRows.length === 0 ? (
-            <ObserverEmptyState icon={Calculator} title="No ledger entries this month" />
+            <ObserverEmptyState icon={Calculator} title="No employees on roster" hint="Active employees for this month will appear here." />
           ) : (
             ledgerRows.map((row) => (
               <ObserverListRow
                 key={row.id}
                 title={row.name}
-                subtitle={`${row.emp.location || "—"} · Adv ${formatInr(row.advance)} · Pen ${formatInr(row.penalty)}`}
-                value={formatInr(row.total)}
+                subtitle={
+                  row.total > 0
+                    ? `${row.emp.location || "—"} · Adv ${formatInr(row.advance)} · Pen ${formatInr(row.penalty)} · Perks ${formatInr(row.uniform + row.food + row.accom + row.conveyance)}`
+                    : `${row.emp.location || "—"} · Tap to record advance, penalty & perks`
+                }
+                value={row.total > 0 ? formatInr(row.total) : "Record"}
+                badge={row.total > 0 ? undefined : "No entries"}
+                badgeTone={row.total > 0 ? undefined : "slate"}
                 onClick={() =>
                   openDetail(
                     row.name,
@@ -1295,7 +1373,8 @@ export default function ObserverModulePage() {
       <div className="space-y-4 pb-2">
         <ObserverStatGrid>
           <ObserverStatCard icon={Clock} label="Present Rate" value={`${attendanceSummary.presentPct}%`} sub={monthLabel} accent="emerald" />
-          <ObserverStatCard icon={Clock} label="Present Days" value={attendanceSummary.presents} accent="blue" />
+          <ObserverStatCard icon={Clock} label="Employees" value={attendanceSummary.activeEmployees} sub="Active roster" accent="blue" />
+          <ObserverStatCard icon={Clock} label="Present Days" value={attendanceSummary.presents} accent="emerald" />
           <ObserverStatCard icon={Clock} label="Absent Days" value={attendanceSummary.absents} accent="rose" alert={attendanceSummary.absents > 0} />
         </ObserverStatGrid>
         <ObserverSection title={`Attendance · ${monthLabel}`}>
@@ -1308,9 +1387,17 @@ export default function ObserverModulePage() {
                 key={row.id}
                 title={row.name}
                 subtitle={`${row.emp.role || "—"} · ${row.emp.location || "—"}`}
-                badge={`${row.presentPct}%`}
-                badgeTone={row.presentPct >= 80 ? "green" : row.presentPct >= 50 ? "amber" : "red"}
-                value={`${row.presents}P / ${row.absents}A`}
+                badge={row.presents + row.absents > 0 ? `${row.presentPct}%` : "Not marked"}
+                badgeTone={
+                  row.presents + row.absents === 0
+                    ? "slate"
+                    : row.presentPct >= 80
+                      ? "green"
+                      : row.presentPct >= 50
+                        ? "amber"
+                        : "red"
+                }
+                value={row.presents + row.absents > 0 ? `${row.presents}P / ${row.absents}A` : "Tap to mark"}
                 onClick={() =>
                   openDetail(
                     row.name,
@@ -1366,6 +1453,7 @@ export default function ObserverModulePage() {
                   title={row.name}
                   subtitle={`${row.role} · ${row.location}`}
                   value={row.phone}
+                  valueHref={phoneToTelHref(row.phone)}
                   onClick={() => openDetail(row.name, buildDirectoryEmployeeDetails(row.emp))}
                 />
               ))
@@ -1379,6 +1467,7 @@ export default function ObserverModulePage() {
                 title={row.name}
                 subtitle={row.location}
                 value={row.phone}
+                valueHref={phoneToTelHref(row.phone)}
                 onClick={() => openDetail(row.name, buildHelplineDetails(row.line))}
               />
             ))
@@ -1458,30 +1547,141 @@ export default function ObserverModulePage() {
             <ObserverStatGrid>
               <ObserverStatCard icon={Activity} label="Online" value={monitorOverview?.employeesOnline ?? 0} accent="emerald" />
               <ObserverStatCard icon={Activity} label="Offline" value={monitorOverview?.employeesOffline ?? 0} accent="slate" />
-              <ObserverStatCard icon={Activity} label="Productivity" value={`${monitorOverview?.productivityScore ?? 0}%`} accent="blue" />
+              <ObserverStatCard icon={Camera} label="Screenshots" value={monitorOverview?.screenshotCount ?? 0} accent="indigo" sub="today" />
               <ObserverStatCard icon={Activity} label="Alerts" value={monitorOverview?.openAlerts ?? 0} accent="rose" alert={(monitorOverview?.openAlerts ?? 0) > 0} />
             </ObserverStatGrid>
-            <ObserverSection title="Work Sessions Today">
-              <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search employees…" />
-              {monitorSessionRows.length === 0 ? (
-                <ObserverEmptyState icon={Activity} title="No work sessions yet" />
-              ) : (
-                monitorSessionRows.map((row) => (
-                  <ObserverListRow
-                    key={row.id}
-                    title={row.name}
-                    subtitle={row.session.employeeCode || "—"}
-                    badge={row.hours}
-                    badgeTone="blue"
-                    onClick={() => openDetail(row.name, buildMonitorSessionDetails(row.session))}
+
+            <div className="flex bg-white border border-slate-200 rounded-xl p-1">
+              <button
+                type="button"
+                data-no-busy
+                onClick={() => setMonitorSubTab("sessions")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
+                  monitorSubTab === "sessions" ? "bg-[#ff791a] text-white" : "text-slate-600"
+                }`}
+              >
+                Work Sessions
+              </button>
+              <button
+                type="button"
+                data-no-busy
+                onClick={() => setMonitorSubTab("screenshots")}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${
+                  monitorSubTab === "screenshots" ? "bg-[#ff791a] text-white" : "text-slate-600"
+                }`}
+              >
+                Screenshots
+              </button>
+            </div>
+
+            {monitorSubTab === "sessions" ? (
+              <ObserverSection title="Work Sessions Today">
+                <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search employees…" />
+                {monitorSessionRows.length === 0 ? (
+                  <ObserverEmptyState icon={Activity} title="No work sessions yet" />
+                ) : (
+                  monitorSessionRows.map((row) => (
+                    <ObserverListRow
+                      key={row.id}
+                      title={row.name}
+                      subtitle={row.session.employeeCode || "—"}
+                      badge={row.hours}
+                      badgeTone="blue"
+                      onClick={() => openDetail(row.name, buildMonitorSessionDetails(row.session))}
+                    />
+                  ))
+                )}
+              </ObserverSection>
+            ) : (
+              <ObserverSection title="Employee Screenshots">
+                <div className="space-y-2 mb-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Date</span>
+                      <input
+                        type="date"
+                        value={monitorScreenshotDate}
+                        onChange={(e) => setMonitorScreenshotDate(e.target.value)}
+                        className="mt-1 w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Employee</span>
+                      <select
+                        value={monitorEmployeeFilter}
+                        onChange={(e) => setMonitorEmployeeFilter(e.target.value)}
+                        className="mt-1 w-full text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-orange-100 cursor-pointer"
+                        aria-label="Filter by employee"
+                      >
+                        <option value="">All employees</option>
+                        {monitoredEmployees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name || emp.employeeCode}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search app or employee…" />
+                </div>
+
+                {monitorScreenshotsLoading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-7 h-7 rounded-full border-2 border-[#ff791a] border-t-transparent animate-spin" />
+                  </div>
+                ) : monitorScreenshotRows.length === 0 ? (
+                  <ObserverEmptyState
+                    icon={Camera}
+                    title="No screenshots"
+                    hint={`No captures found for ${monitorScreenshotDate}.`}
                   />
-                ))
-              )}
-            </ObserverSection>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {monitorScreenshotRows.map((shot, shotIndex) => (
+                      <button
+                        key={shot.id}
+                        type="button"
+                        data-no-busy
+                        onClick={() => setScreenshotViewerIndex(shotIndex)}
+                        className="border border-slate-200 rounded-xl overflow-hidden text-left bg-white active:scale-[0.98] transition"
+                      >
+                        {shot.imageUrl ? (
+                          <img
+                            src={shot.imageUrl}
+                            alt=""
+                            className="w-full h-28 object-contain bg-slate-900"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-28 bg-slate-100 flex items-center justify-center text-slate-400">
+                            <Camera size={22} />
+                          </div>
+                        )}
+                        <div className="p-2">
+                          <p className="text-[10px] font-bold text-slate-800 truncate">
+                            {shot.employeeName || "Employee"}
+                          </p>
+                          <p className="text-[10px] text-slate-500 truncate">{shot.appName || "Screenshot"}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{formatClock(shot.timestamp)}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </ObserverSection>
+            )}
           </>
         )}
         {detail && (
           <ObserverDetailSheet title={detail.title} fields={detail.fields} documents={detail.documents} actions={detail.actions} onClose={closeDetail} />
+        )}
+        {screenshotViewerIndex !== null && monitorScreenshotRows.length > 0 && (
+          <MonitorScreenshotLightbox
+            screenshots={monitorScreenshotRows}
+            index={Math.min(screenshotViewerIndex, monitorScreenshotRows.length - 1)}
+            onClose={() => setScreenshotViewerIndex(null)}
+            onIndexChange={setScreenshotViewerIndex}
+          />
         )}
       </div>
     );

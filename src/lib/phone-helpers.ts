@@ -14,6 +14,13 @@ export function isValidPhone(phone?: string | null): boolean {
   return phone.replace(/\D/g, "").length >= 6;
 }
 
+/** tel: href for mobile dialer links. */
+export function phoneToTelHref(phone?: string | null): string | undefined {
+  if (!isValidPhone(phone)) return undefined;
+  const dial = phoneToDialString(phone!);
+  return dial ? `tel:+${dial}` : undefined;
+}
+
 /** Normalize to digits-only string suitable for tel:/sms: links. */
 export function phoneToDialString(phone: string): string {
   const digits = phone.replace(/\D/g, "");

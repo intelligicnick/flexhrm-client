@@ -91,6 +91,7 @@ export function ObserverListRow({
   subtitle,
   dateLabel,
   value,
+  valueHref,
   valueTone,
   badge,
   badgeTone = "slate",
@@ -100,6 +101,7 @@ export function ObserverListRow({
   subtitle?: string;
   dateLabel?: string;
   value?: string;
+  valueHref?: string;
   valueTone?: "slate" | "green" | "amber" | "red" | "blue";
   badge?: string;
   badgeTone?: "slate" | "red" | "amber" | "green" | "blue";
@@ -137,23 +139,42 @@ export function ObserverListRow({
           {badge}
         </span>
       )}
-      {value && (
-        <span
-          className={`text-sm font-black shrink-0 ${
-            valueTone === "green"
-              ? "text-emerald-600"
-              : valueTone === "amber"
-                ? "text-amber-600"
-                : valueTone === "red"
-                  ? "text-red-600"
-                  : valueTone === "blue"
-                    ? "text-blue-600"
-                    : "text-slate-700"
-          }`}
-        >
-          {value}
-        </span>
-      )}
+      {value &&
+        (valueHref ? (
+          <a
+            href={valueHref}
+            onClick={(event) => event.stopPropagation()}
+            className={`text-sm font-black shrink-0 underline decoration-[#ff791a]/40 underline-offset-2 ${
+              valueTone === "green"
+                ? "text-emerald-600"
+                : valueTone === "amber"
+                  ? "text-amber-600"
+                  : valueTone === "red"
+                    ? "text-red-600"
+                    : valueTone === "blue"
+                      ? "text-blue-600"
+                      : "text-[#0C1E4A]"
+            }`}
+          >
+            {value}
+          </a>
+        ) : (
+          <span
+            className={`text-sm font-black shrink-0 ${
+              valueTone === "green"
+                ? "text-emerald-600"
+                : valueTone === "amber"
+                  ? "text-amber-600"
+                  : valueTone === "red"
+                    ? "text-red-600"
+                    : valueTone === "blue"
+                      ? "text-blue-600"
+                      : "text-slate-700"
+            }`}
+          >
+            {value}
+          </span>
+        ))}
     </Tag>
   );
 }

@@ -36,35 +36,35 @@ export default function ObserverMapPage() {
     );
   }
 
-  const mapPanel = (
-    <Suspense fallback={<MapFallback />}>
-      <FieldTrackingMap
-        supervisors={rawSchoolSupervisors}
-        visits={rawSchoolVisits}
-        employees={employees}
-        showEmployeeTracking={canView("Attendance")}
-        variant="embedded"
-        mapHeightClass={
-          isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-14rem)] min-h-[340px]"
-        }
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={() => setIsFullscreen((v) => !v)}
-      />
-    </Suspense>
-  );
-
-  if (isFullscreen) {
-    return (
-      <div className="fixed inset-0 z-40 bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full">
-        <div className="flex-1 overflow-hidden pt-2">{mapPanel}</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="pb-2 px-1">
-      <div className="rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-sm">
-        {mapPanel}
+    <div
+      className={
+        isFullscreen
+          ? "fixed inset-0 z-40 bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full pt-2"
+          : "pb-2 px-1"
+      }
+    >
+      <div
+        className={
+          isFullscreen
+            ? "flex-1 min-h-0 overflow-hidden"
+            : "rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-sm"
+        }
+      >
+        <Suspense fallback={<MapFallback />}>
+          <FieldTrackingMap
+            supervisors={rawSchoolSupervisors}
+            visits={rawSchoolVisits}
+            employees={employees}
+            showEmployeeTracking={canView("Attendance")}
+            variant="embedded"
+            mapHeightClass={
+              isFullscreen ? "h-[calc(100dvh-7rem)]" : "h-[calc(100dvh-14rem)] min-h-[340px]"
+            }
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={() => setIsFullscreen((v) => !v)}
+          />
+        </Suspense>
       </div>
     </div>
   );

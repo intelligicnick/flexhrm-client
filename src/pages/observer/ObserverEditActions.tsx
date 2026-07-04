@@ -19,12 +19,13 @@ import {
 import { getDaysInMonthStatic } from "../../lib/date-helpers";
 import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
 import {
-  getDefaultLedgerEntryDate,
+  defaultTempLedgerEntry,
   getLedgerDateBoundsForMonth,
   getMonthLedger,
   LEDGER_TYPE_LABELS,
   type LedgerItem,
   type LedgerItemType,
+  type TempLedgerEntry,
 } from "../../lib/ledger-helpers";
 
 type PaymentStatus = "Unpaid" | "Paid" | "Hold";
@@ -405,7 +406,30 @@ export function ObserverRenewalActions({
   );
 }
 
-const OBSERVER_LEDGER_TYPES: LedgerItemType[] = ["advance", "penalty"];
+const ALL_LEDGER_TYPES: LedgerItemType[] = [
+  "advance",
+  "uniform",
+  "penalty",
+  "foodPerk",
+  "accommodationPerk",
+  "conveyancePerk",
+];
+
+function ledgerAmountFieldClass(type: LedgerItemType): string {
+  const base =
+    "w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:border-[#ff791a] focus:outline-none";
+  switch (type) {
+    case "uniform":
+      return `${base} text-[#f57416]`;
+    case "foodPerk":
+      return `${base} text-indigo-700`;
+    case "accommodationPerk":
+    case "conveyancePerk":
+      return `${base} text-teal-700`;
+    default:
+      return `${base} text-slate-800`;
+  }
+}
 
 function attendanceCellClass(status: string): string {
   switch (status) {
@@ -457,7 +481,7 @@ function LedgerItemEditor({
             onChange={(e) => setType(e.target.value as LedgerItemType)}
             className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
           >
-            {OBSERVER_LEDGER_TYPES.map((option) => (
+            {ALL_LEDGER_TYPES.map((option) => (
               <option key={option} value={option}>
                 {LEDGER_TYPE_LABELS[option]}
               </option>
@@ -536,14 +560,14 @@ function LedgerItemEditor({
 export function ObserverLedgerActions({
   employee,
   monthKey,
-  onAdd,
+  onSaveBatch,
   onUpdate,
   onDelete,
   canDelete,
 }: {
   employee: Employee;
   monthKey: string;
-  onAdd: (entry: { type: LedgerItemType; amount: number; entryDate: string; note?: string }) => Promise<boolean>;
+  onSaveBatch: (entry: TempLedgerEntry) => Promise<boolean>;
   onUpdate: (
     itemId: string,
     patch: { type: LedgerItemType; amount: number; entryDate: string; note: string },
@@ -553,27 +577,42 @@ export function ObserverLedgerActions({
 }) {
   const ledger = getMonthLedger(employee, monthKey);
   const dateBounds = getLedgerDateBoundsForMonth(monthKey);
-  const [entryType, setEntryType] = useState<LedgerItemType>("advance");
-  const [amount, setAmount] = useState("");
-  const [entryDate, setEntryDate] = useState(getDefaultLedgerEntryDate(monthKey));
-  const [note, setNote] = useState("");
+  const [form, setForm] = useState<TempLedgerEntry>(() => defaultTempLedgerEntry(monthKey));
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const relevantItems = ledger.ledgerItems.filter((item) =>
-    OBSERVER_LEDGER_TYPES.includes(item.type),
-  );
+  const hasPenaltyAmount = Number(form.penalty) > 0;
+
+  const updateField = (field: keyof TempLedgerEntry, value: string) => {
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "penalty" && Number(value) <= 0) {
+        next.penaltyReason = "";
+      }
+      return next;
+    });
+  };
 
   const refresh = () => {
     setRefreshKey((k) => k + 1);
+    setForm(defaultTempLedgerEntry(monthKey));
   };
+
+  const amountFields: Array<{ key: keyof TempLedgerEntry; type: LedgerItemType; label: string }> = [
+    { key: "advance", type: "advance", label: LEDGER_TYPE_LABELS.advance },
+    { key: "uniform", type: "uniform", label: LEDGER_TYPE_LABELS.uniform },
+    { key: "penalty", type: "penalty", label: LEDGER_TYPE_LABELS.penalty },
+    { key: "foodPerk", type: "foodPerk", label: LEDGER_TYPE_LABELS.foodPerk },
+    { key: "accommodationPerk", type: "accommodationPerk", label: LEDGER_TYPE_LABELS.accommodationPerk },
+    { key: "conveyancePerk", type: "conveyancePerk", label: LEDGER_TYPE_LABELS.conveyancePerk },
+  ];
 
   return (
     <ActionShell key={refreshKey}>
-      {relevantItems.length > 0 && (
+      {ledger.ledgerItems.length > 0 && (
         <div className="space-y-2">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Existing Entries</p>
-          {relevantItems.map((item) => (
+          {ledger.ledgerItems.map((item) => (
             <LedgerItemEditor
               key={item.id}
               item={item}
@@ -586,78 +625,63 @@ export function ObserverLedgerActions({
         </div>
       )}
 
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Add Entry</p>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Type</label>
-          <select
-            value={entryType}
-            onChange={(e) => setEntryType(e.target.value as LedgerItemType)}
-            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
-          >
-            {OBSERVER_LEDGER_TYPES.map((option) => (
-              <option key={option} value={option}>
-                {LEDGER_TYPE_LABELS[option]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Amount</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0"
-            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
-          />
-        </div>
-      </div>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Record Ledger · One Save</p>
+      <p className="text-[10px] text-slate-500 font-medium">
+        Fill all amounts for the same date, then save once. Leave unused fields at 0.
+      </p>
+
       <div>
         <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
         <input
           type="date"
-          value={entryDate}
+          value={form.entryDate}
           min={dateBounds.min}
           max={dateBounds.max}
-          onChange={(e) => setEntryDate(e.target.value)}
-          className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white"
+          onChange={(e) => updateField("entryDate", e.target.value)}
+          className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:border-[#ff791a] focus:outline-none"
         />
       </div>
-      {entryType === "penalty" && (
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reason</label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-xs bg-white"
-            placeholder="Penalty reason…"
-          />
-        </div>
-      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        {amountFields.map(({ key, type, label }) => (
+          <div key={key}>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form[key]}
+              onChange={(e) => updateField(key, e.target.value)}
+              placeholder="0"
+              className={ledgerAmountFieldClass(type)}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Penalty reason / comment{hasPenaltyAmount ? " *" : ""}
+        </label>
+        <textarea
+          value={form.penaltyReason}
+          onChange={(e) => updateField("penaltyReason", e.target.value)}
+          rows={2}
+          placeholder={hasPenaltyAmount ? "Required when penalty amount is entered…" : "Optional unless penalty is entered"}
+          className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-xl text-xs text-slate-800 bg-white resize-none focus:border-[#ff791a] focus:outline-none"
+        />
+      </div>
+
       <PrimaryButton
         disabled={busy}
         onClick={async () => {
           setBusy(true);
-          const ok = await onAdd({
-            type: entryType,
-            amount: Number(amount),
-            entryDate,
-            note: note.trim() || undefined,
-          });
+          const ok = await onSaveBatch(form);
           setBusy(false);
-          if (ok) {
-            setAmount("");
-            setNote("");
-            setEntryDate(getDefaultLedgerEntryDate(monthKey));
-            refresh();
-          }
+          if (ok) refresh();
         }}
       >
-        {busy ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Add Entry"}
+        {busy ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Save All Entries"}
       </PrimaryButton>
     </ActionShell>
   );
@@ -779,6 +803,7 @@ export type ObserverEditHandlers = {
     employeeId: string,
     entry: { type: LedgerItemType; amount: number; entryDate: string; note?: string },
   ) => Promise<boolean>;
+  handleObserverSaveLedgerBatch?: (employeeId: string, entry: TempLedgerEntry) => Promise<boolean>;
   handleObserverUpdateLedgerItem?: (
     employeeId: string,
     itemId: string,

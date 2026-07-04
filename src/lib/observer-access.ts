@@ -82,8 +82,19 @@ export function matchesWorksiteLocation(
 
 export function contractMatchesWorksite(contract: Contract, sessionLocations: string[]): boolean {
   const linked = (contract.linkedLocations || []).filter(Boolean);
-  if (linked.length === 0) return false;
-  return linked.some((loc) => matchesWorksiteLocation(loc, sessionLocations));
+  const hasLocationSignal =
+    linked.length > 0 ||
+    Boolean(contract.officeName?.trim()) ||
+    Boolean(contract.correspondingOffice?.trim());
+
+  if (linked.some((loc) => matchesWorksiteLocation(loc, sessionLocations))) {
+    return true;
+  }
+  if (matchesWorksiteLocation(contract.officeName, sessionLocations)) return true;
+  if (matchesWorksiteLocation(contract.correspondingOffice, sessionLocations)) return true;
+
+  // Legacy contracts without any worksite assignment remain visible.
+  return !hasLocationSignal;
 }
 
 export function filterContractsByWorksite(

@@ -32,19 +32,27 @@ import {
   type MapGeofence,
 } from "../lib/field-tracking-helpers";
 import { formatRelativeTimeAgo } from "../lib/date-helpers";
-import { getDateRangeForPeriod } from "../lib/supervisor-dates";
+import {
+  attachMapInteractionHandlers,
+  attachMapResizeObserver,
+  attachMapVisibilityObserver,
+  createFieldMap,
+  createMapTileLayer,
+  isTouchMapDevice,
+  MAP_DEFAULT_CENTER,
+  MAP_DEFAULT_ZOOM,
+  scheduleMapInvalidate,
+  waitForMapContainerSize,
+} from "../lib/leaflet-map-setup";
+import { getDateRangeForPeriod, todayIsoInKolkata } from "../lib/supervisor-dates";
 
-const INDIA_CENTER: L.LatLngExpression = [20.5937, 78.9629];
-const DEFAULT_ZOOM = 5;
+type TrailPeriod = SupervisorPathPeriod | "custom";
 
-const OSM_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const OSM_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
-const PERIOD_OPTIONS: { key: SupervisorPathPeriod; label: string }[] = [
+const PERIOD_OPTIONS: { key: TrailPeriod; label: string }[] = [
   { key: "day", label: "Today" },
   { key: "week", label: "This Week" },
   { key: "month", label: "This Month" },
+  { key: "custom", label: "Custom" },
 ];
 
 const LAYER_OPTIONS: { key: FieldTrackingLayer; label: string; icon: typeof User }[] = [
@@ -208,6 +216,42 @@ const PATH_LINE_OPTIONS = {
   lineJoin: "round" as const,
 };
 
+function drawRoutePolyline(
+  latLngs: L.LatLngExpression[],
+  color: string,
+  pathsLayer: L.LayerGroup,
+): void {
+  if (latLngs.length < 2) return;
+  L.polyline(latLngs, {
+    ...PATH_LINE_OPTIONS,
+    color: "#94a3b8",
+    weight: 8,
+    opacity: 0.35,
+  }).addTo(pathsLayer);
+  L.polyline(latLngs, {
+    ...PATH_LINE_OPTIONS,
+    color,
+    weight: 4,
+    opacity: 0.9,
+  }).addTo(pathsLayer);
+}
+
+function buildEmployeeDayRoutes(pins: EmployeePunchPin[]): L.LatLngExpression[][] {
+  const byEmployee = new Map<string, EmployeePunchPin[]>();
+  for (const pin of pins) {
+    const bucket = byEmployee.get(pin.employeeId) || [];
+    bucket.push(pin);
+    byEmployee.set(pin.employeeId, bucket);
+  }
+  const routes: L.LatLngExpression[][] = [];
+  for (const employeePins of byEmployee.values()) {
+    const sorted = [...employeePins].sort((a, b) => a.punchedAt.localeCompare(b.punchedAt));
+    if (sorted.length < 2) continue;
+    routes.push(sorted.map((pin) => [pin.lat, pin.lng] as L.LatLngExpression));
+  }
+  return routes;
+}
+
 export default function FieldTrackingMap({
   supervisors,
   visits,
@@ -223,17 +267,19 @@ export default function FieldTrackingMap({
   const embedded = variant === "embedded";
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const pathRendererRef = useRef<L.Canvas | null>(null);
   const geofenceLayerRef = useRef<L.LayerGroup | null>(null);
   const pathsLayerRef = useRef<L.LayerGroup | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const lastFitKeyRef = useRef<string>("");
+  const userInteractedRef = useRef(false);
+  const touchDevice = useMemo(() => isTouchMapDevice(), []);
 
   const [layer, setLayer] = useState<FieldTrackingLayer>("supervisors");
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
-  const [mapWheelActive, setMapWheelActive] = useState(false);
-  const [period, setPeriod] = useState<SupervisorPathPeriod>("week");
+  const [period, setPeriod] = useState<TrailPeriod>("day");
+  const [trailFromDate, setTrailFromDate] = useState(todayIsoInKolkata());
+  const [trailToDate, setTrailToDate] = useState(todayIsoInKolkata());
   const [trackingDate, setTrackingDate] = useState(todayIsoDate());
   const [punchPins, setPunchPins] = useState<EmployeePunchPin[]>([]);
   const [geofences, setGeofences] = useState<MapGeofence[]>([]);
@@ -242,7 +288,14 @@ export default function FieldTrackingMap({
   const showSupervisors = layer === "supervisors" || layer === "all";
   const showEmployees = showEmployeeTracking && (layer === "employees" || layer === "all");
 
-  const periodRange = useMemo(() => getDateRangeForPeriod(period), [period]);
+  const periodRange = useMemo(() => {
+    if (period === "custom") {
+      const fromDate = trailFromDate <= trailToDate ? trailFromDate : trailToDate;
+      const toDate = trailFromDate <= trailToDate ? trailToDate : trailFromDate;
+      return { fromDate, toDate };
+    }
+    return getDateRangeForPeriod(period);
+  }, [period, trailFromDate, trailToDate]);
   const paths = useMemo(
     () =>
       buildSupervisorPaths(supervisors, visits, {
@@ -288,6 +341,11 @@ export default function FieldTrackingMap({
   );
 
   const periodLabel = useMemo(() => {
+    if (period === "custom") {
+      return periodRange.fromDate === periodRange.toDate
+        ? periodRange.fromDate
+        : `${periodRange.fromDate} – ${periodRange.toDate}`;
+    }
     if (period === "day") return periodRange.fromDate;
     if (period === "month" && periodRange.monthKey) {
       const [year, month] = periodRange.monthKey.split("-").map(Number);
@@ -329,73 +387,70 @@ export default function FieldTrackingMap({
   }, [liveLocations, selectedSupervisorId]);
 
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    const containerEl = mapContainerRef.current;
+    if (!containerEl || mapRef.current) return;
 
-    const map = L.map(mapContainerRef.current, {
-      center: INDIA_CENTER,
-      zoom: DEFAULT_ZOOM,
-      scrollWheelZoom: false,
-      preferCanvas: true,
-      zoomControl: true,
-    });
+    let cancelled = false;
+    let detachResize = () => undefined;
+    let detachInteraction = () => undefined;
+    let detachVisibility = () => undefined;
 
-    L.tileLayer(OSM_TILE_URL, {
-      attribution: OSM_ATTRIBUTION,
-      maxZoom: 19,
-    }).addTo(map);
+    void (async () => {
+      await waitForMapContainerSize(containerEl);
+      if (cancelled || mapRef.current) return;
 
-    L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
+      const map = createFieldMap(containerEl);
+      createMapTileLayer().addTo(map);
+      L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
 
-    pathRendererRef.current = L.canvas({ padding: 0.5 });
-    geofenceLayerRef.current = L.layerGroup().addTo(map);
-    pathsLayerRef.current = L.layerGroup().addTo(map);
-    markersLayerRef.current = L.layerGroup().addTo(map);
-    mapRef.current = map;
+      geofenceLayerRef.current = L.layerGroup().addTo(map);
+      pathsLayerRef.current = L.layerGroup().addTo(map);
+      markersLayerRef.current = L.layerGroup().addTo(map);
+      mapRef.current = map;
 
-    const container = map.getContainer();
-    container.tabIndex = 0;
+      const markUserInteracted = () => {
+        userInteractedRef.current = true;
+      };
+      map.on("dragstart", markUserInteracted);
+      map.on("zoomstart", markUserInteracted);
 
-    const activateWheelZoom = () => {
-      map.scrollWheelZoom.enable();
-      setMapWheelActive(true);
-    };
-    const deactivateWheelZoom = () => {
-      map.scrollWheelZoom.disable();
-      setMapWheelActive(false);
-    };
-
-    container.addEventListener("click", activateWheelZoom);
-    container.addEventListener("focus", activateWheelZoom);
-    container.addEventListener("blur", deactivateWheelZoom);
-
-    const handleDocumentPointerDown = (event: PointerEvent) => {
-      if (!container.contains(event.target as Node)) deactivateWheelZoom();
-    };
-    document.addEventListener("pointerdown", handleDocumentPointerDown);
+      detachResize = attachMapResizeObserver(map, containerEl);
+      detachInteraction = attachMapInteractionHandlers(map);
+      detachVisibility = attachMapVisibilityObserver(map, containerEl);
+      scheduleMapInvalidate(map, 80);
+      scheduleMapInvalidate(map, 300);
+    })();
 
     return () => {
-      document.removeEventListener("pointerdown", handleDocumentPointerDown);
-      map.remove();
+      cancelled = true;
+      const map = mapRef.current;
+      if (map) {
+        map.remove();
+      }
       mapRef.current = null;
-      pathRendererRef.current = null;
       geofenceLayerRef.current = null;
       pathsLayerRef.current = null;
       markersLayerRef.current = null;
       lastFitKeyRef.current = "";
+      userInteractedRef.current = false;
+      detachResize();
+      detachInteraction();
+      detachVisibility();
     };
   }, []);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const timer = window.setTimeout(() => map.invalidateSize(), 120);
-    return () => window.clearTimeout(timer);
+    scheduleMapInvalidate(map, 120);
   }, [visiblePaths.length, showPaths, layoutRevision, isFullscreen, layer, punchPins.length]);
 
   const flyTo = useCallback((lat: number, lng: number) => {
     const map = mapRef.current;
     if (!map) return;
+    userInteractedRef.current = true;
     map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 0.8 });
+    scheduleMapInvalidate(map, 350);
   }, []);
 
   const autoFitKey = useMemo(
@@ -413,18 +468,14 @@ export default function FieldTrackingMap({
   );
 
   useEffect(() => {
-    const map = mapRef.current;
     const geofenceLayer = geofenceLayerRef.current;
     const pathsLayer = pathsLayerRef.current;
     const markersLayer = markersLayerRef.current;
-    const pathRenderer = pathRendererRef.current;
-    if (!map || !geofenceLayer || !pathsLayer || !markersLayer) return;
+    if (!geofenceLayer || !pathsLayer || !markersLayer) return;
 
     geofenceLayer.clearLayers();
     pathsLayer.clearLayers();
     markersLayer.clearLayers();
-
-    const bounds = L.latLngBounds([]);
 
     if (showEmployees) {
       for (const fence of geofences) {
@@ -440,7 +491,6 @@ export default function FieldTrackingMap({
           `<strong>${escapeHtml(fence.name)}</strong><br/>${escapeHtml(fence.location || "")}<br/>Radius: ${fence.radiusMeters}m`,
         );
         circle.addTo(geofenceLayer);
-        bounds.extend([fence.lat, fence.lng]);
 
         L.marker([fence.lat, fence.lng], {
           icon: L.divIcon({
@@ -455,7 +505,6 @@ export default function FieldTrackingMap({
       }
 
       for (const pin of punchPins) {
-        bounds.extend([pin.lat, pin.lng]);
         const marker = L.marker([pin.lat, pin.lng], {
           icon: createEmployeeIcon(pin.punchType),
           zIndexOffset: 800,
@@ -463,29 +512,23 @@ export default function FieldTrackingMap({
         marker.bindPopup(buildEmployeePopupHtml(pin));
         marker.addTo(markersLayer);
       }
+
+      if (showPaths) {
+        for (const route of buildEmployeeDayRoutes(punchPins)) {
+          drawRoutePolyline(route, "#ff791a", pathsLayer);
+        }
+      }
     }
 
     if (showSupervisors) {
       visiblePaths.forEach((path) => {
-        const latLngs = path.points.map((point) => [point.lat, point.lng] as L.LatLngExpression);
-        latLngs.forEach((latLng) => bounds.extend(latLng));
-
-        if (showPaths && latLngs.length > 1) {
-          L.polyline(latLngs, {
-            ...PATH_LINE_OPTIONS,
-            color: "#94a3b8",
-            weight: 8,
-            opacity: 0.35,
-            renderer: pathRenderer ?? undefined,
-          }).addTo(pathsLayer);
-
-          L.polyline(latLngs, {
-            ...PATH_LINE_OPTIONS,
-            color: path.color,
-            weight: 4,
-            opacity: 0.9,
-            renderer: pathRenderer ?? undefined,
-          }).addTo(pathsLayer);
+        if (showPaths) {
+          for (const segment of path.segments) {
+            const segmentLatLngs = segment.points.map(
+              (point) => [point.lat, point.lng] as L.LatLngExpression,
+            );
+            drawRoutePolyline(segmentLatLngs, path.color, pathsLayer);
+          }
         }
 
         path.points.forEach((point, index) => {
@@ -503,7 +546,6 @@ export default function FieldTrackingMap({
       });
 
       visibleLiveLocations.forEach((location) => {
-        bounds.extend([location.lat, location.lng]);
         const marker = L.marker([location.lat, location.lng], {
           icon: createSupervisorIcon(location.color, !!location.isOnline),
           zIndexOffset: 1000,
@@ -511,19 +553,6 @@ export default function FieldTrackingMap({
         marker.bindPopup(buildSupervisorPopupHtml(location));
         marker.addTo(markersLayer);
       });
-    }
-
-    if (!bounds.isValid()) {
-      if (lastFitKeyRef.current !== autoFitKey) {
-        map.setView(INDIA_CENTER, DEFAULT_ZOOM);
-        lastFitKeyRef.current = autoFitKey;
-      }
-      return;
-    }
-
-    if (lastFitKeyRef.current !== autoFitKey) {
-      map.fitBounds(bounds, { padding: [52, 52], maxZoom: 15 });
-      lastFitKeyRef.current = autoFitKey;
     }
   }, [
     visiblePaths,
@@ -533,8 +562,55 @@ export default function FieldTrackingMap({
     showEmployees,
     geofences,
     punchPins,
-    autoFitKey,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (userInteractedRef.current) return;
+    if (lastFitKeyRef.current === autoFitKey) return;
+
+    const bounds = L.latLngBounds([]);
+    if (showEmployees) {
+      for (const fence of geofences) bounds.extend([fence.lat, fence.lng]);
+      for (const pin of punchPins) bounds.extend([pin.lat, pin.lng]);
+    }
+    if (showSupervisors) {
+      for (const path of visiblePaths) {
+        for (const point of path.points) bounds.extend([point.lat, point.lng]);
+      }
+      for (const loc of visibleLiveLocations) bounds.extend([loc.lat, loc.lng]);
+    }
+
+    if (!bounds.isValid()) {
+      map.setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
+    } else {
+      map.fitBounds(bounds, { padding: [52, 52], maxZoom: 15, animate: false });
+    }
+    lastFitKeyRef.current = autoFitKey;
+    scheduleMapInvalidate(map, 150);
+  }, [
+    autoFitKey,
+    showEmployees,
+    showSupervisors,
+    geofences,
+    punchPins,
+    visiblePaths,
+    visibleLiveLocations,
+  ]);
+
+  useEffect(() => {
+    userInteractedRef.current = false;
+    lastFitKeyRef.current = "";
+  }, [layer, period, trailFromDate, trailToDate, selectedSupervisorId]);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const map = mapRef.current;
+    if (!map) return;
+    scheduleMapInvalidate(map, 200);
+    scheduleMapInvalidate(map, 500);
+  }, [isFullscreen]);
 
   const resolvedMapHeight =
     mapHeightClass || (embedded ? "h-[calc(100dvh-11rem)]" : "h-80 md:h-[32rem]");
@@ -557,8 +633,35 @@ export default function FieldTrackingMap({
           70% { transform: scale(1.2); opacity: 0; }
           100% { transform: scale(1.2); opacity: 0; }
         }
-        .leaflet-container {
+        .field-tracking-map-container .leaflet-container {
           font-family: Montserrat, system-ui, sans-serif;
+          background: #e2e8f0;
+          height: 100% !important;
+          width: 100% !important;
+          touch-action: none;
+          -webkit-tap-highlight-color: transparent;
+          transform: translateZ(0);
+        }
+        .field-tracking-map-container .leaflet-tile-pane {
+          transform: translateZ(0);
+          -webkit-backface-visibility: hidden;
+          backface-visibility: hidden;
+        }
+        .field-tracking-map-container .leaflet-tile {
+          image-rendering: auto;
+        }
+        .field-tracking-map-container .leaflet-pane,
+        .field-tracking-map-container .leaflet-tile-pane,
+        .field-tracking-map-container .leaflet-overlay-pane {
+          z-index: 1;
+        }
+        .field-tracking-map-container .leaflet-top,
+        .field-tracking-map-container .leaflet-bottom {
+          z-index: 500;
+        }
+        .field-tracking-map-container .leaflet-div-icon {
+          background: transparent;
+          border: none;
         }
       `}</style>
 
@@ -577,7 +680,7 @@ export default function FieldTrackingMap({
           )}
           {embedded && (
             <p className="text-[11px] text-slate-500">
-              OpenStreetMap · tap markers for details
+              OpenStreetMap · colored lines = route trail · tap markers for details
             </p>
           )}
         </div>
@@ -673,8 +776,32 @@ export default function FieldTrackingMap({
               onChange={(event) => setShowPaths(event.target.checked)}
               className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
             />
-            Show trails
+            Show route lines
           </label>
+        </div>
+      )}
+
+      {showSupervisors && period === "custom" && (
+        <div className={`flex flex-wrap items-center gap-2 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
+          <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-600">
+            From
+            <input
+              type="date"
+              value={trailFromDate}
+              onChange={(event) => setTrailFromDate(event.target.value)}
+              className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-700"
+            />
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-600">
+            To
+            <input
+              type="date"
+              value={trailToDate}
+              onChange={(event) => setTrailToDate(event.target.value)}
+              className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-700"
+            />
+          </label>
+          <span className="text-[10px] text-slate-400">{periodLabel}</span>
         </div>
       )}
 
@@ -705,7 +832,7 @@ export default function FieldTrackingMap({
               Offline ({Math.max(activeSupervisorCount - onlineCount, 0)})
             </span>
             <span>{visibleLiveLocations.length} on map</span>
-            <span>{totalStops} trail stops · ~{formatDistanceKm(totalDistanceKm)}</span>
+            <span>{totalStops} trail stops · ~{formatDistanceKm(totalDistanceKm)} · {periodLabel}</span>
           </>
         )}
         {showEmployees && (
@@ -750,7 +877,7 @@ export default function FieldTrackingMap({
         </div>
       )}
 
-      <div className={`relative ${embedded ? "px-1" : ""}`}>
+      <div className={`relative field-tracking-map-container rounded-xl border border-slate-200 shadow-sm overflow-hidden ${embedded ? "mx-1" : ""}`}>
         {embedded && (
           <div className="pointer-events-none absolute inset-x-2 top-2 z-[401] flex justify-center">
             <span className="rounded-full bg-gradient-to-r from-[#0C1E4A] to-[#1a3568] px-3 py-1 text-[10px] font-bold text-white shadow-lg border border-white/10">
@@ -760,20 +887,13 @@ export default function FieldTrackingMap({
         )}
         <div
           ref={mapContainerRef}
-          className={`${resolvedMapHeight} w-full rounded-xl overflow-hidden border z-0 transition ${
-            embedded
-              ? mapWheelActive
-                ? "border-[#ff791a] ring-2 ring-[#ff791a]/30 shadow-lg"
-                : "border-slate-300 shadow-md"
-              : mapWheelActive
-                ? "border-[#ff791a]/50 ring-2 ring-[#ff791a]/20"
-                : "border-slate-200"
-          }`}
+          className={`${resolvedMapHeight} w-full z-0`}
+          style={{ minHeight: embedded ? 280 : 320 }}
           aria-label="Field tracking map"
         />
-        {!mapWheelActive && (
-          <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/80 px-3 py-1.5 text-[10px] font-semibold text-white shadow-lg backdrop-blur-sm">
-            Tap map to pan & zoom
+        {touchDevice && (
+          <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-slate-900/80 px-3 py-1.5 text-[10px] font-semibold text-white shadow-lg backdrop-blur-sm z-[402]">
+            Pinch or drag to move the map
           </p>
         )}
       </div>

@@ -3228,6 +3228,81 @@ export function useHRMSApp() {
     }
   };
 
+  const handleObserverSaveLedgerBatch = async (
+    employeeId: string,
+    entry: TempLedgerEntry,
+  ): Promise<boolean> => {
+    if (!userPermissions.ledger?.edit) {
+      alert("Action locked: You do not have write permissions for Advance & Penalty.");
+      return false;
+    }
+    if (!entry.entryDate) {
+      setErrorMessage("Please select an entry date.");
+      return false;
+    }
+    if (!isLedgerDateWithinMonth(entry.entryDate, selectedMonth)) {
+      setErrorMessage(`Entry date must be within ${selectedMonth}.`);
+      return false;
+    }
+    const penaltyAmount = parseNonNegativeNumber(entry.penalty, 0);
+    if (penaltyAmount > 0 && !entry.penaltyReason.trim()) {
+      setErrorMessage("Enter a reason for each penalty amount.");
+      return false;
+    }
+    const note = entry.penaltyReason.trim();
+    const apiEntries: Array<{
+      employeeId: string;
+      type: LedgerItemType;
+      amount: number;
+      entryDate: string;
+      note: string;
+    }> = [];
+    const fields: Array<[LedgerItemType, string]> = [
+      ["advance", entry.advance],
+      ["uniform", entry.uniform],
+      ["penalty", entry.penalty],
+      ["foodPerk", entry.foodPerk],
+      ["accommodationPerk", entry.accommodationPerk],
+      ["conveyancePerk", entry.conveyancePerk],
+    ];
+    for (const [type, rawAmount] of fields) {
+      const amount = parseNonNegativeNumber(rawAmount, 0);
+      if (amount > 0) {
+        apiEntries.push({
+          employeeId,
+          type,
+          amount,
+          entryDate: entry.entryDate,
+          note: type === "penalty" ? note : "",
+        });
+      }
+    }
+    if (apiEntries.length === 0) {
+      setErrorMessage("Enter at least one amount greater than zero.");
+      return false;
+    }
+    try {
+      setErrorMessage(null);
+      const res = await fetch("/api/employees/payroll-ledger/add-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          monthKey: selectedMonth,
+          entries: apiEntries,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Server rejected ledger entries.");
+      }
+      await fetchEmployees({ forceLedger: true });
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Failed to save ledger entries: " + err.message);
+      return false;
+    }
+  };
+
   const handleObserverUpdateLedgerItem = async (
     employeeId: string,
     itemId: string,
@@ -8537,6 +8612,7 @@ export function useHRMSApp() {
     handleSaveBatchLedgerRecords,
     handleDeleteLedgerItem,
     handleObserverAddLedgerEntry,
+    handleObserverSaveLedgerBatch,
     handleObserverUpdateLedgerItem,
     handleSaveLedgerRecord,
     handleClearLedgerValue,

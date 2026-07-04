@@ -111,6 +111,17 @@ function FieldValue({
     return <LazyImageField field={field} />;
   }
 
+  if (field.href?.startsWith("tel:")) {
+    return (
+      <a
+        href={field.href}
+        className="inline-flex items-center gap-1.5 mt-0.5 text-sm font-semibold text-[#0C1E4A] underline decoration-[#ff791a]/40 underline-offset-2"
+      >
+        {field.value || "—"}
+      </a>
+    );
+  }
+
   if (field.href) {
     const shareTarget = field.shareUrl || field.href;
     const shareTitle = field.shareTitle || field.label;

@@ -115,8 +115,9 @@ export function useObserverStats() {
     });
     const total = presents + absents;
     const presentPct = total > 0 ? Math.round((presents / total) * 100) : 0;
-    return { presents, absents, presentPct, activeEmployees: salarySheetEmployees.length };
-  }, [employees, attendanceDb, selectedMonth, salarySheetEmployees.length]);
+    const activeEmployees = employees.filter((emp) => !isEmployeeExitedForMonth(emp, selectedMonth)).length;
+    return { presents, absents, presentPct, activeEmployees };
+  }, [employees, attendanceDb, selectedMonth]);
 
   const ledgerStats = useMemo(
     () => ({

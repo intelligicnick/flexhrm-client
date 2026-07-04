@@ -22,6 +22,7 @@ import type {
   SchoolWork,
   Tender,
 } from "../../types";
+import { phoneToTelHref } from "../../lib/phone-helpers";
 import { formatInr, formatMonthLabel } from "./ObserverUI";
 
 export type DetailField = {
@@ -463,8 +464,8 @@ export function buildDirectoryEmployeeDetails(emp: Employee): DetailField[] {
     { label: "Employee Code", value: emp.employeeCode || "—" },
     { label: "Designation", value: emp.role || "—" },
     { label: "Location", value: emp.location || "—" },
-    { label: "Mobile", value: emp.employeeMobile || "—", href: emp.employeeMobile ? `tel:${emp.employeeMobile}` : undefined },
-    { label: "Aadhar Linked Mobile", value: emp.aadharLinkMobNo || "—", href: emp.aadharLinkMobNo ? `tel:${emp.aadharLinkMobNo}` : undefined },
+    { label: "Mobile", value: emp.employeeMobile || "—", href: phoneToTelHref(emp.employeeMobile) },
+    { label: "Aadhar Linked Mobile", value: emp.aadharLinkMobNo || "—", href: phoneToTelHref(emp.aadharLinkMobNo) },
     { label: "Gender", value: emp.gender || "—" },
   ];
 }
@@ -477,7 +478,7 @@ export function buildHelplineDetails(helpline: {
 }): DetailField[] {
   return [
     { label: "Name", value: helpline.name || "—" },
-    { label: "Phone", value: helpline.phone || "—", href: helpline.phone ? `tel:${helpline.phone}` : undefined },
+    { label: "Phone", value: helpline.phone || "—", href: phoneToTelHref(helpline.phone) },
     { label: "Location", value: helpline.location || "—" },
     { label: "Category", value: helpline.category || "—" },
   ];
@@ -494,7 +495,7 @@ export function buildBirthdayDetails(emp: Employee, age?: number): DetailField[]
     { label: "Age", value: resolvedAge != null ? String(resolvedAge) : "—" },
     { label: "Role", value: emp.role || "—" },
     { label: "Location", value: emp.location || "—" },
-    { label: "Mobile", value: emp.employeeMobile || "—", href: emp.employeeMobile ? `tel:${emp.employeeMobile}` : undefined },
+    { label: "Mobile", value: emp.employeeMobile || "—", href: phoneToTelHref(emp.employeeMobile) },
   ];
 }
 
