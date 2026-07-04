@@ -21,6 +21,7 @@ export default function ObserverMenuPage() {
   const stats = useObserverStats();
   const {
     canView,
+    canEdit,
     payrollNet,
     visitStats,
     commitmentStats,
@@ -32,6 +33,18 @@ export default function ObserverMenuPage() {
     supervisorStats,
     adminNotificationUnreadCount,
   } = stats;
+
+  const editableModules = new Set(
+    [
+      canEdit("Employees") && "employees",
+      canEdit("Salary") && "salary",
+      canEdit("Field Team") && "field-team",
+      canEdit("Tenders") && "tenders",
+      canEdit("Contracts") && "contracts",
+      canEdit("Car Papers") && "renewals",
+      canEdit("Monthly Billing") && "partner-pay",
+    ].filter(Boolean) as string[],
+  );
 
   const modules = [
     {
@@ -146,11 +159,30 @@ export default function ObserverMenuPage() {
     to: string;
     color: "orange" | "blue" | "emerald" | "indigo" | "rose" | "amber" | "slate";
     alert?: boolean;
+    editable?: boolean;
   }[];
+
+  const moduleEditable = (to: string): boolean => {
+    if (to.includes("/employees")) return editableModules.has("employees") || editableModules.has("salary");
+    if (to.includes("/salary")) return editableModules.has("salary");
+    if (to.includes("/visits") || to.includes("/commitments") || to.includes("/supervisors") || to.includes("/map")) {
+      return editableModules.has("field-team");
+    }
+    if (to.includes("/tenders")) return editableModules.has("tenders");
+    if (to.includes("/contracts")) return editableModules.has("contracts");
+    if (to.includes("/car-papers") || to.includes("/it-renewals") || to.includes("/licenses")) {
+      return editableModules.has("renewals");
+    }
+    if (to.includes("/partner-pay")) return editableModules.has("partner-pay");
+    return false;
+  };
 
   return (
     <div className="space-y-4 pb-2">
-      <p className="text-xs text-slate-500 px-1">Tap any module to view details</p>
+      <p className="text-xs text-slate-500 px-1">
+        Tap any module to view details
+        {editableModules.size > 0 ? " · modules with edit access show actions in detail sheets" : ""}
+      </p>
       <div className="grid grid-cols-3 gap-2.5">
         {modules.map((m) => (
           <ObserverMenuTile
@@ -161,6 +193,7 @@ export default function ObserverMenuPage() {
             to={m.to}
             color={m.color}
             alert={m.alert}
+            editable={moduleEditable(m.to)}
           />
         ))}
       </div>

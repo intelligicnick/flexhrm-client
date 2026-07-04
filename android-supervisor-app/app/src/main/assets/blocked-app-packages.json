@@ -14,14 +14,63 @@
     "com.incorporateapps.fakegps.fre",
     "com.mobile.fakelocation"
   ],
+  "fake gps joystick": [
+    "com.incorporateapps.fakegps_route",
+    "com.theappninjas.gpsjoystick",
+    "com.theappninjas.fakegpsjoystick"
+  ],
+  "fake gps go location spoofer": ["com.incorporateapps.fakegps"],
+  "fake gps 360": ["com.blogspot.newapphorizons.fakegps"],
+  "fake gps location professional": [
+    "com.mobile.fakelocation",
+    "com.lexa.fakegps"
+  ],
+  "fake gps route": ["com.incorporateapps.fakegps_route"],
+  "fake gps route pro": ["com.incorporateapps.fakegps_route"],
+  "fake gps run": ["com.incorporateapps.fakegps_route"],
+  "fake gps navigation": ["com.incorporateapps.fakegps_route"],
+  "fake gps expert": [
+    "com.incorporateapps.fakegps_route",
+    "com.incorporateapps.fakegps.fre"
+  ],
+  "fake gps by lexa": ["com.lexa.fakegps"],
+  "fake gps by incorporateapps": [
+    "com.incorporateapps.fakegps.fre",
+    "com.incorporateapps.fakegps",
+    "com.incorporateapps.fakegps_route"
+  ],
+  "fake location": [
+    "com.lexa.fakegps",
+    "com.incorporateapps.fakegps.fre",
+    "com.mobile.fakelocation"
+  ],
   "locaedit": ["com.mobile.fakelocation"],
   "fake gps location-locaedit": ["com.mobile.fakelocation"],
   "gps emulator": ["com.rosteam.gpsemulator"],
   "lexa fake gps": ["com.lexa.fakegps"],
   "mock locations": ["com.lexa.fakegps"],
+  "mock gps with joystick": [
+    "com.appanchor.fakegps",
+    "com.theappninjas.gpsjoystick",
+    "com.theappninjas.fakegpsjoystick"
+  ],
+  "mock gps controller": ["com.appanchor.fakegps"],
   "location changer": ["com.lexa.fakegps"],
-  "gps joystick": ["com.theappninjas.gpsjoystick"],
+  "gps joystick": [
+    "com.theappninjas.gpsjoystick",
+    "com.theappninjas.fakegpsjoystick"
+  ],
+  "joystick gps": [
+    "com.theappninjas.gpsjoystick",
+    "com.evezzon.fakegps"
+  ],
   "fly gps": ["com.fakegps.mock"],
+  "lockito": ["fr.dvilleneuve.lockito"],
+  "gps route simulator": [
+    "fr.dvilleneuve.lockito",
+    "com.incorporateapps.fakegps_route"
+  ],
+  "gps movement simulator": ["fr.dvilleneuve.lockito"],
   "anydesk": ["com.anydesk.anydeskandroid"],
   "teamviewer": ["com.teamviewer.teamviewer.market.mobile"],
   "whatsapp": ["com.whatsapp", "com.whatsapp.w4b"],

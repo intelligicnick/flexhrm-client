@@ -96,7 +96,7 @@ export default function ObserverLoginPage() {
             <Eye size={32} className="text-white" />
           </div>
           <h1 className="text-2xl font-black text-white">Observer Admin</h1>
-          <p className="text-sm text-slate-300 mt-1">View key numbers at a glance</p>
+          <p className="text-sm text-slate-300 mt-1">View and manage key numbers on the go</p>
         </div>
 
         <form
@@ -148,7 +148,7 @@ export default function ObserverLoginPage() {
         </form>
 
         <p className="text-center text-[10px] text-slate-400 mt-6 font-medium">
-          Flex HRM · Read-only overview for admins
+          Flex HRM · Overview and edits based on your role permissions
         </p>
       </div>
     </div>

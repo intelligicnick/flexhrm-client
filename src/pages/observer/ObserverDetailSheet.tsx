@@ -155,11 +155,13 @@ export function ObserverDetailSheet({
   title,
   fields,
   documents,
+  actions,
   onClose,
 }: {
   title: string;
   fields: DetailField[];
   documents?: ObserverDocumentLink[];
+  actions?: React.ReactNode;
   onClose: () => void;
 }) {
   const [pdfViewer, setPdfViewer] = useState<{ url: string; title: string } | null>(null);
@@ -287,6 +289,8 @@ export function ObserverDetailSheet({
                 </div>
               </div>
             )}
+
+            {actions}
           </div>
         </div>
       </div>

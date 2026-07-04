@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { apiUrl, parseApiError } from "../api";
 import ConfirmDialog from "./ui/ConfirmDialog";
+import { RECOMMENDED_GPS_SPOOFING_BLOCKED_APPS } from "../lib/supervisor-blocked-apps-defaults";
 
 function parseCommaSeparatedApps(value: string): string[] {
   const seen = new Set<string>();
@@ -88,6 +89,12 @@ export default function BlockedAppsConfigurationPanel({ readOnly = false }: Bloc
     if (ok) setNewBlockedAppsInput("");
   };
 
+  const handleAddRecommendedGpsApps = async () => {
+    const nextApps = mergeBlockedApps(blockedApps, [...RECOMMENDED_GPS_SPOOFING_BLOCKED_APPS]);
+    if (nextApps.length === blockedApps.length) return;
+    await persistBlockedApps(nextApps);
+  };
+
   const handleBulkDelete = async () => {
     const nextApps = blockedApps.filter((app) => !selectedApps.includes(app));
     const ok = await persistBlockedApps(nextApps);
@@ -159,6 +166,14 @@ export default function BlockedAppsConfigurationPanel({ readOnly = false }: Bloc
 
           {!readOnly && (
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleAddRecommendedGpsApps()}
+                disabled={savingBlockedApps}
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-xs font-bold text-rose-700 cursor-pointer disabled:opacity-50"
+              >
+                Add recommended GPS apps
+              </button>
               <input
                 type="text"
                 value={newBlockedAppsInput}

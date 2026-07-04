@@ -501,13 +501,16 @@ export default function EmployeeTable({
           <span className="text-[10px] font-medium text-slate-500">Sticky SR, code & name</span>
         </div>
         <div className="overflow-x-auto overflow-y-auto max-h-[580px] w-full @container" style={{ scrollbarWidth: "auto" }}>
-        <table className="w-full text-left border-collapse min-w-[1200px]" id="employees-grid-table">
+        <table className="w-full text-left border-separate border-spacing-0 min-w-[1200px]" id="employees-grid-table">
           <thead>
             {/* Header top background */}
             <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 text-xs font-semibold select-none">
               
               {/* Sticky Columns (Prefix Checklist & Primary Attributes) with pixel-locked widths to prevent overlap & scrolling gaps */}
-              <th className="employee-sticky-col-0 bg-slate-100 p-3.5 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 selection:bg-transparent">
+              <th
+                className="employee-sticky-col-0 bg-slate-100 p-3.5 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 selection:bg-transparent"
+                style={{ left: 0, zIndex: 41 }}
+              >
                 <input
                   type="checkbox"
                   checked={isAllSelected}
@@ -520,6 +523,7 @@ export default function EmployeeTable({
               <th 
                 onClick={() => handleSort("srNo")}
                 className="employee-sticky-col-1 bg-slate-100 p-3.5 w-[60px] min-w-[60px] max-w-[60px] text-center cursor-pointer hover:bg-slate-200/70 border-r border-slate-200"
+                style={{ left: 48, zIndex: 42 }}
               >
                 <div className="flex items-center justify-center gap-1">
                   SR NO
@@ -530,6 +534,7 @@ export default function EmployeeTable({
               <th 
                 onClick={() => handleSort("employeeCode")}
                 className="employee-sticky-col-2 bg-slate-100 p-3.5 w-[110px] min-w-[110px] max-w-[110px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-250"
+                style={{ left: 108, zIndex: 43 }}
               >
                 <div className="flex items-center gap-1 justify-between">
                   <span>Code <span className="text-red-500 font-bold">*</span></span>
@@ -540,6 +545,7 @@ export default function EmployeeTable({
               <th 
                 onClick={() => handleSort("nameAsPerAadhar")}
                 className="employee-sticky-col-3 bg-slate-100 p-3.5 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-300"
+                style={{ left: 218, zIndex: 44 }}
               >
                 <div className="flex items-center gap-1 justify-between">
                   <span>Name (Aadhar) <span className="text-red-500 font-bold">**</span></span>

@@ -12,6 +12,23 @@ export interface SidebarItemDef {
   children?: SidebarChildItemDef[];
 }
 
+export type UserPermissionsMap = Record<
+  string,
+  { view: boolean; edit: boolean; delete: boolean }
+> | null;
+
+export function canViewModule(userPermissions: UserPermissionsMap, tabName: string): boolean {
+  const key = getModuleKey(tabName);
+  if (!key) return true;
+  return !!userPermissions?.[key]?.view;
+}
+
+export function canEditModule(userPermissions: UserPermissionsMap, tabName: string): boolean {
+  const key = getModuleKey(tabName);
+  if (!key) return false;
+  return !!userPermissions?.[key]?.edit;
+}
+
 export const getModuleKey = (tabName: string): string => {
   switch (tabName) {
     case "Dashboard":
@@ -170,5 +187,24 @@ export const DEFAULT_NEW_ROLE_PERMISSIONS: Record<
   birthdays: { view: true, edit: false, delete: false },
   directory: { view: true, edit: false, delete: false },
   monitor: { view: true, edit: true, delete: true },
+  admin: { view: false, edit: false, delete: false },
+};
+
+/** View + edit (no delete) for modules surfaced in the Observer Admin mobile app. */
+export const OBSERVER_ADMIN_ROLE_PERMISSIONS: Record<
+  PermissionModuleKey,
+  { view: boolean; edit: boolean; delete: boolean }
+> = {
+  employees: { view: true, edit: false, delete: false },
+  schoolWork: { view: true, edit: true, delete: false },
+  bids: { view: true, edit: true, delete: false },
+  renewals: { view: true, edit: true, delete: false },
+  salary: { view: true, edit: true, delete: false },
+  ledger: { view: false, edit: false, delete: false },
+  attendance: { view: false, edit: false, delete: false },
+  leave: { view: false, edit: false, delete: false },
+  birthdays: { view: false, edit: false, delete: false },
+  directory: { view: false, edit: false, delete: false },
+  monitor: { view: false, edit: false, delete: false },
   admin: { view: false, edit: false, delete: false },
 };

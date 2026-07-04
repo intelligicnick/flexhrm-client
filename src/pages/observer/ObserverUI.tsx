@@ -163,6 +163,7 @@ export function ObserverMenuTile({
   label,
   count,
   alert,
+  editable,
   to,
   color = "orange",
 }: {
@@ -170,6 +171,7 @@ export function ObserverMenuTile({
   label: string;
   count?: string | number;
   alert?: boolean;
+  editable?: boolean;
   to: string;
   color?: "orange" | "blue" | "emerald" | "indigo" | "rose" | "amber" | "slate";
 }) {
@@ -197,6 +199,9 @@ export function ObserverMenuTile({
         )}
       </div>
       <span className="text-[11px] font-bold text-slate-700 text-center leading-tight">{label}</span>
+      {editable && (
+        <span className="text-[9px] font-bold uppercase tracking-wide text-[#ff791a] -mt-1">Editable</span>
+      )}
       {count !== undefined && (
         <span className="text-xs font-black text-slate-900 -mt-1">{count}</span>
       )}

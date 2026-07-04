@@ -32,11 +32,19 @@ import { getDateRangeForPeriod } from "../../lib/supervisor-dates";
 import { buildAllExpenseRecords, formatExpenseDate } from "../../lib/school-work-helpers";
 import { resolveGemContractNoLabel } from "../../lib/gem-helpers";
 import { fetchRenewalDocuments, getRenewalDocumentUrl } from "../../lib/renewals";
-import type { Renewal } from "../../types";
+import type { Employee, Renewal, SchoolPartner } from "../../types";
 import ObserverSearchInput from "./ObserverSearchInput";
 import { ObserverDetailSheet } from "./ObserverDetailSheet";
 import { ObserverPeriodTabs, type ObserverPeriod } from "./ObserverPeriodTabs";
 import { ObserverSupervisorSelect } from "./ObserverPeriodTabs";
+import {
+  ObserverCommitmentActions,
+  ObserverContractStatusActions,
+  ObserverPaymentStatusActions,
+  ObserverRenewalActions,
+  ObserverTenderStatusActions,
+  ObserverVisitActions,
+} from "./ObserverEditActions";
 import {
   buildCommitmentDetails,
   buildContractDetails,
@@ -128,7 +136,16 @@ type DetailState = {
   title: string;
   fields: DetailField[];
   documents?: ObserverDocumentLink[];
+  actions?: React.ReactNode;
 };
+
+function salaryPaymentStatus(emp: Employee, month: string): "Paid" | "Unpaid" | "Hold" {
+  return emp.monthlyLedger?.[month]?.paymentStatus || "Unpaid";
+}
+
+function partnerPaymentStatus(partner: SchoolPartner, month: string): "Paid" | "Unpaid" | "Hold" {
+  return partner.monthlyPayLedger?.[month]?.paymentStatus || "Unpaid";
+}
 
 export default function ObserverModulePage() {
   const { moduleId = "" } = useParams<{ moduleId: string }>();
@@ -143,6 +160,7 @@ export default function ObserverModulePage() {
   } = useHRMS();
   const {
     canView,
+    canEdit,
     selectedMonth,
     payrollNet,
     salarySheetEmployees,
@@ -161,6 +179,16 @@ export default function ObserverModulePage() {
     rawCommitmentDiary,
     supervisorStats,
   } = stats;
+
+  const {
+    handleUpdateVisitStatus,
+    handleUpdateCommitmentDiary,
+    handleUpdatePaymentStatus,
+    handleSavePartnerPaymentStatus,
+    handleUpdateTender,
+    handleUpdateContract,
+    handleUpdateRenewal,
+  } = useHRMS();
 
   const [moduleSearch, setModuleSearch] = useState("");
   const [detail, setDetail] = useState<DetailState | null>(null);
@@ -348,8 +376,14 @@ export default function ObserverModulePage() {
     [rawContracts, moduleSearch],
   );
 
-  const openDetail = (title: string, fields: DetailField[], documents?: ObserverDocumentLink[]) =>
-    setDetail({ title, fields, documents });
+  const openDetail = (
+    title: string,
+    fields: DetailField[],
+    documents?: ObserverDocumentLink[],
+    actions?: React.ReactNode,
+  ) => setDetail({ title, fields, documents, actions });
+
+  const closeDetail = () => setDetail(null);
 
   const openRenewalDetail = async (title: string, renewal: Renewal) => {
     try {
@@ -363,9 +397,27 @@ export default function ObserverModulePage() {
           url: getRenewalDocumentUrl(renewal.id, doc),
           mimeType: doc.mimeType,
         })),
+        canEdit(config?.permission || "Car Papers") ? (
+          <ObserverRenewalActions
+            renewal={renewal}
+            onUpdate={handleUpdateRenewal}
+            onComplete={closeDetail}
+          />
+        ) : undefined,
       );
     } catch {
-      openDetail(title, buildRenewalDetails(renewal));
+      openDetail(
+        title,
+        buildRenewalDetails(renewal),
+        undefined,
+        canEdit(config?.permission || "Car Papers") ? (
+          <ObserverRenewalActions
+            renewal={renewal}
+            onUpdate={handleUpdateRenewal}
+            onComplete={closeDetail}
+          />
+        ) : undefined,
+      );
     }
   };
 
@@ -412,7 +464,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -446,6 +499,16 @@ export default function ObserverModulePage() {
                       locationCompliance,
                       locationPtEnabled,
                     ),
+                    undefined,
+                    canEdit("Salary") ? (
+                      <ObserverPaymentStatusActions
+                        currentStatus={salaryPaymentStatus(row.emp, selectedMonth)}
+                        onSave={async (status) => {
+                          await handleUpdatePaymentStatus(row.emp.id, status);
+                        }}
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
                   )
                 }
               />
@@ -457,7 +520,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -494,6 +558,16 @@ export default function ObserverModulePage() {
                       locationCompliance,
                       locationPtEnabled,
                     ),
+                    undefined,
+                    canEdit("Salary") ? (
+                      <ObserverPaymentStatusActions
+                        currentStatus={salaryPaymentStatus(row.emp, selectedMonth)}
+                        onSave={async (status) => {
+                          await handleUpdatePaymentStatus(row.emp.id, status);
+                        }}
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
                   )
                 }
               />
@@ -505,7 +579,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -540,7 +615,21 @@ export default function ObserverModulePage() {
                 subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)}`}
                 badge={v.status}
                 badgeTone={v.status === "pending" ? "amber" : v.status === "approved" ? "green" : "slate"}
-                onClick={() => openDetail(v.schoolName, buildVisitDetails(v))}
+                onClick={() =>
+                  openDetail(
+                    v.schoolName,
+                    buildVisitDetails(v),
+                    undefined,
+                    canEdit("Field Team") ? (
+                      <ObserverVisitActions
+                        visitId={v.id}
+                        status={v.status}
+                        onUpdate={handleUpdateVisitStatus}
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
+                  )
+                }
               />
             ))
           )}
@@ -550,7 +639,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -591,7 +681,20 @@ export default function ObserverModulePage() {
                       ? "red"
                       : "blue"
                 }
-                onClick={() => openDetail(c.schoolName, buildCommitmentDetails(c))}
+                onClick={() =>
+                  openDetail(
+                    c.schoolName,
+                    buildCommitmentDetails(c),
+                    undefined,
+                    canEdit("Field Team") ? (
+                      <ObserverCommitmentActions
+                        commitment={c}
+                        onUpdate={handleUpdateCommitmentDiary}
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
+                  )
+                }
               />
             ))
           )}
@@ -601,7 +704,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -632,7 +736,20 @@ export default function ObserverModulePage() {
                   valueTone="green"
                   badge={typeBadge.label}
                   badgeTone={typeBadge.tone}
-                  onClick={() => openDetail(t.bidNo || "Tender", buildTenderDetails(t))}
+                  onClick={() =>
+                    openDetail(
+                      t.bidNo || "Tender",
+                      buildTenderDetails(t),
+                      undefined,
+                      canEdit("Tenders") ? (
+                        <ObserverTenderStatusActions
+                          tender={t}
+                          onUpdate={handleUpdateTender}
+                          onComplete={closeDetail}
+                        />
+                      ) : undefined,
+                    )
+                  }
                 />
               );
             })
@@ -643,7 +760,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -670,7 +788,18 @@ export default function ObserverModulePage() {
                 badge={c.status || "—"}
                 badgeTone="slate"
                 onClick={() =>
-                  openDetail(resolveGemContractNoLabel(c) || c.contractNo || "Contract", buildContractDetails(c))
+                  openDetail(
+                    resolveGemContractNoLabel(c) || c.contractNo || "Contract",
+                    buildContractDetails(c),
+                    undefined,
+                    canEdit("Contracts") ? (
+                      <ObserverContractStatusActions
+                        contract={c}
+                        onUpdate={handleUpdateContract}
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
+                  )
                 }
               />
             ))
@@ -681,7 +810,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -728,7 +858,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -770,7 +901,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>
@@ -799,7 +931,22 @@ export default function ObserverModulePage() {
                 badge={row.status}
                 badgeTone={row.status === "Paid" ? "green" : row.status === "Hold" ? "amber" : "red"}
                 value={formatInr(row.pay)}
-                onClick={() => openDetail(row.name, buildPartnerDetails(row.partner, selectedMonth))}
+                onClick={() =>
+                  openDetail(
+                    row.name,
+                    buildPartnerDetails(row.partner, selectedMonth),
+                    undefined,
+                    canEdit("Monthly Billing") ? (
+                      <ObserverPaymentStatusActions
+                        currentStatus={partnerPaymentStatus(row.partner, selectedMonth)}
+                        onSave={async (status) =>
+                          handleSavePartnerPaymentStatus([{ id: row.partner.id, paymentStatus: status }])
+                        }
+                        onComplete={closeDetail}
+                      />
+                    ) : undefined,
+                  )
+                }
               />
             ))
           )}
@@ -809,7 +956,8 @@ export default function ObserverModulePage() {
             title={detail.title}
             fields={detail.fields}
             documents={detail.documents}
-            onClose={() => setDetail(null)}
+            actions={detail.actions}
+            onClose={closeDetail}
           />
         )}
       </div>

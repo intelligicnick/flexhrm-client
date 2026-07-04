@@ -6,6 +6,7 @@ import {
   createFullRolePermission,
   createEmptyRolePermissions,
   DEFAULT_NEW_ROLE_PERMISSIONS,
+  OBSERVER_ADMIN_ROLE_PERMISSIONS,
 } from "../../lib/permissions";
 import {
   createEmptyRoleUiRestrictions,
@@ -170,6 +171,14 @@ export default function RolesPermissionsPanel() {
       });
       return next;
     });
+  };
+
+  const grantObserverAdminRolePreset = () => {
+    setRolePermsInput({ ...OBSERVER_ADMIN_ROLE_PERMISSIONS });
+    setRoleUiInput((prev) => ({
+      ...prev,
+      salary: { ...OBSERVER_SALARY_PRESET },
+    }));
   };
 
   const clearAllRoleModulePermissions = () => {
@@ -418,6 +427,13 @@ export default function RolesPermissionsPanel() {
                     className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
                   >
                     All view only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={grantObserverAdminRolePreset}
+                    className="px-2.5 py-1 bg-violet-50 border border-violet-200 rounded-lg text-[10px] font-bold text-violet-800 hover:bg-violet-100 transition cursor-pointer"
+                  >
+                    Observer Admin preset
                   </button>
                   <button
                     type="button"

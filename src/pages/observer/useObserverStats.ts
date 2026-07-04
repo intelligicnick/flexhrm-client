@@ -3,7 +3,7 @@ import { useHRMS } from "../../context/HRMSContext";
 import { countMonthAttendance } from "../../lib/attendance-helpers";
 import { getDaysInMonthStatic, parseFlexibleDateMs } from "../../lib/date-helpers";
 import { isEmployeeExitedForMonth, isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
-import { getModuleKey } from "../../lib/permissions";
+import { canEditModule, canViewModule } from "../../lib/permissions";
 import { expiryBand } from "../../lib/renewal-helpers";
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { computePartnerMonthlyPay } from "../../lib/school-work-helpers";
@@ -42,11 +42,8 @@ export function useObserverStats() {
     isLoading,
   } = useHRMS();
 
-  const canView = (tab: string) => {
-    const key = getModuleKey(tab);
-    if (!key) return true;
-    return !!userPermissions[key]?.view;
-  };
+  const canView = (tab: string) => canViewModule(userPermissions, tab);
+  const canEdit = (tab: string) => canEditModule(userPermissions, tab);
 
   const payrollNet = useMemo(
     () =>
@@ -230,6 +227,8 @@ export function useObserverStats() {
 
   return {
     canView,
+    canEdit,
+    userPermissions,
     sessionUser,
     selectedMonth,
     isLoading,

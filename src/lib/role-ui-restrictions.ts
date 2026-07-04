@@ -69,6 +69,7 @@ export const EMPLOYEE_FILTER_DEFINITIONS = [
 ] as const;
 
 export const OBSERVER_SALARY_PRESET: ModuleUiRestrictions = {
+  /** Limits salary UI on the web admin; compatible with salary edit for payment status in Observer Admin. */
   allowedFilters: ["month", "search", "location"],
   allowedColumns: [
     "Employee Code",

@@ -23,6 +23,7 @@ import {
   type ObserverDocumentLink,
 } from "./observer-details";
 import { fetchRenewalDocuments, getRenewalDocumentUrl } from "../../lib/renewals";
+import { buildObserverSearchActions } from "./ObserverEditActions";
 
 function SearchResultRow({
   result,
@@ -55,6 +56,7 @@ type DetailState = {
   title: string;
   fields: DetailField[];
   documents?: ObserverDocumentLink[];
+  actions?: React.ReactNode;
 };
 
 export default function ObserverUniversalSearch({
@@ -71,6 +73,13 @@ export default function ObserverUniversalSearch({
     attendanceDb,
     locationCompliance,
     locationPtEnabled,
+    handleUpdateVisitStatus,
+    handleUpdateCommitmentDiary,
+    handleUpdatePaymentStatus,
+    handleSavePartnerPaymentStatus,
+    handleUpdateTender,
+    handleUpdateContract,
+    handleUpdateRenewal,
   } = useHRMS();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -129,6 +138,28 @@ export default function ObserverUniversalSearch({
   };
 
   const buildDetail = async (result: UniversalSearchResult): Promise<DetailState> => {
+    const closeDetail = () => {
+      setDetail(null);
+      if (!open) onOpenChange(true);
+    };
+    const editHandlers = {
+      handleUpdateVisitStatus,
+      handleUpdateCommitmentDiary,
+      handleUpdatePaymentStatus,
+      handleSavePartnerPaymentStatus,
+      handleUpdateTender,
+      handleUpdateContract,
+      handleUpdateRenewal,
+    };
+    const actions = buildObserverSearchActions(
+      result.kind,
+      result.entity,
+      stats.canEdit,
+      stats.selectedMonth,
+      editHandlers,
+      closeDetail,
+    );
+
     switch (result.kind) {
       case "employee":
       case "salary":
@@ -142,31 +173,37 @@ export default function ObserverUniversalSearch({
             locationCompliance,
             locationPtEnabled,
           ),
+          actions,
         };
       case "supervisor":
         return {
           title: (result.entity as typeof stats.rawSchoolSupervisors[0]).name,
           fields: buildSupervisorDetails(result.entity as typeof stats.rawSchoolSupervisors[0]),
+          actions,
         };
       case "visit":
         return {
           title: (result.entity as typeof stats.rawSchoolVisits[0]).schoolName,
           fields: buildVisitDetails(result.entity as typeof stats.rawSchoolVisits[0]),
+          actions,
         };
       case "commitment":
         return {
           title: (result.entity as typeof stats.rawCommitmentDiary[0]).schoolName,
           fields: buildCommitmentDetails(result.entity as typeof stats.rawCommitmentDiary[0]),
+          actions,
         };
       case "tender":
         return {
           title: (result.entity as typeof stats.rawTenders[0]).bidNo || "Tender",
           fields: buildTenderDetails(result.entity as typeof stats.rawTenders[0]),
+          actions,
         };
       case "contract":
         return {
           title: (result.entity as typeof stats.rawContracts[0]).contractNo || "Contract",
           fields: buildContractDetails(result.entity as typeof stats.rawContracts[0]),
+          actions,
         };
       case "renewal": {
         const renewal = result.entity as typeof stats.rawRenewals[0];
@@ -175,6 +212,7 @@ export default function ObserverUniversalSearch({
           title: renewal.title || renewal.subType || "Renewal",
           fields: buildRenewalDetails(renewal),
           documents,
+          actions,
         };
       }
       case "expense":
@@ -184,6 +222,7 @@ export default function ObserverUniversalSearch({
             result.entity as typeof stats.rawSchoolWorks[0],
             stats.selectedMonth,
           ),
+          actions,
         };
       case "partner":
         return {
@@ -192,9 +231,10 @@ export default function ObserverUniversalSearch({
             result.entity as typeof stats.rawSchoolPartners[0],
             stats.selectedMonth,
           ),
+          actions,
         };
       default:
-        return { title: result.title, fields: [] };
+        return { title: result.title, fields: [], actions };
     }
   };
 
@@ -290,6 +330,7 @@ export default function ObserverUniversalSearch({
           title={detail.title}
           fields={detail.fields}
           documents={detail.documents}
+          actions={detail.actions}
           onClose={() => {
             setDetail(null);
             if (!open) onOpenChange(true);
