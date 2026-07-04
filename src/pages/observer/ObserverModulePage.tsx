@@ -145,7 +145,7 @@ export default function ObserverModulePage() {
     canView,
     selectedMonth,
     payrollNet,
-    filteredSalaryEmployees,
+    salarySheetEmployees,
     visitStats,
     commitmentStats,
     tenderStats,
@@ -172,7 +172,7 @@ export default function ObserverModulePage() {
   const monthLabel = formatMonthLabel(selectedMonth);
 
   const salaryRows = useMemo(() => {
-    return filteredSalaryEmployees
+    return salarySheetEmployees
       .map((emp) => ({
         emp,
         id: emp.id,
@@ -206,7 +206,7 @@ export default function ObserverModulePage() {
       )
       .sort((a, b) => b.net - a.net);
   }, [
-    filteredSalaryEmployees,
+    salarySheetEmployees,
     selectedMonth,
     esicEligibilityLimit,
     attendanceDb,
@@ -469,7 +469,7 @@ export default function ObserverModulePage() {
       <div className="space-y-4 pb-2">
         <ObserverStatGrid>
           <ObserverStatCard icon={IndianRupee} label="Total Net Pay" value={formatInr(payrollNet)} sub={monthLabel} accent="orange" />
-          <ObserverStatCard icon={IndianRupee} label="Employees" value={filteredSalaryEmployees.length} sub="On payroll" accent="blue" />
+          <ObserverStatCard icon={IndianRupee} label="Employees" value={salarySheetEmployees.length} sub="On payroll" accent="blue" />
         </ObserverStatGrid>
         <ObserverSection title={`Payroll · ${monthLabel}`}>
           <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search by name, role, code…" />

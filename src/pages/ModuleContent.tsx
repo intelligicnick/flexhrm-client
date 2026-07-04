@@ -152,7 +152,6 @@ import BirthdaysTab from "../components/BirthdaysTab";
 import BulkAttendanceDateCalendar from "../components/BulkAttendanceDateCalendar";
 import EmployeeAttendanceMarkingView from "../components/EmployeeAttendanceMarkingView";
 import AttendancePdfUploadWizard from "../components/AttendancePdfUploadWizard";
-import { filterEmployeesWithLedgerEntries } from "../components/LedgerOverviewRow";
 import LedgerRecordedOverviewModal from "../components/LedgerRecordedOverviewModal";
 import {
   getMonthLedger,
@@ -165,6 +164,7 @@ import {
   sumExportRows,
 } from "../lib/export-totals";
 import SearchableMultiSelect from "../components/ui/SearchableMultiSelect";
+import { Switch } from "../components/ui/Switch";
 import { matchesMultiSelectFilter } from "../lib/filter-helpers";
 import { useHRMS } from "../context/HRMSContext";
 import EmployeesPage from "./EmployeesPage";
@@ -354,10 +354,6 @@ export default function ModuleContent() {
     attendanceSearchQuery,
     hideAttendanceAbsentColumn,
     setHideAttendanceAbsentColumn,
-    attendanceStickyColumns,
-    setAttendanceStickyColumns,
-    salaryStickyEmployeeDetails,
-    setSalaryStickyEmployeeDetails,
     promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
@@ -560,6 +556,8 @@ export default function ModuleContent() {
     handleCreateTender,
     handleUpdateTender,
     handleDeleteTender,
+    handleBulkUpdateTenders,
+    handleBulkDeleteTenders,
     handleImportTenders,
     rawContracts,
     fetchContracts,
@@ -845,6 +843,30 @@ export default function ModuleContent() {
     location,
     confirmAction,
   } = useHRMS();
+  const salaryStickyContainerRef = useRef<HTMLDivElement | null>(null);
+  const attendanceStickyContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const setSalaryStickyContainer = useCallback((node: HTMLDivElement | null) => {
+    salaryStickyContainerRef.current = node;
+    if (node) {
+      node.setAttribute("data-salary-sticky-details", "true");
+    }
+  }, []);
+
+  const setAttendanceStickyContainer = useCallback((node: HTMLDivElement | null) => {
+    attendanceStickyContainerRef.current = node;
+    if (node) {
+      node.setAttribute("data-attendance-sticky-columns", "true");
+    }
+  }, []);
+
+  const handleSalaryStickyChange = useCallback((enabled: boolean) => {
+    salaryStickyContainerRef.current?.setAttribute("data-salary-sticky-details", enabled ? "true" : "false");
+  }, []);
+
+  const handleAttendanceStickyChange = useCallback((enabled: boolean) => {
+    attendanceStickyContainerRef.current?.setAttribute("data-attendance-sticky-columns", enabled ? "true" : "false");
+  }, []);
 
   const canEditAdmin = !!userPermissions.admin?.edit;
   const isSuperAdmin =
@@ -881,14 +903,6 @@ export default function ModuleContent() {
   const ledgerDateBounds = useMemo(
     () => getLedgerDateBoundsForMonth(selectedMonth),
     [selectedMonth],
-  );
-  const recordedLedgerOverviewRows = useMemo(
-    () =>
-      filterEmployeesWithLedgerEntries(employees, selectedMonth, getMonthLedger).map((emp) => ({
-        emp,
-        monthLedger: getMonthLedger(emp, selectedMonth),
-      })),
-    [employees, selectedMonth],
   );
   const hasLedgerAmounts = useCallback((entry: ReturnType<typeof defaultTempLedgerEntry>) => {
     return [
@@ -2494,25 +2508,18 @@ export default function ModuleContent() {
                                 {/* Responsive Scrollable Table Container */}
                                 <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
                                   <div className="flex items-center gap-1.5 px-2.5 py-1 border-b border-slate-100 bg-white">
-                                    <button
-                                      type="button"
-                                      role="switch"
-                                      aria-checked={salaryStickyEmployeeDetails}
+                                    <Switch
+                                      defaultChecked
+                                      onCheckedChange={handleSalaryStickyChange}
                                       aria-label="Pin Employee Details column"
-                                      onClick={() => setSalaryStickyEmployeeDetails((on) => !on)}
-                                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-                                        salaryStickyEmployeeDetails ? "bg-[#f57416]" : "bg-slate-300"
-                                      }`}
-                                    >
-                                      <span
-                                        className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                                          salaryStickyEmployeeDetails ? "translate-x-3.5" : "translate-x-0.5"
-                                        }`}
-                                      />
-                                    </button>
+                                    />
                                     <span className="text-[10px] font-medium text-slate-500">Sticky employee details</span>
                                   </div>
-                                  <div className="overflow-x-auto max-h-[480px] overflow-y-auto" id="salary-sheet-scroller">
+                                  <div
+                                    ref={setSalaryStickyContainer}
+                                    className="overflow-x-auto max-h-[480px] overflow-y-auto"
+                                    id="salary-sheet-scroller"
+                                  >
                                   <table className="w-max min-w-full text-xs text-left border-collapse bg-white">
                                     <colgroup>
                                       <col className="w-[48px]" />
@@ -2588,7 +2595,7 @@ export default function ModuleContent() {
                                     </colgroup>
                                     <thead className="bg-slate-100 text-[9px] font-black text-slate-500 uppercase tracking-wider select-none border-b border-slate-200">
                                       <tr>
-                                        <th rowSpan={2} className={`sticky top-0 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle ${salaryStickyEmployeeDetails ? "left-0 z-50 shadow-[2px_0_4px_rgba(0,0,0,0.04)]" : "z-30"}`}>
+                                        <th rowSpan={2} className="salary-sticky-select sticky top-0 z-30 px-2.5 py-2.5 border-r border-slate-200 bg-slate-100 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle">
                                           <input
                                             id="salary-select-all"
                                             name="salarySelectAll"
@@ -2606,7 +2613,7 @@ export default function ModuleContent() {
                                           />
                                         </th>
                                         {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                          <th className={`sticky top-0 px-3 py-2.5 border-r border-slate-200 bg-slate-100 w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? "left-[48px] z-50 shadow-[2px_0_4px_rgba(0,0,0,0.06)]" : "z-20"}`}>Employee Details</th>
+                                          <th className="salary-sticky-details sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 w-[200px] min-w-[200px] max-w-[200px]">Employee Details</th>
                                         )}
                                         {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-0 z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center">Skill Category</th>
@@ -2675,7 +2682,7 @@ export default function ModuleContent() {
                                       </tr>
                                       <tr className="border-t border-slate-200">
                                         {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                          <th className={`sticky top-[34px] px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? "left-[48px] z-50 shadow-[2px_0_4px_rgba(0,0,0,0.06)]" : "z-20"}`}>Code & Name</th>
+                                          <th className="salary-sticky-details sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 font-bold w-[200px] min-w-[200px] max-w-[200px]">Code & Name</th>
                                         )}
                                         {visibleSalaryColumns.includes("Skill Category") && (
                                           <th className="sticky top-[34px] z-20 px-3 py-2.5 border-r border-slate-200 bg-slate-100 text-center font-bold">Skill Category</th>
@@ -2847,7 +2854,7 @@ export default function ModuleContent() {
                                                 isSelected ? "bg-orange-50/20 hover:bg-orange-50/30" : ""
                                               }`}
                                             >
-                                              <td className={`px-2.5 py-2.5 border-r border-slate-150 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle ${salaryStickyEmployeeDetails ? `sticky left-0 z-20 shadow-[2px_0_4px_rgba(0,0,0,0.04)] ${salaryStickyRowBg}` : "bg-slate-50/10"}`}>
+                                              <td className={`salary-sticky-select ${salaryStickyRowBg} px-2.5 py-2.5 border-r border-slate-150 text-center w-[48px] min-w-[48px] max-w-[48px] align-middle`}>
                                                 <input id={`salary-select-${emp.id}`} name={`salarySelect_${emp.id}`}
                                                   type="checkbox"
                                                   checked={isSelected}
@@ -2862,7 +2869,7 @@ export default function ModuleContent() {
                                                 />
                                               </td>
                                               {(visibleSalaryColumns.includes("Employee Code") || visibleSalaryColumns.includes("Employee Name")) && (
-                                                <td className={`px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 text-left truncate w-[200px] min-w-[200px] max-w-[200px] ${salaryStickyEmployeeDetails ? `sticky left-[48px] z-20 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${salaryStickyRowBg}` : "bg-slate-50/20"}`}>
+                                                <td className={`salary-sticky-details ${salaryStickyRowBg} px-3 py-2.5 border-r border-slate-150 font-bold text-slate-700 text-left truncate w-[200px] min-w-[200px] max-w-[200px]`}>
                                                   {visibleSalaryColumns.includes("Employee Name") && (
                                                     <div className="truncate" title={emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}>{emp.nameAsPerAadharColumn || emp.nameAsPerAadhar}</div>
                                                   )}
@@ -3667,23 +3674,13 @@ export default function ModuleContent() {
       
                                       <div className="pt-3 border-t border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="flex items-center gap-2">
-                                          <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={ledgerAutoSaveEnabled}
+                                          <Switch
+                                            checked={ledgerAutoSaveEnabled}
+                                            onCheckedChange={setLedgerAutoSaveEnabled}
                                             aria-label="Toggle ledger auto save"
                                             data-ledger-autosave-toggle="true"
-                                            onClick={() => setLedgerAutoSaveEnabled((enabled) => !enabled)}
-                                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-                                              ledgerAutoSaveEnabled ? "bg-[#f57416]" : "bg-slate-300"
-                                            }`}
-                                          >
-                                            <span
-                                              className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                                                ledgerAutoSaveEnabled ? "translate-x-4" : "translate-x-0.5"
-                                              }`}
-                                            />
-                                          </button>
+                                            size="md"
+                                          />
                                           <div className="leading-tight">
                                             <p className="text-[11px] font-bold text-slate-600">Auto save</p>
                                             <p className="text-[10px] text-slate-400">
@@ -3712,9 +3709,10 @@ export default function ModuleContent() {
 
                               {showRecordedLedgerModal && (
                                 <LedgerRecordedOverviewModal
-                                  monthLabel={selectedMonth}
-                                  overviewRows={recordedLedgerOverviewRows}
-                                  hasEmployees={employees.length > 0}
+                                  selectedMonth={selectedMonth}
+                                  monthsList={MONTHS_LIST}
+                                  employees={employees}
+                                  onMonthChange={setSelectedMonth}
                                   onClose={() => setShowRecordedLedgerModal(false)}
                                 />
                               )}
@@ -4834,31 +4832,23 @@ export default function ModuleContent() {
                                   {/* Interactive Grid Table */}
                               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                                 <div className="flex items-center gap-1.5 px-2.5 py-1 border-b border-slate-100">
-                                  <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={attendanceStickyColumns}
+                                  <Switch
+                                    defaultChecked
+                                    onCheckedChange={handleAttendanceStickyChange}
                                     aria-label="Pin Emp Code and Employee Name columns"
-                                    onClick={() => setAttendanceStickyColumns((on) => !on)}
-                                    className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-                                      attendanceStickyColumns ? "bg-[#f57416]" : "bg-slate-300"
-                                    }`}
-                                  >
-                                    <span
-                                      className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                                        attendanceStickyColumns ? "translate-x-3.5" : "translate-x-0.5"
-                                      }`}
-                                    />
-                                  </button>
+                                  />
                                   <span className="text-[10px] font-medium text-slate-500">Sticky code & name</span>
                                 </div>
-                                <div className="overflow-auto max-w-full max-h-[min(70vh,720px)]">
+                                <div
+                                  ref={setAttendanceStickyContainer}
+                                  className="overflow-auto max-w-full max-h-[min(70vh,720px)]"
+                                >
                                   <table className="w-full text-left border-separate border-spacing-0 min-w-[1200px]">
                                     <thead>
                                       <tr className="text-[10px] font-black uppercase tracking-wider border-b border-slate-200">
                                         <th className="sticky top-0 z-30 px-3 py-2 w-12 min-w-[3rem] max-w-[3rem] text-center bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">SR</th>
-                                        <th className={`sticky top-0 px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)] ${attendanceStickyColumns ? "left-0 z-40 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.04),inset_0_-1px_0_0_rgb(226,232,240)]" : "z-30"}`}>Emp Code</th>
-                                        <th className={`sticky top-0 px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)] ${attendanceStickyColumns ? "left-28 z-40 border-r border-slate-300 shadow-[2px_0_4px_rgba(0,0,0,0.06),inset_0_-1px_0_0_rgb(226,232,240)]" : "z-30"}`}>Employee Name</th>
+                                        <th className="attendance-sticky-code sticky top-0 z-30 px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Emp Code</th>
+                                        <th className="attendance-sticky-name sticky top-0 z-30 px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Employee Name</th>
                                         <th className="sticky top-0 z-30 px-3 py-2 w-36 bg-slate-100 text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">Worksite Location</th>
                                         {Array.from({ length: getDaysInSelectedMonth(selectedMonth) }, (_, i) => {
                                           const dayNum = i + 1;
@@ -4952,7 +4942,7 @@ export default function ModuleContent() {
                                               <td className="px-3 py-2 w-12 min-w-[3rem] max-w-[3rem] text-center text-slate-400 font-bold">
                                                 {index + 1}
                                               </td>
-                                              <td className={`px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] font-mono font-bold ${attendanceStickyColumns ? `sticky left-0 z-20 border-r border-slate-100 shadow-[2px_0_4px_rgba(0,0,0,0.04)] ${stickyRowBg}` : ""}`}>
+                                              <td className={`attendance-sticky-code ${stickyRowBg} px-3 py-2 w-28 min-w-[7rem] max-w-[7rem] font-mono font-bold`}>
                                                 <button
                                                   type="button"
                                                   onClick={() => openEmployeeAttendanceMarking(emp.id)}
@@ -4962,7 +4952,7 @@ export default function ModuleContent() {
                                                   {emp.employeeCode}
                                                 </button>
                                               </td>
-                                              <td className={`px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] font-semibold ${attendanceStickyColumns ? `sticky left-28 z-20 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.06)] ${stickyRowBg}` : ""}`}>
+                                              <td className={`attendance-sticky-name ${stickyRowBg} px-3 py-2 w-48 min-w-[12rem] max-w-[12rem] font-semibold`}>
                                                 <button
                                                   type="button"
                                                   onClick={() => openEmployeeAttendanceMarking(emp.id)}
@@ -5472,6 +5462,8 @@ export default function ModuleContent() {
                                   onCreate={handleCreateTender}
                                   onUpdate={handleUpdateTender}
                                   onDelete={handleDeleteTender}
+                                  onBulkUpdate={handleBulkUpdateTenders}
+                                  onBulkDelete={handleBulkDeleteTenders}
                                   onImport={handleImportTenders}
                                 />
                               )}

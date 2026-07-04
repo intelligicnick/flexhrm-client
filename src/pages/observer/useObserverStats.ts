@@ -22,7 +22,7 @@ export function useObserverStats() {
     employees,
     selectedMonth,
     attendanceDb,
-    filteredSalaryEmployees,
+    salarySheetEmployees,
     esicEligibilityLimit,
     locationCompliance,
     locationPtEnabled,
@@ -50,7 +50,7 @@ export function useObserverStats() {
 
   const payrollNet = useMemo(
     () =>
-      filteredSalaryEmployees.reduce(
+      salarySheetEmployees.reduce(
         (sum, e) =>
           sum +
           (Number(
@@ -67,7 +67,7 @@ export function useObserverStats() {
         0,
       ),
     [
-      filteredSalaryEmployees,
+      salarySheetEmployees,
       selectedMonth,
       esicEligibilityLimit,
       attendanceDb,
@@ -95,8 +95,8 @@ export function useObserverStats() {
     });
     const total = presents + absents;
     const presentPct = total > 0 ? Math.round((presents / total) * 100) : 0;
-    return { presents, absents, presentPct, activeEmployees: filteredSalaryEmployees.length };
-  }, [employees, attendanceDb, selectedMonth, filteredSalaryEmployees.length]);
+    return { presents, absents, presentPct, activeEmployees: salarySheetEmployees.length };
+  }, [employees, attendanceDb, selectedMonth, salarySheetEmployees.length]);
 
   const tenderStats = useMemo(() => {
     const active = rawTenders.filter((t) => !isTenderDeleted(t));
@@ -255,7 +255,7 @@ export function useObserverStats() {
     rawSchoolWorks,
     rawSchoolPartners,
     rawCommitmentDiary,
-    filteredSalaryEmployees,
+    salarySheetEmployees,
   };
 }
 

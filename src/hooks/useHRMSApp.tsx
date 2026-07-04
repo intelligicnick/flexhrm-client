@@ -1749,8 +1749,6 @@ export function useHRMSApp() {
   const [isBulkWizardSkillDropdownOpen, setIsBulkWizardSkillDropdownOpen] = useState(false);
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
   const [hideAttendanceAbsentColumn, setHideAttendanceAbsentColumn] = useState(false);
-  const [attendanceStickyColumns, setAttendanceStickyColumns] = useState(true);
-  const [salaryStickyEmployeeDetails, setSalaryStickyEmployeeDetails] = useState(true);
 
   // Bulk marking form states
   const [bulkStartDay, setBulkStartDay] = useState(1);
@@ -3487,6 +3485,173 @@ export function useHRMSApp() {
     setIsSkillDropdownOpen(false);
     setIsRoleDropdownOpen(false);
   }, []);
+
+  const resetRoleAccessFilters = useCallback(() => {
+    setAuditSearch("");
+    setAuditFilterAdmin("");
+    setAuditFilterAction("");
+  }, []);
+
+  const resetEmployeeTabFilters = useCallback(() => {
+    setEmployeeListRoleFilters([]);
+    setEmployeeListStatusFilter("active");
+    setEmployeeListLocationFilters([]);
+    setEmployeeListEsicCoverageFilter("");
+    setSelectedIds([]);
+    clearReportFilters();
+    setActiveReportTemplateName("");
+    setNewReportTemplateName("");
+  }, [clearReportFilters]);
+
+  const resetSavedBulkPayTabFilters = useCallback(() => {
+    setBulkPayArchiveYearFilter("");
+  }, []);
+
+  const resetSavedSchoolBulkPayTabFilters = useCallback(() => {
+    setSchoolBulkPayArchiveYearFilter("");
+  }, []);
+
+  const resetLedgerTabFilters = useCallback(() => {
+    setLedgerSearchQuery("");
+    setLedgerSelectedEmployeeIds([]);
+    setLedgerLocationFilters([]);
+    setLedgerSkillFilters([]);
+    setLedgerRoleFilters([]);
+    setIsLedgerLocationDropdownOpen(false);
+    setIsLedgerSkillDropdownOpen(false);
+    setIsLedgerRoleDropdownOpen(false);
+  }, []);
+
+  const resetSalaryTabFilters = useCallback(() => {
+    setSalarySearchQuery("");
+    setSalaryLocationFilters([]);
+    setSalaryFilterType("all");
+    setSalaryJoinStartFilter("");
+    setSalaryJoinEndFilter("");
+    setSalaryExitStartFilter("");
+    setSalaryExitEndFilter("");
+    setSalaryMinSalaryFilter("");
+    setSalaryMaxSalaryFilter("");
+    setSalaryMinDailyWageFilter("");
+    setSalaryMaxDailyWageFilter("");
+    setSalaryGenderFilter("All");
+    setSalaryMaritalFilter("All");
+    setSalaryEsicFilter("All");
+    setSalarySkillFilters([]);
+    setSalaryRoleFilters([]);
+    setSalaryPaymentStatusFilter("All");
+    setIsSalarySkillDropdownOpen(false);
+    setIsSalaryRoleDropdownOpen(false);
+    setSelectedSalaryEmployeeIds([]);
+    setActiveSalaryTemplateName("");
+    setNewSalaryTemplateName("");
+  }, []);
+
+  const resetAttendanceTabFilters = useCallback(() => {
+    setAttendanceLocationFilters([]);
+    setAttendanceRoleFilters([]);
+    setAttendanceSkillFilters([]);
+    setIsAttendanceRoleDropdownOpen(false);
+    setIsAttendanceSkillDropdownOpen(false);
+    setBulkWizardRoleFilters([]);
+    setBulkWizardSkillFilters([]);
+    setIsBulkWizardRoleDropdownOpen(false);
+    setIsBulkWizardSkillDropdownOpen(false);
+    setAttendanceSearchQuery("");
+    setAttendanceRecordFilter("all");
+    setAttendanceSubView("grid");
+  }, []);
+
+  const resetDirectoryTabFilters = useCallback(() => {
+    setDirectorySearch("");
+    setDirectoryLocationFilters([]);
+    setDirectoryGender("");
+    setHelplineSearchQuery("");
+    setHelplineLocationFilters([]);
+  }, []);
+
+  const resetSchoolsTabFilters = useCallback(() => {
+    setSchoolDistrictFilter("");
+  }, []);
+
+  const resetTendersTabFilters = useCallback(() => {
+    setTenderDeadlineFilter("all");
+  }, []);
+
+  const resetRenewalsTabFilters = useCallback(() => {
+    setRenewalExpiryFilter("all");
+  }, []);
+
+  const resetBgDdTabFilters = useCallback(() => {
+    setBgDdExpiryFilter("all");
+    setBgDdTypeFilter("");
+  }, []);
+
+  const resetModuleTransientState = useCallback(
+    (tab: string, nextTab: string) => {
+      if (!tab || tab === nextTab) return;
+
+      if (isRenewalsTab(tab)) {
+        if (!isRenewalsTab(nextTab)) {
+          resetRenewalsTabFilters();
+        }
+        return;
+      }
+
+      switch (tab) {
+        case "Role & Access":
+          resetRoleAccessFilters();
+          break;
+        case "Employees":
+          resetEmployeeTabFilters();
+          break;
+        case "Salary":
+          resetSalaryTabFilters();
+          break;
+        case "Saved Bulk Pay":
+          resetSavedBulkPayTabFilters();
+          break;
+        case "Advance & Penalty":
+        case "Ledger":
+          resetLedgerTabFilters();
+          break;
+        case "Attendance":
+          resetAttendanceTabFilters();
+          break;
+        case "Directory":
+          resetDirectoryTabFilters();
+          break;
+        case "Schools":
+          resetSchoolsTabFilters();
+          break;
+        case "Tenders":
+          resetTendersTabFilters();
+          break;
+        case "Saved School Bulk Pay":
+          resetSavedSchoolBulkPayTabFilters();
+          break;
+        case "BG & DD":
+          resetBgDdTabFilters();
+          break;
+        default:
+          break;
+      }
+    },
+    [
+      resetAttendanceTabFilters,
+      resetBgDdTabFilters,
+      resetDirectoryTabFilters,
+      resetEmployeeTabFilters,
+      resetLedgerTabFilters,
+      resetRenewalsTabFilters,
+      resetRoleAccessFilters,
+      resetSalaryTabFilters,
+      resetSavedBulkPayTabFilters,
+      resetSavedSchoolBulkPayTabFilters,
+      resetSchoolsTabFilters,
+      resetTendersTabFilters,
+    ],
+  );
 
   const reportOverviewStats = useMemo(() => {
     const activeEmployees = employees.filter((emp) => !isEmployeeExitedGeneral(emp));
@@ -6654,6 +6819,46 @@ export function useHRMSApp() {
     triggerSuccess("Tender deleted.");
   };
 
+  const handleBulkUpdateTenders = async (
+    ids: string[],
+    payload: Partial<CreateTenderInput>,
+  ): Promise<{ updated: number; errors: string[] }> => {
+    const res = await fetch("/api/tenders/bulk-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, patch: payload }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to bulk update tenders.");
+    const data = await res.json();
+    await fetchTenders();
+    triggerSuccess(`Updated ${data.updated || 0} tender${data.updated === 1 ? "" : "s"}.`);
+    return {
+      updated: data.updated || 0,
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
+  };
+
+  const handleBulkDeleteTenders = async (
+    ids: string[],
+  ): Promise<{ deleted: number; errors: string[] }> => {
+    if (!ensureDeletePermission("bids", "tenders")) {
+      return { deleted: 0, errors: ["Delete permission is required."] };
+    }
+    const res = await fetch("/api/tenders/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to bulk delete tenders.");
+    const data = await res.json();
+    await fetchTenders();
+    triggerSuccess(`Deleted ${data.deleted || 0} tender${data.deleted === 1 ? "" : "s"}.`);
+    return {
+      deleted: data.deleted || 0,
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
+  };
+
   const handleImportTenders = async (
     items: CreateTenderInput[],
   ): Promise<{ created: number; updated: number; skipped: number }> => {
@@ -7583,13 +7788,25 @@ export function useHRMSApp() {
     return customLocations;
   }, [customLocations]);
 
-  const filteredSalaryEmployees = useMemo(() => {
-    return employees.filter(emp => {
-      // 0. Exited in Prior Month Match
+  const salarySheetEmployees = useMemo(() => {
+    const monthData = attendanceDb[selectedMonth] || {};
+    const daysInMonth = getDaysInMonthStatic(selectedMonth);
+    return employees.filter((emp) => {
       if (isEmployeeExitedForMonth(emp, selectedMonth)) {
         return false;
       }
 
+      const empAttendance = monthData[emp.id] || {};
+      return employeeHasMarkedAttendanceForMonth(
+        empAttendance,
+        daysInMonth,
+        (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
+      );
+    });
+  }, [employees, attendanceDb, selectedMonth]);
+
+  const filteredSalaryEmployees = useMemo(() => {
+    return salarySheetEmployees.filter(emp => {
       // 1. Search Query Match
       const q = salarySearchQuery.toLowerCase().trim();
       if (q) {
@@ -7725,25 +7942,10 @@ export function useHRMSApp() {
       if (salaryFilterType === "penalties" && !hasPen) return false;
       if (salaryFilterType === "perks" && !hasPerks) return false;
 
-      // 13. Only employees with attendance marked for the selected month
-      const monthData = attendanceDb[selectedMonth] || {};
-      const daysInMonth = getDaysInMonthStatic(selectedMonth);
-      const empAttendance = monthData[emp.id] || {};
-      if (
-        !employeeHasMarkedAttendanceForMonth(
-          empAttendance,
-          daysInMonth,
-          (day) => isEmployeeExitedOnDayStatic(emp, selectedMonth, day),
-        )
-      ) {
-        return false;
-      }
-
       return true;
     });
   }, [
-    employees,
-    attendanceDb,
+    salarySheetEmployees,
     salarySearchQuery,
     salaryLocationFilters,
     salaryFilterType,
@@ -7896,6 +8098,9 @@ export function useHRMSApp() {
 
   useEffect(() => {
     const prevTab = prevSidebarTabRef.current;
+    if (prevTab !== activeSidebarTab) {
+      resetModuleTransientState(prevTab, activeSidebarTab);
+    }
     prevSidebarTabRef.current = activeSidebarTab;
 
     if (isMonitorTab(activeSidebarTab)) {
@@ -7903,7 +8108,7 @@ export function useHRMSApp() {
     } else if (isMonitorTab(prevTab) && typeof window !== "undefined" && window.innerWidth >= 768) {
       setIsSidebarCollapsed(false);
     }
-  }, [activeSidebarTab]);
+  }, [activeSidebarTab, resetModuleTransientState]);
 
 
   return {
@@ -8108,10 +8313,6 @@ export function useHRMSApp() {
     attendanceSearchQuery,
     hideAttendanceAbsentColumn,
     setHideAttendanceAbsentColumn,
-    attendanceStickyColumns,
-    setAttendanceStickyColumns,
-    salaryStickyEmployeeDetails,
-    setSalaryStickyEmployeeDetails,
     promptHideAttendanceAbsentColumn,
     bulkStartDay,
     bulkEndDay,
@@ -8371,6 +8572,8 @@ export function useHRMSApp() {
     handleCreateTender,
     handleUpdateTender,
     handleDeleteTender,
+    handleBulkUpdateTenders,
+    handleBulkDeleteTenders,
     handleImportTenders,
     rawContracts,
     fetchContracts,
@@ -8444,6 +8647,7 @@ export function useHRMSApp() {
     dashboardStats,
     existingCodes,
     salaryUniqueLocations,
+    salarySheetEmployees,
     filteredSalaryEmployees,
     selectedMonthHasMarkedAttendance,
     profileDropdownRef,

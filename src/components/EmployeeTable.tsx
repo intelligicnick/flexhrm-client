@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Search, MapPin, BadgePercent, ShieldAlert, Edit, Trash2, DownloadCloud, FileDown, FileSpreadsheet, CheckCircle, ChevronDown, RefreshCw, Eye, LogOut, X, Briefcase } from "lucide-react";
 import { Employee, EXCEL_ROW_HEADERS } from "../types";
 import { normalizeSkillCategory } from "../utils";
@@ -15,6 +15,7 @@ import {
   resolveEmployeeWageModeRowVariant,
 } from "../lib/employee-helpers";
 import SearchableMultiSelect from "./ui/SearchableMultiSelect";
+import { Switch } from "./ui/Switch";
 import { matchesMultiSelectFilter } from "../lib/filter-helpers";
 
 interface EmployeeTableProps {
@@ -93,7 +94,18 @@ export default function EmployeeTable({
   const [bulkExitDate, setBulkExitDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [bulkExitReasonCategory, setBulkExitReasonCategory] = useState<string>(BULK_EXIT_REASON_OPTIONS[0]);
   const [bulkExitReasonDetails, setBulkExitReasonDetails] = useState("");
-  const [stickyColumns, setStickyColumns] = useState(true);
+  const stickyColumnsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const setStickyColumnsContainer = useCallback((node: HTMLDivElement | null) => {
+    stickyColumnsContainerRef.current = node;
+    if (node) {
+      node.setAttribute("data-employee-sticky-columns", "true");
+    }
+  }, []);
+
+  const handleStickyColumnsChange = useCallback((enabled: boolean) => {
+    stickyColumnsContainerRef.current?.setAttribute("data-employee-sticky-columns", enabled ? "true" : "false");
+  }, []);
 
   // Sorting state
   const [sortField, setSortField] = useState<keyof Employee>("srNo");
@@ -474,25 +486,17 @@ export default function EmployeeTable({
       )}
 
       {/* Main Datagrid */}
-      <div className="border border-slate-150 rounded-lg shadow-inner overflow-hidden">
+      <div
+        ref={setStickyColumnsContainer}
+        className="border border-slate-150 rounded-lg shadow-inner overflow-hidden"
+      >
         <div className="flex items-center gap-1.5 px-2.5 py-1 border-b border-slate-100 bg-white">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={stickyColumns}
+          <Switch
+            defaultChecked
+            onCheckedChange={handleStickyColumnsChange}
             aria-label="Pin SR No, Code and Name columns"
-            onClick={() => setStickyColumns((on) => !on)}
-            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
-              stickyColumns ? "bg-[#f57416]" : "bg-slate-300"
-            }`}
             id="employee-sticky-columns-toggle"
-          >
-            <span
-              className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                stickyColumns ? "translate-x-3.5" : "translate-x-0.5"
-              }`}
-            />
-          </button>
+          />
           <span className="text-[10px] font-medium text-slate-500">Sticky SR, code & name</span>
         </div>
         <div className="overflow-x-auto overflow-y-auto max-h-[580px] w-full @container" style={{ scrollbarWidth: "auto" }}>
@@ -502,7 +506,7 @@ export default function EmployeeTable({
             <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 text-xs font-semibold select-none">
               
               {/* Sticky Columns (Prefix Checklist & Primary Attributes) with pixel-locked widths to prevent overlap & scrolling gaps */}
-              <th className={`bg-slate-100 p-3.5 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 selection:bg-transparent ${stickyColumns ? "sticky left-0 z-20 shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}>
+              <th className="employee-sticky-col-0 bg-slate-100 p-3.5 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 selection:bg-transparent">
                 <input
                   type="checkbox"
                   checked={isAllSelected}
@@ -514,7 +518,7 @@ export default function EmployeeTable({
               
               <th 
                 onClick={() => handleSort("srNo")}
-                className={`bg-slate-100 p-3.5 w-[60px] min-w-[60px] max-w-[60px] text-center cursor-pointer hover:bg-slate-200/70 border-r border-slate-200 ${stickyColumns ? "sticky left-[48px] z-20 shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}
+                className="employee-sticky-col-1 bg-slate-100 p-3.5 w-[60px] min-w-[60px] max-w-[60px] text-center cursor-pointer hover:bg-slate-200/70 border-r border-slate-200"
               >
                 <div className="flex items-center justify-center gap-1">
                   SR NO
@@ -524,7 +528,7 @@ export default function EmployeeTable({
 
               <th 
                 onClick={() => handleSort("employeeCode")}
-                className={`bg-slate-100 p-3.5 w-[110px] min-w-[110px] max-w-[110px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-250 ${stickyColumns ? "sticky left-[108px] z-20 shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}
+                className="employee-sticky-col-2 bg-slate-100 p-3.5 w-[110px] min-w-[110px] max-w-[110px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-250"
               >
                 <div className="flex items-center gap-1 justify-between">
                   <span>Code <span className="text-red-500 font-bold">*</span></span>
@@ -534,7 +538,7 @@ export default function EmployeeTable({
 
               <th 
                 onClick={() => handleSort("nameAsPerAadhar")}
-                className={`bg-slate-100 p-3.5 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-300 ${stickyColumns ? "sticky left-[218px] z-20 shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}
+                className="employee-sticky-col-3 bg-slate-100 p-3.5 w-[220px] min-w-[220px] max-w-[220px] cursor-pointer hover:bg-slate-200/70 border-r border-slate-300"
               >
                 <div className="flex items-center gap-1 justify-between">
                   <span>Name (Aadhar) <span className="text-red-500 font-bold">**</span></span>
@@ -662,7 +666,7 @@ export default function EmployeeTable({
                     style={{ contentVisibility: "auto", containIntrinsicSize: "0 44px" }}
                   >
                     {/* Sticky column checkboxes with pixel-locked widths */}
-                    <td className={`${stickyCellClassName} p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200 ${stickyColumns ? "sticky left-0 z-[15] shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}>
+                    <td className={`employee-sticky-col-0 ${stickyCellClassName} p-3 w-[48px] min-w-[48px] max-w-[48px] text-center border-r border-slate-200`}>
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -672,19 +676,19 @@ export default function EmployeeTable({
                       />
                     </td>
 
-                    <td className={`${stickyCellClassName} p-3 w-[60px] min-w-[60px] max-w-[60px] text-center font-bold text-slate-450 border-r border-slate-200 ${stickyColumns ? "sticky left-[48px] z-[15] shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}>
+                    <td className={`employee-sticky-col-1 ${stickyCellClassName} p-3 w-[60px] min-w-[60px] max-w-[60px] text-center font-bold text-slate-450 border-r border-slate-200`}>
                       {emp.srNo}
                     </td>
 
                     <td 
                       onClick={() => setViewEmployee(emp)}
-                      className={`${stickyCellClassName} p-3 w-[110px] min-w-[110px] max-w-[110px] font-semibold text-blue-600 border-r border-slate-250 cursor-pointer hover:underline hover:text-blue-800 overflow-hidden ${stickyColumns ? "sticky left-[108px] z-[15] shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`}
+                      className={`employee-sticky-col-2 ${stickyCellClassName} p-3 w-[110px] min-w-[110px] max-w-[110px] font-semibold text-blue-600 border-r border-slate-250 cursor-pointer hover:underline hover:text-blue-800 overflow-hidden`}
                       title="Click to view full employee dossier"
                     >
                       {emp.employeeCode}
                     </td>
 
-                    <td className={`${stickyCellClassName} p-3 w-[220px] min-w-[220px] max-w-[220px] font-bold text-slate-900 truncate overflow-hidden border-r border-slate-300 ${stickyColumns ? "sticky left-[218px] z-[15] shadow-[2px_0_4px_rgba(0,0,0,0.03)]" : ""}`} title={emp.nameAsPerAadhar}>
+                    <td className={`employee-sticky-col-3 ${stickyCellClassName} p-3 w-[220px] min-w-[220px] max-w-[220px] font-bold text-slate-900 truncate overflow-hidden border-r border-slate-300`} title={emp.nameAsPerAadhar}>
                       {emp.nameAsPerAadhar}
                     </td>
 

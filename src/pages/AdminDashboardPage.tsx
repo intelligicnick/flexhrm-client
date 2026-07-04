@@ -207,7 +207,7 @@ export default function AdminDashboardPage() {
     rawRenewals,
     rawBgDdRecords,
     rawContracts,
-    filteredSalaryEmployees,
+    salarySheetEmployees,
     esicEligibilityLimit,
     locationCompliance,
     locationPtEnabled,
@@ -326,7 +326,7 @@ export default function AdminDashboardPage() {
 
   const payrollNet = useMemo(
     () =>
-      filteredSalaryEmployees.reduce(
+      salarySheetEmployees.reduce(
         (sum, e) =>
           sum +
           (Number(
@@ -342,7 +342,7 @@ export default function AdminDashboardPage() {
           ) || 0),
         0,
       ),
-    [filteredSalaryEmployees, selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled],
+    [salarySheetEmployees, selectedMonth, esicEligibilityLimit, attendanceDb, locationCompliance, locationPtEnabled],
   );
 
   const tenderStats = useMemo(() => {
@@ -816,7 +816,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <div className="rounded-xl bg-orange-50 border border-orange-100 p-3 col-span-2">
                     <span className="text-[10px] font-bold text-orange-600 uppercase block">Employees on sheet</span>
-                    <span className="text-lg font-black text-orange-800">{filteredSalaryEmployees.length}</span>
+                    <span className="text-lg font-black text-orange-800">{salarySheetEmployees.length}</span>
                   </div>
                 </div>
               </button>

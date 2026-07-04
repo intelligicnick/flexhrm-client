@@ -141,6 +141,85 @@
   #employees-grid-table tbody td.sticky {
     z-index: 10;
   }
+
+  [data-employee-sticky-columns="true"] .employee-sticky-col-0,
+  [data-employee-sticky-columns="true"] .employee-sticky-col-1,
+  [data-employee-sticky-columns="true"] .employee-sticky-col-2,
+  [data-employee-sticky-columns="true"] .employee-sticky-col-3 {
+    position: sticky;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.03);
+  }
+
+  [data-employee-sticky-columns="true"] .employee-sticky-col-0 {
+    left: 0;
+    z-index: 15;
+  }
+
+  [data-employee-sticky-columns="true"] .employee-sticky-col-1 {
+    left: 48px;
+    z-index: 15;
+  }
+
+  [data-employee-sticky-columns="true"] .employee-sticky-col-2 {
+    left: 108px;
+    z-index: 15;
+  }
+
+  [data-employee-sticky-columns="true"] .employee-sticky-col-3 {
+    left: 218px;
+    z-index: 15;
+  }
+
+  [data-employee-sticky-columns="true"] thead .employee-sticky-col-0,
+  [data-employee-sticky-columns="true"] thead .employee-sticky-col-1,
+  [data-employee-sticky-columns="true"] thead .employee-sticky-col-2,
+  [data-employee-sticky-columns="true"] thead .employee-sticky-col-3 {
+    z-index: 30;
+    background-color: #f1f5f9 !important;
+  }
+
+  [data-salary-sticky-details="true"] .salary-sticky-select,
+  [data-salary-sticky-details="true"] .salary-sticky-details,
+  [data-attendance-sticky-columns="true"] .attendance-sticky-code,
+  [data-attendance-sticky-columns="true"] .attendance-sticky-name {
+    position: sticky;
+  }
+
+  [data-salary-sticky-details="true"] .salary-sticky-select {
+    left: 0;
+    z-index: 20;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+  }
+
+  [data-salary-sticky-details="true"] .salary-sticky-details {
+    left: 48px;
+    z-index: 20;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+  }
+
+  [data-salary-sticky-details="true"] thead .salary-sticky-select,
+  [data-salary-sticky-details="true"] thead .salary-sticky-details {
+    z-index: 50;
+  }
+
+  [data-attendance-sticky-columns="true"] .attendance-sticky-code {
+    left: 0;
+    z-index: 20;
+    border-right: 1px solid #f1f5f9;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+  }
+
+  [data-attendance-sticky-columns="true"] .attendance-sticky-name {
+    left: 7rem;
+    z-index: 20;
+    border-right: 1px solid #e2e8f0;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+  }
+
+  [data-attendance-sticky-columns="true"] thead .attendance-sticky-code,
+  [data-attendance-sticky-columns="true"] thead .attendance-sticky-name {
+    z-index: 40;
+  }
 }
 
 /* Uniform directory module form controls — native selects ignore height without appearance reset */
