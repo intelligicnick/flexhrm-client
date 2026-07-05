@@ -57,8 +57,9 @@ object TrackingBridge {
           } else {
             LocationRepository.getPointsBetween(fromMs, toMs)
           }
+      val sampled = sampleRoutePoints(points, 1500)
       val array = JSONArray()
-      for (point in points) {
+      for (point in sampled) {
         array.put(
             JSONObject()
                 .put("lat", point.latitude)
@@ -71,6 +72,26 @@ object TrackingBridge {
       }
       array.toString()
     }
+  }
+
+  private fun sampleRoutePoints(
+      points: List<com.flexhrm.supervisor.tracking.data.LocationPointEntity>,
+      maxPoints: Int,
+  ): List<com.flexhrm.supervisor.tracking.data.LocationPointEntity> {
+    if (points.size <= maxPoints) return points
+    val sorted = points.sortedBy { it.timestamp }
+    val step = Math.ceil(sorted.size.toDouble() / maxPoints).toInt().coerceAtLeast(1)
+    val sampled = ArrayList<com.flexhrm.supervisor.tracking.data.LocationPointEntity>(maxPoints)
+    var index = 0
+    while (index < sorted.size) {
+      sampled.add(sorted[index])
+      index += step
+    }
+    val last = sorted.last()
+    if (sampled.isEmpty() || sampled.last().id != last.id) {
+      sampled.add(last)
+    }
+    return sampled
   }
 
   @JvmStatic

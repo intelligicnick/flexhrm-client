@@ -255,12 +255,12 @@ function SupervisorLayoutInner() {
           </div>
         </header>
 
-        <main className={`flex-1 px-4 pt-4 ${hideNav ? "pb-4" : "pb-24"}`}>
+        <main className={`flex-1 px-4 pt-4 ${hideNav ? "pb-4" : "pb-28"}`}>
           <Outlet context={{ supervisorFetch }} />
         </main>
 
         {!hideNav && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-50 safe-area-bottom px-3 pt-2 pb-2 bg-[#f4f6f9] border-t border-slate-200 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.1)]">
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-[60] safe-area-bottom px-3 pt-2 pb-2 bg-[#f4f6f9] border-t border-slate-200 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.1)]">
             <div className="bg-white border border-slate-200 rounded-2xl shadow-lg shadow-slate-200/50 flex">
               {navItems.map(({ to, icon: Icon, label, exact, badge }) => {
                 const active = exact ? location.pathname === to : location.pathname.startsWith(to);

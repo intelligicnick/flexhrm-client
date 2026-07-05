@@ -17,6 +17,8 @@ import {
   attachMapVisibilityObserver,
   createFieldMap,
   createMapTileLayer,
+  MAP_DEFAULT_CENTER,
+  MAP_DEFAULT_ZOOM,
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../../lib/leaflet-map-setup";
@@ -38,6 +40,35 @@ const PERIOD_OPTIONS: { key: RoutePeriod; label: string }[] = [
 ];
 
 const MAX_ROUTE_MARKERS = 120;
+const MAX_MAP_POINTS = 1500;
+
+function isValidRouteCoord(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180 &&
+    !(Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001)
+  );
+}
+
+function filterRoutePointsForMap(points: RoutePoint[]): RoutePoint[] {
+  const valid = points.filter((p) => isValidRouteCoord(p.lat, p.lng));
+  if (valid.length <= 2) return valid;
+
+  const sortedLat = valid.map((p) => p.lat).sort((a, b) => a - b);
+  const sortedLng = valid.map((p) => p.lng).sort((a, b) => a - b);
+  const mid = Math.floor(valid.length / 2);
+  const latMed = sortedLat[mid] ?? valid[0].lat;
+  const lngMed = sortedLng[mid] ?? valid[0].lng;
+  const cosLat = Math.cos((latMed * Math.PI) / 180);
+
+  return valid.filter((p) => {
+    const dy = (p.lat - latMed) * 111_000;
+    const dx = (p.lng - lngMed) * 111_000 * cosLat;
+    return Math.hypot(dx, dy) <= 50_000;
+  });
+}
 
 function sampleRoutePoints(points: RoutePoint[]): RoutePoint[] {
   if (points.length <= MAX_ROUTE_MARKERS) return points;
@@ -52,7 +83,7 @@ function sampleRoutePoints(points: RoutePoint[]): RoutePoint[] {
 }
 
 function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
-  const valid = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  const valid = filterRoutePointsForMap(points);
   if (valid.length === 0) return;
 
   if (valid.length >= 2) {
@@ -164,14 +195,18 @@ export default function SupervisorRouteHistoryPage() {
     if (!mapReady || !leafletRef.current || !routeLayerRef.current || loading) return;
 
     routeLayerRef.current.clearLayers();
-    const valid = drawRoute(routeLayerRef.current, sampleRoutePoints(points));
+    const mapPoints = sampleRoutePoints(filterRoutePointsForMap(points).slice(0, MAX_MAP_POINTS));
+    const valid = drawRoute(routeLayerRef.current, mapPoints);
     const map = leafletRef.current;
     if (valid && valid.length >= 2) {
       map.fitBounds(L.latLngBounds(valid.map((p) => [p.lat, p.lng] as [number, number])), {
         padding: [24, 24],
+        maxZoom: 17,
       });
     } else if (valid && valid.length === 1) {
       map.setView([valid[0].lat, valid[0].lng], 15);
+    } else {
+      map.setView(MAP_DEFAULT_CENTER, MAP_DEFAULT_ZOOM);
     }
     scheduleMapInvalidate(map, 0);
     scheduleMapInvalidate(map, 200);
@@ -188,7 +223,7 @@ export default function SupervisorRouteHistoryPage() {
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-32">
       <SupervisorPageHeader
         title="Route history"
         subtitle="Travel path recorded on this device while you are logged in"
@@ -264,10 +299,24 @@ export default function SupervisorRouteHistoryPage() {
       </div>
 
       <SupervisorSection title="Travel path">
-        <div className="relative overflow-hidden rounded-xl border border-slate-100">
-          <div ref={mapRef} className="h-72 w-full bg-slate-100" />
+        <style>{`
+          .supervisor-route-map-container {
+            position: relative;
+            isolation: isolate;
+            z-index: 0;
+            overflow: hidden;
+          }
+          .supervisor-route-map-container .leaflet-container {
+            height: 100% !important;
+            width: 100% !important;
+            min-height: 18rem;
+            touch-action: pan-x pan-y pinch-zoom;
+          }
+        `}</style>
+        <div className="relative supervisor-route-map-container mb-2 rounded-xl border border-slate-100 bg-slate-100">
+          <div ref={mapRef} className="h-72 w-full" />
           {!mapReady && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-xs text-slate-500">
+            <div className="absolute inset-0 z-[3] flex items-center justify-center bg-slate-100 text-xs text-slate-500">
               Loading map…
             </div>
           )}
