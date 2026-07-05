@@ -9,7 +9,7 @@ export function normalizeSchoolWorkId(id: string | number | null | undefined): s
 let cachedSchools: SchoolWork[] | null = null;
 let cachedAt = 0;
 let inFlight: Promise<SchoolWork[]> | null = null;
-const TTL_MS = 90_000;
+const TTL_MS = 300_000;
 
 export function invalidateSupervisorSchoolsCache(): void {
   cachedSchools = null;
@@ -22,6 +22,21 @@ export async function fetchSupervisorSchools(
 ): Promise<SchoolWork[]> {
   const now = Date.now();
   if (!options?.force && cachedSchools && now - cachedAt < TTL_MS) {
+    return cachedSchools;
+  }
+
+  if (!options?.force && cachedSchools && cachedSchools.length > 0) {
+    void (async () => {
+      try {
+        const res = await supervisorFetch("/api/school-visits/supervisor/schools");
+        if (!res.ok) return;
+        const data: SchoolWork[] = await res.json();
+        cachedSchools = data;
+        cachedAt = Date.now();
+      } catch {
+        /* keep stale cache */
+      }
+    })();
     return cachedSchools;
   }
 

@@ -49,8 +49,8 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 export function revokeStampedVisitPhotoUrls(photo: StampedVisitPhoto): void {
-  if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl);
-  if (photo.thumbPreviewUrl) URL.revokeObjectURL(photo.thumbPreviewUrl);
+  if (photo.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl);
+  if (photo.thumbPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(photo.thumbPreviewUrl);
 }
 
 type PlaceNameResolver = (lat: number, lng: number) => Promise<string>;
@@ -148,7 +148,9 @@ async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string
 
 function buildLocationLabel(lat: number, lng: number, placeName: string): string {
   const coords = formatCoords(lat, lng);
-  return placeName ? `${placeName} (${coords})` : coords;
+  const trimmed = placeName.trim();
+  if (!trimmed || trimmed === coords) return coords;
+  return `${trimmed} (${coords})`;
 }
 
 function cachePosition(lat: number, lng: number) {
@@ -256,16 +258,16 @@ async function resolvePlaceNameMandatory(
     }
   }
 
-  throw new Error(
-    "Place name could not be resolved from GPS. Check internet connection and tap Retry GPS before taking a photo.",
-  );
+  return "";
 }
 
 async function buildMandatoryVisitLocation(
   resolvePlaceName?: PlaceNameResolver,
 ): Promise<VisitGpsCoords> {
   const { lat, lng } = await resolveCoordsMandatory();
-  const placeName = await resolvePlaceNameMandatory(lat, lng, resolvePlaceName);
+  const resolvedPlaceName = await resolvePlaceNameMandatory(lat, lng, resolvePlaceName);
+  const trimmedPlace = resolvedPlaceName.trim();
+  const placeName = trimmedPlace || formatCoords(lat, lng);
   return {
     lat,
     lng,
@@ -300,16 +302,16 @@ export function startGpsWarmup(): () => void {
 }
 
 export function hasValidVisitGps(location: VisitGpsCoords): boolean {
-  return isValidCoords(location.lat, location.lng) && Boolean(location.placeName.trim());
+  return isValidCoords(location.lat, location.lng);
 }
 
-/** GPS coordinates + place name are both required before stamping a visit photo. */
+/** GPS coordinates are required before stamping a visit photo (place name is best-effort). */
 export async function requireGpsLocationForStamp(
   resolvePlaceName?: PlaceNameResolver,
 ): Promise<VisitGpsCoords> {
   const location = await buildMandatoryVisitLocation(resolvePlaceName);
   if (!hasValidVisitGps(location)) {
-    throw new Error("GPS location and place name are required before stamping a photo.");
+    throw new Error("GPS coordinates are required before stamping a photo.");
   }
   return location;
 }
@@ -347,7 +349,7 @@ export async function stampVisitPhoto(
   options?: { schoolName?: string; index?: number },
 ): Promise<StampedVisitPhoto> {
   if (!hasValidVisitGps(location)) {
-    throw new Error("Photo must include valid GPS coordinates and place name.");
+    throw new Error("Photo must include valid GPS coordinates.");
   }
 
   const takenAt = new Date();
@@ -369,24 +371,35 @@ export async function stampVisitPhoto(
     image.src = dataUrl;
   });
 
+  const maxDim = 1920;
+  let width = img.naturalWidth || img.width;
+  let height = img.naturalHeight || img.height;
+  if (Math.max(width, height) > maxDim) {
+    const scale = maxDim / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
   const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not prepare photo canvas.");
 
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, width, height);
 
   const padding = Math.max(12, Math.round(canvas.width * 0.02));
   const fontSize = Math.max(14, Math.round(canvas.width * 0.028));
   const lineHeight = Math.round(fontSize * 1.35);
   ctx.font = `700 ${fontSize}px Montserrat, Arial, sans-serif`;
 
+  const coordsLabel = formatCoords(location.lat, location.lng);
+  const resolvedPlace = location.placeName.trim();
   const lines = [
     `Date: ${dateLine}`,
     `Time: ${timeLine}`,
-    `Place: ${location.placeName}`,
-    `Location: ${formatCoords(location.lat, location.lng)}`,
+    ...(resolvedPlace && resolvedPlace !== coordsLabel ? [`Place: ${resolvedPlace}`] : []),
+    `Location: ${coordsLabel}`,
   ];
   if (schoolName) lines.unshift(`School: ${schoolName}`);
 
@@ -402,10 +415,16 @@ export async function stampVisitPhoto(
     ctx.fillText(line, padding, canvas.height - barHeight + padding + i * lineHeight);
   });
 
-  const mimeType = file.type || "image/jpeg";
-  const stampedDataUrl = canvas.toDataURL(mimeType, 0.92);
+  const mimeType = "image/jpeg";
+  const stampedDataUrl = canvas.toDataURL(mimeType, 0.88);
   const { rawBase64: photoDataBase64 } = parseDataUrl(stampedDataUrl);
-  const previewUrl = URL.createObjectURL(dataUrlToBlob(stampedDataUrl));
+  if (!photoDataBase64) {
+    throw new Error("Failed to encode stamped photo.");
+  }
+
+  const previewUrl = isFlexHrmNativeApp()
+    ? stampedDataUrl
+    : URL.createObjectURL(dataUrlToBlob(stampedDataUrl));
 
   const thumbW = 120;
   const thumbH = Math.max(1, Math.round(thumbW * (canvas.height / canvas.width)));
@@ -418,12 +437,17 @@ export async function stampVisitPhoto(
   }
   const thumbDataUrl = thumbCtx ? thumbCanvas.toDataURL("image/jpeg", 0.5) : undefined;
   const thumbnailBase64 = thumbDataUrl ? parseDataUrl(thumbDataUrl).rawBase64 : undefined;
-  const thumbPreviewUrl = thumbDataUrl ? URL.createObjectURL(dataUrlToBlob(thumbDataUrl)) : undefined;
+  const thumbPreviewUrl = thumbDataUrl
+    ? isFlexHrmNativeApp()
+      ? thumbDataUrl
+      : URL.createObjectURL(dataUrlToBlob(thumbDataUrl))
+    : undefined;
 
+  const baseName = file.name?.replace(/\.[^.]+$/, "").trim();
   return {
     caption: `Field visit photo ${index}`,
     mimeType,
-    filename: file.name || `visit-${index}.jpg`,
+    filename: baseName ? `${baseName}.jpg` : `visit-${index}.jpg`,
     photoDataBase64,
     thumbnailBase64,
     previewUrl,

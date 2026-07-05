@@ -42,6 +42,7 @@ const SupervisorCalendarPage = lazy(() => import("./pages/supervisor/SupervisorC
 const SupervisorHistoryPage = lazy(() => import("./pages/supervisor/SupervisorHistoryPage"));
 const SupervisorRequestsPage = lazy(() => import("./pages/supervisor/SupervisorRequestsPage"));
 const SupervisorProfilePage = lazy(() => import("./pages/supervisor/SupervisorProfilePage"));
+const SupervisorRouteHistoryPage = lazy(() => import("./pages/supervisor/SupervisorRouteHistoryPage"));
 
 function SupervisorRouteFallback() {
   return (
@@ -165,6 +166,14 @@ function AppRoutes() {
             element={
               <Suspense fallback={<SupervisorRouteFallback />}>
                 <SupervisorRequestsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="route"
+            element={
+              <Suspense fallback={<SupervisorRouteFallback />}>
+                <SupervisorRouteHistoryPage />
               </Suspense>
             }
           />

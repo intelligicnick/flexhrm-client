@@ -112,8 +112,18 @@ export function isObserverModuleInAllowlist(
   observerRestrictions: ObserverUiRestrictions | null | undefined,
 ): boolean {
   const allowed = observerRestrictions?.allowedModules;
-  if (!allowed?.length) return true;
+  // undefined = no Observer module restriction on the role → allow RBAC-visible modules
+  if (allowed === undefined) return true;
   return allowed.includes(moduleId);
+}
+
+export function listVisibleObserverModules(
+  userPermissions: UserPermissionsMap,
+  observerRestrictions: ObserverUiRestrictions | null | undefined,
+): ObserverModuleRow[] {
+  return OBSERVER_MODULE_ROWS.filter((row) =>
+    isObserverModuleAllowed(row.id, userPermissions, observerRestrictions),
+  );
 }
 
 export function isObserverModuleAllowed(

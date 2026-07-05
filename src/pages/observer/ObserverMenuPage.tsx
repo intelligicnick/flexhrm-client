@@ -18,9 +18,10 @@ import {
   Contact,
   Cake,
   Activity,
+  LayoutGrid,
 } from "lucide-react";
 import { useObserverStats } from "./useObserverStats";
-import { ObserverMenuTile, formatInr } from "./ObserverUI";
+import { ObserverMenuTile, ObserverEmptyState, formatInr } from "./ObserverUI";
 
 export default function ObserverMenuPage() {
   const stats = useObserverStats();
@@ -225,24 +226,34 @@ export default function ObserverMenuPage() {
 
   return (
     <div className="space-y-4 pb-2">
-      <p className="text-xs text-slate-500 px-1">
-        Tap any module to view details
-        {editableModules.size > 0 ? " · modules with edit access show actions in detail sheets" : ""}
-      </p>
-      <div className="grid grid-cols-3 gap-2.5">
-        {modules.map((m) => (
-          <ObserverMenuTile
-            key={m.to}
-            icon={m.icon}
-            label={m.label}
-            count={m.count}
-            to={m.to}
-            color={m.color}
-            alert={m.alert}
-            editable={moduleEditable(m.to)}
-          />
-        ))}
-      </div>
+      {modules.length === 0 ? (
+        <ObserverEmptyState
+          icon={LayoutGrid}
+          title="No modules assigned"
+          hint="Ask your admin to enable Observer modules for your role."
+        />
+      ) : (
+        <>
+          <p className="text-xs text-slate-500 px-1">
+            Tap any module to view details
+            {editableModules.size > 0 ? " · modules with edit access show actions in detail sheets" : ""}
+          </p>
+          <div className="grid grid-cols-3 gap-2.5">
+            {modules.map((m) => (
+              <ObserverMenuTile
+                key={m.to}
+                icon={m.icon}
+                label={m.label}
+                count={m.count}
+                to={m.to}
+                color={m.color}
+                alert={m.alert}
+                editable={moduleEditable(m.to)}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -13,6 +13,8 @@ import androidx.core.content.ContextCompat;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
+import com.flexhrm.supervisor.tracking.bridge.TrackingBridge;
+import com.flexhrm.supervisor.tracking.security.MockLocationDetector;
 import com.google.android.gms.tasks.CancellationTokenSource;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -75,6 +77,10 @@ public final class NativeGpsHelper {
 
   @SuppressLint("MissingPermission")
   public static String getCoordinatesJson(Context context) {
+    String cached = TrackingBridge.getCachedGpsJson();
+    if (cached != null && !cached.equals("{}")) {
+      return cached;
+    }
     if (!hasLocationPermission(context)) {
       return "{}";
     }
@@ -228,6 +234,9 @@ public final class NativeGpsHelper {
       json.put("lng", location.getLongitude());
       json.put("accuracy", location.getAccuracy());
       json.put("at", location.getTime());
+      json.put("speed", location.hasSpeed() ? location.getSpeed() : JSONObject.NULL);
+      json.put("bearing", location.hasBearing() ? location.getBearing() : JSONObject.NULL);
+      json.put("isMock", MockLocationDetector.isMock(location));
       return json.toString();
     } catch (Exception error) {
       return "{}";

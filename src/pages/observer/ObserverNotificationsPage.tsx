@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect } from "react";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useHRMS } from "../../context/HRMSContext";
 import { AppNotification } from "../../types";
 import { getObserverNotificationTarget } from "../../lib/notification-navigation";
@@ -66,13 +66,7 @@ export default function ObserverNotificationsPage() {
   );
 
   if (!canViewObserverModule("notifications")) {
-    return (
-      <ObserverEmptyState
-        icon={Bell}
-        title="Access denied"
-        hint="You don't have permission to view notifications."
-      />
-    );
+    return <Navigate to="/observer/menu" replace />;
   }
 
   return (

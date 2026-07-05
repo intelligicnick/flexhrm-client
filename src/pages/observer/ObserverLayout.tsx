@@ -98,7 +98,9 @@ function ObserverLayoutInner() {
 
   const navItems = [
     { to: "/observer", icon: Home, label: "Home", exact: true },
-    { to: "/observer/map", icon: Map, label: "Map" },
+    ...(canViewObserverModule("map")
+      ? [{ to: "/observer/map", icon: Map, label: "Map" as const }]
+      : []),
     { to: "/observer/menu", icon: LayoutGrid, label: "Modules", badge: alertCount },
   ];
 

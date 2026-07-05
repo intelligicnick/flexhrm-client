@@ -1,5 +1,5 @@
 #!/bin/bash
-# Production-build the supervisor web UI and package a debug APK.
+# Production-build the supervisor web UI and package debug/release APK.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,6 +8,7 @@ ASSETS_DIR="${ANDROID_DIR}/app/src/main/assets/www"
 VERSION="$("$(dirname "$0")/read-android-version.sh" "${ANDROID_DIR}/app/build.gradle")"
 VERSION_TS="${ROOT}/src/lib/native-app-version.ts"
 API_ORIGIN="$(node "$(dirname "$0")/read-client-config.cjs" apiOrigin)"
+BUILD_TYPE="${1:-debug}"
 
 echo "==> Syncing shared client-config..."
 node "$(dirname "$0")/sync-client-config.mjs"
@@ -32,7 +33,7 @@ rm -rf "$ASSETS_DIR"
 mkdir -p "$ASSETS_DIR"
 cp -R dist/. "$ASSETS_DIR/"
 
-echo "==> Building Android APK..."
+echo "==> Building Android APK (${BUILD_TYPE})..."
 cd "$ANDROID_DIR"
 
 if [ -z "${JAVA_HOME:-}" ]; then
@@ -41,13 +42,39 @@ if [ -z "${JAVA_HOME:-}" ]; then
   fi
 fi
 
-./gradlew assembleDebug -PAPI_ORIGIN="$API_ORIGIN"
+GRADLE_TASK="assembleDebug"
+STAMP_SUFFIX="debug"
+if [ "$BUILD_TYPE" = "release" ]; then
+  GRADLE_TASK="assembleRelease"
+  STAMP_SUFFIX="release"
+fi
 
-APK_PATH="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"
-STAMPED_APK="${ROOT}/FlexHRM-FieldTeam-v${VERSION}.apk"
+./gradlew "$GRADLE_TASK" -PAPI_ORIGIN="$API_ORIGIN"
+
+APK_DIR="${ANDROID_DIR}/app/build/outputs/apk/${STAMP_SUFFIX}"
+APK_PATH="${APK_DIR}/app-${STAMP_SUFFIX}.apk"
+if [ ! -f "$APK_PATH" ]; then
+  APK_PATH="${APK_DIR}/app-${STAMP_SUFFIX}-unsigned.apk"
+fi
+if [ ! -f "$APK_PATH" ]; then
+  echo "ERROR: APK not found in ${APK_DIR}" >&2
+  exit 1
+fi
+
+STAMPED_APK="${ROOT}/FlexHRM-FieldTeam-v${VERSION}-${STAMP_SUFFIX}.apk"
 cp "$APK_PATH" "$STAMPED_APK"
+
+if [ "$BUILD_TYPE" = "release" ] && [[ "$APK_PATH" == *"-unsigned.apk" ]]; then
+  echo ""
+  echo "WARNING: Release APK is unsigned and may fail to install on device." >&2
+  echo "Rebuild after configuring FLEXHRM_RELEASE_STORE_FILE or use: bash scripts/build-android-apk.sh debug" >&2
+fi
 
 echo ""
 echo "APK ready:"
 echo "  ${APK_PATH}"
 echo "  ${STAMPED_APK}"
+if [ "$BUILD_TYPE" = "debug" ]; then
+  echo ""
+  echo "Install: adb install -r \"${STAMPED_APK}\""
+fi

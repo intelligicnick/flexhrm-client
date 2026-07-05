@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, Loader2, Trash2, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import type {
   CommitmentDiary,
   Contract,
@@ -20,13 +20,18 @@ import { getDaysInMonthStatic } from "../../lib/date-helpers";
 import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
 import {
   defaultTempLedgerEntry,
+  formatLedgerDisplayDate,
+  formatLedgerRecordedSummary,
   getLedgerDateBoundsForMonth,
   getMonthLedger,
+  groupLedgerItemsByDate,
   LEDGER_TYPE_LABELS,
+  tempEntryFromLedgerItems,
   type LedgerItem,
   type LedgerItemType,
   type TempLedgerEntry,
 } from "../../lib/ledger-helpers";
+import { parseNonNegativeNumber } from "../../lib/number-validation";
 
 type PaymentStatus = "Unpaid" | "Paid" | "Hold";
 
@@ -448,111 +453,85 @@ function attendanceCellClass(status: string): string {
   }
 }
 
-function LedgerItemEditor({
-  item,
+function LedgerBatchForm({
+  form,
   monthKey,
+  label,
+  saveLabel,
+  busy,
+  onFieldChange,
   onSave,
-  onDelete,
-  canDelete,
 }: {
-  item: LedgerItem;
+  form: TempLedgerEntry;
   monthKey: string;
-  onSave: (patch: { type: LedgerItemType; amount: number; entryDate: string; note: string }) => Promise<boolean>;
-  onDelete?: () => Promise<boolean>;
-  canDelete: boolean;
+  label?: string;
+  saveLabel?: string;
+  busy?: boolean;
+  onFieldChange: (field: keyof TempLedgerEntry, value: string) => void;
+  onSave: () => void;
 }) {
   const dateBounds = getLedgerDateBoundsForMonth(monthKey);
-  const [type, setType] = useState<LedgerItemType>(item.type);
-  const [amount, setAmount] = useState(String(item.amount));
-  const [entryDate, setEntryDate] = useState(item.entryDate);
-  const [note, setNote] = useState(item.note || "");
-  const [busy, setBusy] = useState<"save" | "delete" | null>(null);
+  const hasPenaltyAmount = Number(form.penalty) > 0;
+  const amountFields: Array<{ key: keyof TempLedgerEntry; type: LedgerItemType; label: string }> = [
+    { key: "advance", type: "advance", label: LEDGER_TYPE_LABELS.advance },
+    { key: "uniform", type: "uniform", label: LEDGER_TYPE_LABELS.uniform },
+    { key: "penalty", type: "penalty", label: LEDGER_TYPE_LABELS.penalty },
+    { key: "foodPerk", type: "foodPerk", label: LEDGER_TYPE_LABELS.foodPerk },
+    { key: "accommodationPerk", type: "accommodationPerk", label: LEDGER_TYPE_LABELS.accommodationPerk },
+    { key: "conveyancePerk", type: "conveyancePerk", label: LEDGER_TYPE_LABELS.conveyancePerk },
+  ];
 
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-        {LEDGER_TYPE_LABELS[item.type]} · {entryDate}
-      </p>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Type</label>
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value as LedgerItemType)}
-            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
-          >
-            {ALL_LEDGER_TYPES.map((option) => (
-              <option key={option} value={option}>
-                {LEDGER_TYPE_LABELS[option]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Amount</label>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
-          />
-        </div>
-      </div>
+      {label && (
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+      )}
+
       <div>
         <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
         <input
           type="date"
-          value={entryDate}
+          value={form.entryDate}
           min={dateBounds.min}
           max={dateBounds.max}
-          onChange={(e) => setEntryDate(e.target.value)}
-          className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold bg-white"
+          onChange={(e) => onFieldChange("entryDate", e.target.value)}
+          className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:border-[#ff791a] focus:outline-none"
         />
       </div>
-      {type === "penalty" && (
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reason</label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-xs bg-white"
-            placeholder="Penalty reason…"
-          />
-        </div>
-      )}
-      <div className="flex gap-2">
-        <PrimaryButton
-          disabled={!!busy}
-          onClick={async () => {
-            setBusy("save");
-            const ok = await onSave({
-              type,
-              amount: Number(amount),
-              entryDate,
-              note: note.trim(),
-            });
-            setBusy(null);
-          }}
-        >
-          {busy === "save" ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Save"}
-        </PrimaryButton>
-        {canDelete && onDelete && (
-          <PrimaryButton
-            tone="rose"
-            disabled={!!busy}
-            onClick={async () => {
-              setBusy("delete");
-              await onDelete();
-              setBusy(null);
-            }}
-          >
-            {busy === "delete" ? <Loader2 size={14} className="animate-spin mx-auto" /> : <Trash2 size={14} className="mx-auto" />}
-          </PrimaryButton>
-        )}
+
+      <div className="grid grid-cols-2 gap-2">
+        {amountFields.map(({ key, type, label: fieldLabel }) => (
+          <div key={key}>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{fieldLabel}</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form[key]}
+              onChange={(e) => onFieldChange(key, e.target.value)}
+              placeholder="0"
+              className={ledgerAmountFieldClass(type)}
+            />
+          </div>
+        ))}
       </div>
+
+      <div>
+        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Penalty reason / comment{hasPenaltyAmount ? " *" : ""}
+        </label>
+        <textarea
+          value={form.penaltyReason}
+          onChange={(e) => onFieldChange("penaltyReason", e.target.value)}
+          rows={2}
+          placeholder={hasPenaltyAmount ? "Required when penalty amount is entered…" : "Optional unless penalty is entered"}
+          className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-xl text-xs text-slate-800 bg-white resize-none focus:border-[#ff791a] focus:outline-none"
+        />
+      </div>
+
+      <PrimaryButton disabled={!!busy} onClick={onSave}>
+        {busy ? <Loader2 size={14} className="animate-spin mx-auto" /> : saveLabel || "Save"}
+      </PrimaryButton>
     </div>
   );
 }
@@ -576,112 +555,169 @@ export function ObserverLedgerActions({
   canDelete: boolean;
 }) {
   const ledger = getMonthLedger(employee, monthKey);
-  const dateBounds = getLedgerDateBoundsForMonth(monthKey);
-  const [form, setForm] = useState<TempLedgerEntry>(() => defaultTempLedgerEntry(monthKey));
-  const [busy, setBusy] = useState(false);
+  const dateGroups = groupLedgerItemsByDate(ledger.ledgerItems);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForms, setEditForms] = useState<Array<{ entryDate: string; form: TempLedgerEntry; items: LedgerItem[] }>>([]);
+  const [newForm, setNewForm] = useState<TempLedgerEntry>(() => defaultTempLedgerEntry(monthKey));
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const hasPenaltyAmount = Number(form.penalty) > 0;
+  const patchFormField = (
+    form: TempLedgerEntry,
+    field: keyof TempLedgerEntry,
+    value: string,
+  ): TempLedgerEntry => {
+    const next = { ...form, [field]: value };
+    if (field === "penalty" && Number(value) <= 0) {
+      next.penaltyReason = "";
+    }
+    return next;
+  };
 
-  const updateField = (field: keyof TempLedgerEntry, value: string) => {
-    setForm((prev) => {
-      const next = { ...prev, [field]: value };
-      if (field === "penalty" && Number(value) <= 0) {
-        next.penaltyReason = "";
-      }
-      return next;
-    });
+  const resetEditState = () => {
+    setIsEditing(false);
+    setEditForms([]);
+    setNewForm(defaultTempLedgerEntry(monthKey));
+    setBusyKey(null);
   };
 
   const refresh = () => {
     setRefreshKey((k) => k + 1);
-    setForm(defaultTempLedgerEntry(monthKey));
+    resetEditState();
   };
 
-  const amountFields: Array<{ key: keyof TempLedgerEntry; type: LedgerItemType; label: string }> = [
-    { key: "advance", type: "advance", label: LEDGER_TYPE_LABELS.advance },
-    { key: "uniform", type: "uniform", label: LEDGER_TYPE_LABELS.uniform },
-    { key: "penalty", type: "penalty", label: LEDGER_TYPE_LABELS.penalty },
-    { key: "foodPerk", type: "foodPerk", label: LEDGER_TYPE_LABELS.foodPerk },
-    { key: "accommodationPerk", type: "accommodationPerk", label: LEDGER_TYPE_LABELS.accommodationPerk },
-    { key: "conveyancePerk", type: "conveyancePerk", label: LEDGER_TYPE_LABELS.conveyancePerk },
-  ];
+  const startEditing = () => {
+    setEditForms(
+      dateGroups.map((group) => ({
+        entryDate: group.entryDate,
+        form: tempEntryFromLedgerItems(group.items, monthKey),
+        items: group.items,
+      })),
+    );
+    setNewForm(defaultTempLedgerEntry(monthKey));
+    setIsEditing(true);
+  };
+
+  const saveExistingGroup = async (
+    form: TempLedgerEntry,
+    itemsOnDate: LedgerItem[],
+  ): Promise<boolean> => {
+    const penaltyAmount = parseNonNegativeNumber(form.penalty, 0);
+    if (penaltyAmount > 0 && !form.penaltyReason.trim()) {
+      return false;
+    }
+
+    const note = form.penaltyReason.trim();
+    let ok = true;
+    const addEntry: TempLedgerEntry = {
+      ...defaultTempLedgerEntry(monthKey),
+      entryDate: form.entryDate,
+      penaltyReason: note,
+    };
+    let needsAdd = false;
+
+    for (const type of ALL_LEDGER_TYPES) {
+      const amount = parseNonNegativeNumber(form[type], 0);
+      const existing = itemsOnDate.find((item) => item.type === type);
+      if (existing) {
+        if (amount > 0) {
+          const updated = await onUpdate(existing.id, {
+            type,
+            amount,
+            entryDate: form.entryDate,
+            note: type === "penalty" ? note : "",
+          });
+          if (!updated) ok = false;
+        } else if (canDelete) {
+          const deleted = await onDelete(existing.id);
+          if (!deleted) ok = false;
+        }
+      } else if (amount > 0) {
+        addEntry[type] = form[type];
+        needsAdd = true;
+      }
+    }
+
+    if (needsAdd) {
+      const added = await onSaveBatch(addEntry);
+      if (!added) ok = false;
+    }
+
+    return ok;
+  };
+
+  if (!isEditing) {
+    return (
+      <ActionShell key={refreshKey}>
+        {dateGroups.length === 0 ? (
+          <p className="text-xs font-medium text-slate-500">No entries recorded for this month yet.</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Recorded</p>
+            {dateGroups.map(({ entryDate, items }) => {
+              const penaltyNote = items.find((item) => item.type === "penalty" && item.note?.trim())?.note?.trim();
+              return (
+                <div key={entryDate} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <p className="text-sm font-bold text-slate-800">{formatLedgerDisplayDate(entryDate)}</p>
+                  <p className="text-xs font-semibold text-slate-600 mt-1">{formatLedgerRecordedSummary(items)}</p>
+                  {penaltyNote && (
+                    <p className="text-[11px] text-slate-500 mt-1">Reason: {penaltyNote}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <PrimaryButton onClick={startEditing}>
+          {dateGroups.length === 0 ? "Record Entry" : "Edit"}
+        </PrimaryButton>
+      </ActionShell>
+    );
+  }
 
   return (
     <ActionShell key={refreshKey}>
-      {ledger.ledgerItems.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Existing Entries</p>
-          {ledger.ledgerItems.map((item) => (
-            <LedgerItemEditor
-              key={item.id}
-              item={item}
-              monthKey={monthKey}
-              canDelete={canDelete}
-              onSave={(patch) => onUpdate(item.id, patch).then((ok) => { if (ok) refresh(); return ok; })}
-              onDelete={canDelete ? () => onDelete(item.id).then((ok) => { if (ok) refresh(); return ok; }) : undefined}
-            />
-          ))}
-        </div>
-      )}
-
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Record Ledger · One Save</p>
-      <p className="text-[10px] text-slate-500 font-medium">
-        Fill all amounts for the same date, then save once. Leave unused fields at 0.
-      </p>
-
-      <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
-        <input
-          type="date"
-          value={form.entryDate}
-          min={dateBounds.min}
-          max={dateBounds.max}
-          onChange={(e) => updateField("entryDate", e.target.value)}
-          className="w-full mt-1 px-2 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold bg-white focus:border-[#ff791a] focus:outline-none"
+      {editForms.map((group, index) => (
+        <LedgerBatchForm
+          key={`${group.entryDate}-${index}`}
+          form={group.form}
+          monthKey={monthKey}
+          label={`Edit · ${formatLedgerDisplayDate(group.form.entryDate)}`}
+          saveLabel="Save Changes"
+          busy={busyKey === `edit-${index}`}
+          onFieldChange={(field, value) => {
+            setEditForms((prev) =>
+              prev.map((row, rowIndex) =>
+                rowIndex === index ? { ...row, form: patchFormField(row.form, field, value) } : row,
+              ),
+            );
+          }}
+          onSave={async () => {
+            setBusyKey(`edit-${index}`);
+            const ok = await saveExistingGroup(group.form, group.items);
+            setBusyKey(null);
+            if (ok) refresh();
+          }}
         />
-      </div>
+      ))}
 
-      <div className="grid grid-cols-2 gap-2">
-        {amountFields.map(({ key, type, label }) => (
-          <div key={key}>
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form[key]}
-              onChange={(e) => updateField(key, e.target.value)}
-              placeholder="0"
-              className={ledgerAmountFieldClass(type)}
-            />
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Penalty reason / comment{hasPenaltyAmount ? " *" : ""}
-        </label>
-        <textarea
-          value={form.penaltyReason}
-          onChange={(e) => updateField("penaltyReason", e.target.value)}
-          rows={2}
-          placeholder={hasPenaltyAmount ? "Required when penalty amount is entered…" : "Optional unless penalty is entered"}
-          className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-xl text-xs text-slate-800 bg-white resize-none focus:border-[#ff791a] focus:outline-none"
-        />
-      </div>
-
-      <PrimaryButton
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          const ok = await onSaveBatch(form);
-          setBusy(false);
+      <LedgerBatchForm
+        form={newForm}
+        monthKey={monthKey}
+        label={editForms.length > 0 ? "Add Another Entry" : "Record Entry"}
+        saveLabel="Save All Entries"
+        busy={busyKey === "new"}
+        onFieldChange={(field, value) => setNewForm((prev) => patchFormField(prev, field, value))}
+        onSave={async () => {
+          setBusyKey("new");
+          const ok = await onSaveBatch(newForm);
+          setBusyKey(null);
           if (ok) refresh();
         }}
-      >
-        {busy ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Save All Entries"}
+      />
+
+      <PrimaryButton tone="slate" disabled={!!busyKey} onClick={resetEditState}>
+        Cancel
       </PrimaryButton>
     </ActionShell>
   );

@@ -191,6 +191,39 @@ export function SupervisorLoadingScreen({ message }: { message: string }) {
   );
 }
 
+export function SupervisorSkeletonStatGrid() {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="rounded-2xl border border-slate-200 bg-white p-3 animate-pulse"
+        >
+          <div className="h-4 w-4 rounded bg-slate-200 mb-2" />
+          <div className="h-6 w-16 rounded bg-slate-200" />
+          <div className="h-3 w-20 rounded bg-slate-100 mt-2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SupervisorSkeletonList({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div
+          key={index}
+          className="rounded-2xl border border-slate-200 bg-white p-4 animate-pulse"
+        >
+          <div className="h-4 w-2/3 rounded bg-slate-200" />
+          <div className="h-3 w-1/3 rounded bg-slate-100 mt-2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SupervisorFormStep({
   step,
   total,

@@ -40,7 +40,10 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.WindowCompat;
+import com.flexhrm.supervisor.tracking.domain.TrackingConfig;
+import com.flexhrm.supervisor.tracking.bridge.TrackingBridge;
 import androidx.webkit.WebViewAssetLoader;
 import android.graphics.BitmapFactory;
 import android.util.Base64;
@@ -116,9 +119,19 @@ public class MainActivity extends AppCompatActivity {
           new ActivityResultContracts.RequestMultiplePermissions(),
           result -> onWebPermissionsResult());
 
+  private final ActivityResultLauncher<String> backgroundLocationLauncher =
+      registerForActivityResult(
+          new ActivityResultContracts.RequestPermission(),
+          granted -> {
+            if (granted) {
+              maybePromptBatteryOptimization();
+            }
+          });
+
   @SuppressLint("SetJavaScriptEnabled")
   @Override
   protected void onCreate(Bundle savedInstanceState) {
+    SplashScreen.installSplashScreen(this);
     super.onCreate(savedInstanceState);
     WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
     setContentView(R.layout.activity_main);
@@ -174,7 +187,10 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     if (securityCheckPassed && portalLoaded) {
-      runSecurityCheck();
+      long elapsed = System.currentTimeMillis() - lastSecurityPassAt;
+      if (elapsed >= TrackingConfig.SECURITY_SCAN_INTERVAL_MS) {
+        runSecurityCheck();
+      }
       return;
     }
     runSecurityCheck();
@@ -184,15 +200,11 @@ public class MainActivity extends AppCompatActivity {
     securityCheckPassed = false;
     hideLocationGate();
     if (!isOnline()) {
-      List<String> cachedPolicy = BlockedAppsPolicyCache.load(this);
-      if (cachedPolicy.isEmpty()) {
-        showError(getString(R.string.error_no_internet));
-        return;
-      }
+      List<String> policy = BlockedAppsPolicyCache.resolvePolicy(this);
       errorPanel.setVisibility(View.GONE);
       securityCheckPanel.setVisibility(View.VISIBLE);
       webView.setVisibility(View.GONE);
-      securityExecutor.execute(() -> runLocalScan(cachedPolicy));
+      securityExecutor.execute(() -> runLocalScan(policy));
       return;
     }
 
@@ -202,27 +214,15 @@ public class MainActivity extends AppCompatActivity {
 
     securityExecutor.execute(
         () -> {
+          List<String> policy = BlockedAppsPolicyCache.resolvePolicy(MainActivity.this);
           try {
-            List<String> policy = PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
-            if (!policy.isEmpty()) {
-              BlockedAppsPolicyCache.save(MainActivity.this, policy);
-            } else {
-              policy = BlockedAppsPolicyCache.load(MainActivity.this);
-            }
-            runLocalScan(policy);
+            List<String> remotePolicy = PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
+            BlockedAppsPolicyCache.save(MainActivity.this, remotePolicy);
+            policy = remotePolicy;
           } catch (Exception error) {
-            Log.w(TAG, "Security scan failed", error);
-            List<String> cachedPolicy = BlockedAppsPolicyCache.load(MainActivity.this);
-            if (!cachedPolicy.isEmpty()) {
-              runLocalScan(cachedPolicy);
-            } else {
-              runOnUiThread(
-                  () -> {
-                    securityCheckPanel.setVisibility(View.GONE);
-                    showError(getString(R.string.error_security_check));
-                  });
-            }
+            Log.w(TAG, "Security policy fetch failed; using cached/bundled policy", error);
           }
+          runLocalScan(policy);
         });
   }
 
@@ -332,6 +332,7 @@ public class MainActivity extends AppCompatActivity {
     if (NativeGpsHelper.isLocationReady(this)) {
       hideLocationGate();
       NativeGpsHelper.warmup(this);
+      requestBackgroundLocationIfNeeded();
       openPortal();
       return;
     }
@@ -424,6 +425,40 @@ public class MainActivity extends AppCompatActivity {
     return loginUrl;
   }
 
+  private void requestBackgroundLocationIfNeeded() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+      maybePromptBatteryOptimization();
+      return;
+    }
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        == PackageManager.PERMISSION_GRANTED) {
+      maybePromptBatteryOptimization();
+      return;
+    }
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+      return;
+    }
+    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION);
+  }
+
+  private void maybePromptBatteryOptimization() {
+    if (TrackingBridge.isBatteryOptimizationDisabled(this)) {
+      return;
+    }
+    new AlertDialog.Builder(this)
+        .setTitle(R.string.app_name)
+        .setMessage(
+            "Disable battery optimization for reliable GPS tracking while you are in the field.")
+        .setPositiveButton(
+            "Open settings",
+            (dialog, which) -> TrackingBridge.openBatterySettings(MainActivity.this))
+        .setNegativeButton(android.R.string.cancel, null)
+        .show();
+  }
+
   private void openPortal() {
     if (!NativeGpsHelper.isLocationReady(this)) {
       ensureLocationReady();
@@ -437,6 +472,7 @@ public class MainActivity extends AppCompatActivity {
 
   @SuppressLint("SetJavaScriptEnabled")
   private void configureWebView() {
+    webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
     WebSettings settings = webView.getSettings();
     settings.setJavaScriptEnabled(true);
     settings.setDomStorageEnabled(true);

@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
+import com.flexhrm.supervisor.tracking.bridge.TrackingBridge;
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -69,6 +70,10 @@ public class FlexHrmAndroidBridge {
 
   @JavascriptInterface
   public String getGpsCoordinates() {
+    String cached = TrackingBridge.getCachedGpsJson();
+    if (cached != null && !cached.equals("{}")) {
+      return cached;
+    }
     return NativeGpsHelper.getCoordinatesJson(activity);
   }
 
@@ -102,5 +107,45 @@ public class FlexHrmAndroidBridge {
   @JavascriptInterface
   public void clearSupervisorSession() {
     SupervisorSessionCache.clear(activity);
+  }
+
+  @JavascriptInterface
+  public void startTracking() {
+    TrackingBridge.startTracking(activity);
+  }
+
+  @JavascriptInterface
+  public void stopTracking() {
+    TrackingBridge.stopTracking(activity);
+  }
+
+  @JavascriptInterface
+  public String getTrackingStatus() {
+    return TrackingBridge.getTrackingStatus(activity);
+  }
+
+  @JavascriptInterface
+  public String getRoutePoints(long fromMs, long toMs) {
+    return TrackingBridge.getRoutePoints(activity, fromMs, toMs);
+  }
+
+  @JavascriptInterface
+  public String getRouteSummary(long fromMs, long toMs) {
+    return TrackingBridge.getRouteSummary(activity, fromMs, toMs);
+  }
+
+  @JavascriptInterface
+  public boolean isBatteryOptimizationDisabled() {
+    return TrackingBridge.isBatteryOptimizationDisabled(activity);
+  }
+
+  @JavascriptInterface
+  public void openBatterySettings() {
+    activity.runOnUiThread(() -> TrackingBridge.openBatterySettings(activity));
+  }
+
+  @JavascriptInterface
+  public String getDeviceIntegrity() {
+    return TrackingBridge.getDeviceIntegrity(activity);
   }
 }

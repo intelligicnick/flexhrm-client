@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import {
   IndianRupee,
   ClipboardList,
@@ -30,6 +30,7 @@ import { monitorApi, todayKey, type MonitorOverview, type MonitoredEmployee } fr
 import { formatClock } from "../../lib/monitor-time";
 import MonitorScreenshotLightbox from "../../components/monitor/MonitorScreenshotLightbox";
 import { parseApiError } from "../../api";
+import { observerRouteToModuleId } from "../../lib/observer-access";
 import { phoneToTelHref } from "../../lib/phone-helpers";
 import {
   ObserverEmptyState,
@@ -779,18 +780,12 @@ export default function ObserverModulePage() {
     }
   };
 
-  if (!config) {
-    return <ObserverEmptyState icon={ClipboardList} title="Module not found" />;
+  if (!config || !observerRouteToModuleId(moduleId)) {
+    return <Navigate to="/observer/menu" replace />;
   }
 
   if (!canViewObserverModule(moduleId)) {
-    return (
-      <ObserverEmptyState
-        icon={config.icon}
-        title="Access denied"
-        hint="You don't have permission to view this module."
-      />
-    );
+    return <Navigate to="/observer/menu" replace />;
   }
 
   if (moduleId === "supervisors") {

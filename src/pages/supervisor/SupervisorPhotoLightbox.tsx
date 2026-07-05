@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, X, ZoomIn } from "lucide-react";
 import { useSupervisorOverlayBack } from "../../lib/supervisor-back-handler";
+
+function shouldPreloadFullImage(src: string, thumbSrc?: string): boolean {
+  if (!src || src === thumbSrc) return false;
+  if (src.startsWith("data:")) return false;
+  return true;
+}
 
 export default function SupervisorPhotoLightbox({
   thumbSrc,
@@ -15,20 +22,26 @@ export default function SupervisorPhotoLightbox({
   caption?: string;
   onClose: () => void;
 }) {
-  const [displaySrc, setDisplaySrc] = useState(thumbSrc || src);
-  const [loadingFull, setLoadingFull] = useState(Boolean(thumbSrc && thumbSrc !== src));
+  const initialSrc = thumbSrc || src;
+  const [displaySrc, setDisplaySrc] = useState(initialSrc);
+  const [loadingFull, setLoadingFull] = useState(shouldPreloadFullImage(src, thumbSrc));
   const closeOverlay = useSupervisorOverlayBack(true, onClose);
 
   useEffect(() => {
-    setDisplaySrc(thumbSrc || src);
-    setLoadingFull(Boolean(thumbSrc && thumbSrc !== src));
+    const nextInitial = thumbSrc || src;
+    setDisplaySrc(nextInitial);
+    setLoadingFull(shouldPreloadFullImage(src, thumbSrc));
   }, [src, thumbSrc]);
 
   useEffect(() => {
-    if (!src || src === thumbSrc) {
+    if (!shouldPreloadFullImage(src, thumbSrc)) {
+      if (src && src !== thumbSrc) {
+        setDisplaySrc(src);
+      }
       setLoadingFull(false);
       return;
     }
+
     let cancelled = false;
     const img = new Image();
     img.onload = () => {
@@ -61,9 +74,11 @@ export default function SupervisorPhotoLightbox({
     };
   }, [closeOverlay]);
 
-  return (
+  if (!src) return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex flex-col bg-black/90 backdrop-blur-sm"
+      className="fixed inset-0 z-[260] flex flex-col bg-black/90 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       onClick={closeOverlay}
@@ -91,19 +106,24 @@ export default function SupervisorPhotoLightbox({
             <Loader2 size={32} className="animate-spin text-white/70" />
           </div>
         )}
-        <img
-          src={displaySrc}
-          alt={alt}
-          className={`max-h-full max-w-full rounded-2xl object-contain shadow-2xl transition-opacity duration-200 ${
-            loadingFull ? "opacity-60" : "opacity-100"
-          }`}
-        />
+        {displaySrc ? (
+          <img
+            src={displaySrc}
+            alt={alt}
+            className={`max-h-full max-w-full rounded-2xl object-contain shadow-2xl transition-opacity duration-200 ${
+              loadingFull ? "opacity-60" : "opacity-100"
+            }`}
+          />
+        ) : (
+          <p className="text-sm text-white/70">Photo preview unavailable.</p>
+        )}
       </div>
       {caption && (
         <p className="shrink-0 px-4 pb-6 text-center text-xs text-slate-200 safe-area-bottom">
           {caption}
         </p>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

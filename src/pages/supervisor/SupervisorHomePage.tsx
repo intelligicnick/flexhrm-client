@@ -27,6 +27,8 @@ import {
   SupervisorLoadingScreen,
   SupervisorPageHeader,
   SupervisorQuickAction,
+  SupervisorSkeletonList,
+  SupervisorSkeletonStatGrid,
   SupervisorSearchInput,
   SupervisorSection,
   SupervisorStatCard,
@@ -213,7 +215,12 @@ export default function SupervisorHomePage() {
   const name = localStorage.getItem("hrms_supervisor_name")?.split(" ")[0] || "";
 
   if (loading) {
-    return <SupervisorLoadingScreen message={t("loading")} />;
+    return (
+      <div className="space-y-4 pb-24">
+        <SupervisorSkeletonStatGrid />
+        <SupervisorSkeletonList rows={8} />
+      </div>
+    );
   }
 
   return (

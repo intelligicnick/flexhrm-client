@@ -8,6 +8,7 @@ import {
   School,
   User,
   Bell,
+  Route,
 } from "lucide-react";
 import { isSupervisorWebDevHost } from "../../env";
 import { getSupervisorDeviceId } from "../../lib/supervisor-device";
@@ -38,6 +39,7 @@ function getPageTitle(pathname: string, t: (key: string) => string): string {
   if (pathname === "/supervisor" || pathname === "/supervisor/") return t("home");
   if (pathname.startsWith("/supervisor/calendar")) return t("calendar");
   if (pathname.startsWith("/supervisor/history")) return t("history");
+  if (pathname.startsWith("/supervisor/route")) return "Route";
   if (pathname.startsWith("/supervisor/requests")) return t("requests");
   if (pathname.startsWith("/supervisor/profile")) return t("profile");
   if (pathname.includes("/visit/")) return t("logVisit");
@@ -202,6 +204,9 @@ function SupervisorLayoutInner() {
     { to: "/supervisor", icon: School, label: t("schools"), exact: true },
     { to: "/supervisor/calendar", icon: CalendarDays, label: t("calendar") },
     { to: "/supervisor/history", icon: History, label: t("history") },
+    ...(isFlexHrmNativeApp()
+      ? [{ to: "/supervisor/route", icon: Route, label: "Route", exact: false as const }]
+      : []),
     { to: "/supervisor/requests", icon: MessageSquarePlus, label: t("requests"), badge: unreadCount },
     { to: "/supervisor/profile", icon: User, label: t("profile") },
   ];
@@ -254,7 +259,7 @@ function SupervisorLayoutInner() {
         </main>
 
         {!hideNav && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-30 safe-area-bottom px-3 pt-2 pb-2 bg-[#f4f6f9] border-t border-slate-200 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.1)]">
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg z-50 safe-area-bottom px-3 pt-2 pb-2 bg-[#f4f6f9] border-t border-slate-200 shadow-[0_-8px_24px_-12px_rgba(15,23,42,0.1)]">
             <div className="bg-white border border-slate-200 rounded-2xl shadow-lg shadow-slate-200/50 flex">
               {navItems.map(({ to, icon: Icon, label, exact, badge }) => {
                 const active = exact ? location.pathname === to : location.pathname.startsWith(to);

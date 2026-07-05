@@ -406,25 +406,15 @@ export function buildLedgerDetails(emp: Employee, monthKey: string): DetailField
     { label: "Month", value: formatMonthLabel(monthKey) },
   ];
 
+  const monthTotals: string[] = [];
   (["advance", "penalty", "uniform", "foodPerk", "accommodationPerk", "conveyancePerk"] as LedgerItemType[]).forEach(
     (type) => {
       const total = getTotalByType(ledger, type);
-      if (total > 0) {
-        fields.push({ label: LEDGER_TYPE_LABELS[type], value: formatInr(total) });
-      }
+      if (total > 0) monthTotals.push(`${LEDGER_TYPE_LABELS[type]} ${formatInr(total)}`);
     },
   );
-
-  ledger.ledgerItems.forEach((item, index) => {
-    fields.push(
-      { label: `Entry ${index + 1}`, value: `${LEDGER_TYPE_LABELS[item.type]} · ${formatInr(item.amount)}` },
-      { label: `Entry ${index + 1} Date`, value: formatDate(item.entryDate) },
-      { label: `Entry ${index + 1} Note`, value: item.note || "—" },
-    );
-  });
-
-  if (ledger.penaltyReason?.trim()) {
-    fields.push({ label: "Penalty Reason", value: ledger.penaltyReason });
+  if (monthTotals.length > 0) {
+    fields.push({ label: "Month Totals", value: monthTotals.join(" · ") });
   }
 
   return fields;

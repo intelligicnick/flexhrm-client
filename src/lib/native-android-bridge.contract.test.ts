@@ -26,21 +26,18 @@ const EXPECTED_BRIDGE_METHODS = [
   "saveSupervisorSession",
   "getSupervisorSession",
   "clearSupervisorSession",
+  "startTracking",
+  "stopTracking",
+  "getTrackingStatus",
+  "getRoutePoints",
+  "getRouteSummary",
+  "isBatteryOptimizationDisabled",
+  "openBatterySettings",
+  "getDeviceIntegrity",
 ];
 
 const TS_BRIDGE_USAGE = [
-  "getGpsCoordinates",
-  "requestFreshGps",
-  "warmupGps",
-  "capturePhoto",
-  "getDeviceId",
-  "getInstalledApps",
-  "uninstallApp",
-  "getApiBase",
-  "isNativeApp",
-  "saveSupervisorSession",
-  "getSupervisorSession",
-  "clearSupervisorSession",
+  ...EXPECTED_BRIDGE_METHODS,
 ];
 
 describe("native android bridge contract", () => {

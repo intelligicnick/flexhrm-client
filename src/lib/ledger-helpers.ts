@@ -127,9 +127,70 @@ export function getTotalByType(ledger: MonthLedger, type: LedgerItemType): numbe
 }
 
 export function formatEntryDate(entryDate: string): string {
-  const d = new Date(`${entryDate}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return entryDate;
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  return formatLedgerDisplayDate(entryDate);
+}
+
+/** Simple readable date for observer ledger views, e.g. "5 Jul 2026". */
+export function formatLedgerDisplayDate(entryDate: string): string {
+  const iso = String(entryDate || "").trim().slice(0, 10);
+  if (!iso) return "—";
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return entryDate.trim();
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+export type LedgerDateGroup = {
+  entryDate: string;
+  items: LedgerItem[];
+};
+
+export function groupLedgerItemsByDate(items: LedgerItem[]): LedgerDateGroup[] {
+  const map = new Map<string, LedgerItem[]>();
+  for (const item of items) {
+    const date = String(item.entryDate || "").slice(0, 10);
+    if (!date) continue;
+    if (!map.has(date)) map.set(date, []);
+    map.get(date)!.push(item);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([entryDate, groupItems]) => ({ entryDate, items: groupItems }));
+}
+
+export function tempEntryFromLedgerItems(items: LedgerItem[], monthKey: string): TempLedgerEntry {
+  const entry = defaultTempLedgerEntry(monthKey);
+  if (items.length === 0) return entry;
+
+  entry.entryDate = String(items[0].entryDate || "").slice(0, 10) || entry.entryDate;
+  for (const item of items) {
+    if (item.type === "advance") entry.advance = String(item.amount);
+    else if (item.type === "penalty") {
+      entry.penalty = String(item.amount);
+      if (item.note?.trim()) entry.penaltyReason = item.note.trim();
+    } else if (item.type === "uniform") entry.uniform = String(item.amount);
+    else if (item.type === "foodPerk") entry.foodPerk = String(item.amount);
+    else if (item.type === "accommodationPerk") entry.accommodationPerk = String(item.amount);
+    else if (item.type === "conveyancePerk") entry.conveyancePerk = String(item.amount);
+  }
+  return entry;
+}
+
+function formatLedgerAmount(amount: number): string {
+  return `₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+export function formatLedgerRecordedSummary(items: LedgerItem[]): string {
+  const parts: string[] = [];
+  for (const type of Object.keys(LEDGER_TYPE_LABELS) as LedgerItemType[]) {
+    const total = items.filter((item) => item.type === type).reduce((sum, item) => sum + item.amount, 0);
+    if (total > 0) parts.push(`${LEDGER_TYPE_LABELS[type]} ${formatLedgerAmount(total)}`);
+  }
+  return parts.join(" · ") || "—";
 }
 
 export function sumMonthTotals(employees: Employee[], monthKey: string, type: LedgerItemType): number {

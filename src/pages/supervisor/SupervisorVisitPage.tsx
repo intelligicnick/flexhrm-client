@@ -26,6 +26,11 @@ import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
 import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
+import {
+  queueVisitDraft,
+  registerVisitOutboxSync,
+  type PendingVisitDraft,
+} from "../../lib/supervisor-visit-outbox";
 import { useSupervisorOverlayBack, useSupervisorUnsavedBackGuard } from "../../lib/supervisor-back-handler";
 import { SupervisorActionButton, SupervisorLoadingScreen } from "./SupervisorUI";
 import SupervisorToast from "./SupervisorToast";
@@ -107,6 +112,24 @@ export default function SupervisorVisitPage() {
     void refreshGps();
     return stopWarmup;
   }, [supervisorFetch]);
+
+  useEffect(() => {
+    return registerVisitOutboxSync(async (draft: PendingVisitDraft) => {
+      const res = await supervisorFetch("/api/school-visits/supervisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schoolWorkId: draft.schoolWorkId,
+          visitDate: draft.visitDate,
+          notes: draft.notes,
+          materialsGiven: draft.materialsGiven,
+          photos: draft.photos,
+          gpsLocation: draft.gpsLocation,
+        }),
+      });
+      if (!res.ok) throw await parseApiError(res, t("requestSubmitFailed"));
+    });
+  }, [supervisorFetch, t]);
 
   useEffect(() => {
     if (!schoolId) {
@@ -247,21 +270,21 @@ export default function SupervisorVisitPage() {
 
     setSaving(true);
     setError(null);
+    const payload = {
+      schoolWorkId: schoolId,
+      visitDate,
+      notes,
+      materialsGiven: materials,
+      photos: photos.map(({ previewUrl: _previewUrl, thumbPreviewUrl: _thumbPreviewUrl, ...photo }) => photo),
+      gpsLocation: photos[0]
+        ? { lat: photos[0].lat, lng: photos[0].lng, locationLabel: photos[0].locationLabel }
+        : undefined,
+    };
     try {
-      const primary = photos[0];
       const res = await supervisorFetch("/api/school-visits/supervisor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schoolWorkId: schoolId,
-          visitDate,
-          notes,
-          materialsGiven: materials,
-          photos: photos.map(({ previewUrl: _previewUrl, thumbPreviewUrl: _thumbPreviewUrl, ...photo }) => photo),
-          gpsLocation: primary
-            ? { lat: primary.lat, lng: primary.lng, locationLabel: primary.locationLabel }
-            : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw await parseApiError(res, t("requestSubmitFailed"));
       setEarnedXp(pointsForVisit(photos.length));
@@ -272,6 +295,23 @@ export default function SupervisorVisitPage() {
       setPhotos([]);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err: unknown) {
+      if (!navigator.onLine) {
+        await queueVisitDraft({
+          schoolWorkId: schoolId,
+          visitDate,
+          notes,
+          materialsGiven: materials,
+          photos: payload.photos,
+          gpsLocation: payload.gpsLocation,
+        });
+        setSuccess(true);
+        setError(null);
+        photos.forEach(revokeStampedVisitPhotoUrls);
+        setNotes("");
+        setMaterials([]);
+        setPhotos([]);
+        return;
+      }
       setError(err instanceof Error ? err.message : t("requestSubmitFailed"));
     } finally {
       setSaving(false);

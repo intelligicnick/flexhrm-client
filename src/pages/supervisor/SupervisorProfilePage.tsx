@@ -18,6 +18,13 @@ import { getSupervisorDeviceId } from "../../lib/supervisor-device";
 import { SupervisorLang } from "../../lib/supervisor-i18n";
 import { computeGamificationStats } from "../../lib/supervisor-gamification";
 import { toIsoDate } from "../../lib/supervisor-dates";
+import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
+import {
+  isNativeBatteryOptimizationDisabled,
+  openNativeBatterySettings,
+  readNativeDeviceIntegrity,
+  readNativeTrackingStatus,
+} from "../../lib/supervisor-route-history";
 import { resolveProfilePhotoSrc, resolvePhotoSrc } from "../../lib/media-url";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorGamificationCard from "./SupervisorGamificationCard";
@@ -92,6 +99,8 @@ export default function SupervisorProfilePage() {
   const [gamificationStats, setGamificationStats] = useState<ReturnType<typeof computeGamificationStats> | null>(
     null,
   );
+  const trackingStatus = isFlexHrmNativeApp() ? readNativeTrackingStatus() : null;
+  const deviceIntegrity = isFlexHrmNativeApp() ? readNativeDeviceIntegrity() : null;
 
   const localDeviceId = getSupervisorDeviceId();
   const deviceMatches = profile?.registeredDeviceId
@@ -415,6 +424,40 @@ export default function SupervisorProfilePage() {
           />
         </div>
       </section>
+
+      {isFlexHrmNativeApp() && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
+            <MapPin size={16} className="text-[#ff791a]" />
+            GPS tracking
+          </h3>
+          <div className="space-y-2 text-sm text-slate-700">
+            <p>
+              Status:{" "}
+              <span className="font-bold">{trackingStatus?.active ? "Active" : "Stopped"}</span>
+            </p>
+            <p>
+              Points stored: <span className="font-bold">{trackingStatus?.pointCount ?? 0}</span>
+            </p>
+            <p>
+              Pending upload:{" "}
+              <span className="font-bold">{trackingStatus?.pendingUpload ?? 0}</span>
+            </p>
+            {deviceIntegrity?.rooted ? (
+              <p className="text-red-600 font-semibold">Rooted device detected.</p>
+            ) : null}
+            {!isNativeBatteryOptimizationDisabled() && (
+              <button
+                type="button"
+                onClick={() => openNativeBatterySettings()}
+                className="mt-2 text-[#ff791a] font-bold text-sm"
+              >
+                Disable battery optimization →
+              </button>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -1,5 +1,7 @@
 plugins {
     id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
 }
 
 android {
@@ -10,8 +12,8 @@ android {
         applicationId 'com.flexhrm.supervisor'
         minSdk 24
         targetSdk 35
-        versionCode 18
-        versionName '1.7.2'
+        versionCode 21
+        versionName '1.8.2'
 
         buildConfigField 'String', 'SUPERVISOR_URL',
                 '"https://appassets.androidplatform.net/supervisor/login"'
@@ -21,35 +23,61 @@ android {
                 "\"${project.findProperty('API_ORIGIN') ?: 'https://mediumseagreen-chimpanzee-998149.hostingersite.com'}/api\""
     }
 
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-        debug {
-            applicationIdSuffix '.debug'
-        }
-    }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
     buildFeatures {
         buildConfig true
     }
-}
 
-configurations.configureEach {
-    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
-    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+    signingConfigs {
+        release {
+            if (project.hasProperty('FLEXHRM_RELEASE_STORE_FILE')) {
+                storeFile file(FLEXHRM_RELEASE_STORE_FILE)
+                storePassword FLEXHRM_RELEASE_STORE_PASSWORD
+                keyAlias FLEXHRM_RELEASE_KEY_ALIAS
+                keyPassword FLEXHRM_RELEASE_KEY_PASSWORD
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (project.hasProperty('FLEXHRM_RELEASE_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            } else {
+                // Local sideload builds: sign with the debug keystore so the APK installs.
+                signingConfig signingConfigs.debug
+            }
+        }
+        debug {
+            applicationIdSuffix '.debug'
+            minifyEnabled false
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.core:core:1.15.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.activity:activity:1.9.3'
     implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+    implementation 'androidx.room:room-runtime:2.6.1'
+    implementation 'androidx.room:room-ktx:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1'
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'androidx.lifecycle:lifecycle-service:2.8.7'
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 }

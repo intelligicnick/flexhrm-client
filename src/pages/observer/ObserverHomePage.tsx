@@ -4,7 +4,6 @@ import {
   Users,
   IndianRupee,
   Clock,
-  School,
   MapPin,
   ClipboardList,
   BookOpen,
@@ -32,13 +31,11 @@ import {
 export default function ObserverHomePage() {
   const stats = useObserverStats();
   const {
-    canView,
     canViewObserverModule,
     selectedMonth,
     isLoading,
     payrollNet,
     attendanceSummary,
-    schoolDashboardStats,
     supervisorStats,
     visitStats,
     commitmentStats,
@@ -114,7 +111,7 @@ export default function ObserverHomePage() {
               value={attendanceSummary.activeEmployees}
               sub="Active payroll"
               accent="blue"
-              to="/observer/salary"
+              to="/observer/employees"
             />
           )}
           {canViewObserverModule("salary") && (
@@ -155,15 +152,6 @@ export default function ObserverHomePage() {
               sub="Today"
               accent="amber"
               to="/observer/birthdays"
-            />
-          )}
-          {canView("Schools") && (
-            <ObserverStatCard
-              icon={School}
-              label="Schools"
-              value={schoolDashboardStats.totalCount}
-              sub={`${schoolDashboardStats.uniqueDistricts} districts`}
-              accent="indigo"
             />
           )}
           {canViewObserverModule("supervisors") && (

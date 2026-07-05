@@ -1,3 +1,5 @@
+import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
+
 export interface Base64MediaFields {
   imagekitUrl?: string;
   photoDataBase64?: string;
@@ -33,10 +35,35 @@ export interface StoredDocumentFields {
   imagekitUrl?: string;
 }
 
+function toDataUrlFromBase64(base64: string, mimeType?: string): string {
+  const trimmed = base64.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:")) return trimmed;
+  return `data:${mimeType || "image/jpeg"};base64,${trimmed}`;
+}
+
+/** Prefer embedded base64 over blob URLs on native WebView (blob previews often fail). */
+function resolveNativePreviewUrl(
+  previewUrl: string | undefined,
+  base64: string | undefined,
+  mimeType?: string,
+): string {
+  const trimmedPreview = previewUrl?.trim() ?? "";
+  const trimmedBase64 = base64?.trim() ?? "";
+  if (isFlexHrmNativeApp() && trimmedPreview.startsWith("blob:") && trimmedBase64) {
+    return toDataUrlFromBase64(trimmedBase64, mimeType);
+  }
+  return trimmedPreview;
+}
+
 export function resolvePhotoSrc(
   photo: Base64MediaFields & { photoUrl?: string; profilePhotoUrl?: string },
 ): string {
-  const previewUrl = photo.previewUrl?.trim();
+  const previewUrl = resolveNativePreviewUrl(
+    photo.previewUrl,
+    photo.photoDataBase64,
+    photo.mimeType,
+  );
   if (previewUrl) return previewUrl;
 
   const directUrl =
@@ -45,22 +72,25 @@ export function resolvePhotoSrc(
     photo.profilePhotoUrl?.trim();
   if (directUrl) return directUrl;
 
-  const base64 = photo.photoDataBase64?.trim() ?? '';
-  if (!base64) return '';
-  if (base64.startsWith('data:')) return base64;
-  return `data:${photo.mimeType || 'image/jpeg'};base64,${base64}`;
+  const base64 = photo.photoDataBase64?.trim() ?? "";
+  if (!base64) return "";
+  return toDataUrlFromBase64(base64, photo.mimeType);
 }
 
 /** Low-quality thumbnail for grids and lists — full image via {@link resolvePhotoSrc}. */
 export function resolvePhotoThumbnailSrc(
   photo: Base64MediaFields & { photoUrl?: string; profilePhotoUrl?: string },
 ): string {
-  const thumbPreviewUrl = photo.thumbPreviewUrl?.trim();
+  const thumbPreviewUrl = resolveNativePreviewUrl(
+    photo.thumbPreviewUrl,
+    photo.thumbnailBase64,
+    photo.mimeType,
+  );
   if (thumbPreviewUrl) return thumbPreviewUrl;
 
   const thumb = photo.thumbnailBase64?.trim();
   if (thumb) {
-    return thumb.startsWith('data:') ? thumb : `data:${photo.mimeType || 'image/jpeg'};base64,${thumb}`;
+    return toDataUrlFromBase64(thumb, photo.mimeType);
   }
 
   const directUrl =

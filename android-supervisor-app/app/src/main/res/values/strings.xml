@@ -17,4 +17,9 @@
     <string name="location_services_required">Turn on location (GPS) in your device settings to continue.</string>
     <string name="location_enable_action">Enable location</string>
     <string name="location_check_again">Check again</string>
+    <string name="tracking_notification_title">Flex HRM location tracking</string>
+    <string name="tracking_notification_body">Recording your field route while you are logged in.</string>
+    <string name="tracking_channel_name">Location tracking</string>
+    <string name="tracking_channel_description">Shows when Flex HRM is recording GPS for route history.</string>
+    <string name="background_location_rationale">Allow location access all the time so Flex HRM can record your travel route even when the screen is off.</string>
 </resources>
