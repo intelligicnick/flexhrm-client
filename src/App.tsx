@@ -24,6 +24,7 @@ import { DEFAULT_PATH, LOGIN_PATH } from "./routes";
 import GlobalHorizontalScroll from "./components/GlobalHorizontalScroll";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import { ActionButtonFeedback } from "./components/ActionButtonFeedback";
+import GeoFirewallGate from "./components/GeoFirewallGate";
 
 const HRMSPortal = lazy(() => import("./pages/HRMSPortal"));
 const EmployeeVerifyPage = lazy(() => import("./pages/EmployeeVerifyPage"));
@@ -216,10 +217,12 @@ function AppRoutes() {
 
 function AppShell() {
   return (
-    <AuthProvider>
-      <ActionButtonFeedback />
-      <AppRoutes />
-    </AuthProvider>
+    <GeoFirewallGate>
+      <AuthProvider>
+        <ActionButtonFeedback />
+        <AppRoutes />
+      </AuthProvider>
+    </GeoFirewallGate>
   );
 }
 

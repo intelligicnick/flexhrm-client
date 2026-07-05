@@ -26,6 +26,7 @@ function isPasswordRecoveryRequestUrl(urlStr: string): boolean {
 
 function isPublicAuthUrl(urlStr: string): boolean {
   return (
+    urlStr.includes("/api/firewall/check") ||
     urlStr.includes("/api/auth/login") ||
     urlStr.includes("/api/auth/logout") ||
     urlStr.includes("/api/auth/captcha") ||

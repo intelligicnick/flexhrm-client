@@ -115,11 +115,13 @@ import {
   ExtensionIntegrationModal,
   ExtensionProfileMenuItem,
 } from "../components/ExtensionIntegration";
+import FirewallPanel, { FirewallProfileMenuItem } from "../components/FirewallPanel";
 
 const ModuleContent = lazy(() => import("../pages/ModuleContent"));
 
 export default function DashboardLayout() {
   const [isExtensionModalOpen, setIsExtensionModalOpen] = useState(false);
+  const [isFirewallPanelOpen, setIsFirewallPanelOpen] = useState(false);
   const {
     isLoggedIn,
     sessionUser,
@@ -954,6 +956,12 @@ export default function DashboardLayout() {
                                   setIsExtensionModalOpen(true);
                                 }}
                               />
+                              <FirewallProfileMenuItem
+                                onClick={() => {
+                                  setIsMobileProfileOpen(false);
+                                  setIsFirewallPanelOpen(true);
+                                }}
+                              />
                               <button
                                 type="button"
                                 onClick={() => { void handleLogout(); }}
@@ -1101,6 +1109,12 @@ export default function DashboardLayout() {
                                 onClick={() => {
                                   setIsProfileOpen(false);
                                   setIsExtensionModalOpen(true);
+                                }}
+                              />
+                              <FirewallProfileMenuItem
+                                onClick={() => {
+                                  setIsProfileOpen(false);
+                                  setIsFirewallPanelOpen(true);
                                 }}
                               />
                               <button
@@ -1508,6 +1522,10 @@ export default function DashboardLayout() {
                     open={isExtensionModalOpen}
                     onClose={() => setIsExtensionModalOpen(false)}
                     onCopied={triggerSuccess}
+                  />
+                  <FirewallPanel
+                    open={isFirewallPanelOpen}
+                    onClose={() => setIsFirewallPanelOpen(false)}
                   />
                 </div>
   );
