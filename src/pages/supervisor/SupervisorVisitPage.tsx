@@ -522,7 +522,10 @@ export default function SupervisorVisitPage() {
                   >
                     <button
                       type="button"
-                      onClick={() => setLightboxIndex(i)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.setTimeout(() => setLightboxIndex(i), 0);
+                      }}
                       className="block w-full cursor-pointer text-left"
                     >
                       <img

@@ -104,22 +104,28 @@ export default function SupervisorHomePage() {
         }
 
         if (!cancelled && weekFrom > streakBounds.fromDate) {
-          const dayBeforeWeek = new Date(`${weekFrom}T12:00:00`);
-          dayBeforeWeek.setDate(dayBeforeWeek.getDate() - 1);
-          const oldToDate = toIsoDate(dayBeforeWeek);
-          const oldRes = await supervisorFetch(
-            `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${oldToDate}&lite=1`,
-          );
-          if (oldRes.ok) {
-            const older: SchoolVisit[] = await oldRes.json();
-            if (!cancelled) {
-              setAllVisits((prev) => {
-                const ids = new Set(prev.map((v) => v.id));
-                const merged = [...prev, ...older.filter((v) => !ids.has(v.id))];
-                return merged.sort((a, b) => b.visitDate.localeCompare(a.visitDate));
-              });
+          window.setTimeout(async () => {
+            if (cancelled) return;
+            const dayBeforeWeek = new Date(`${weekFrom}T12:00:00`);
+            dayBeforeWeek.setDate(dayBeforeWeek.getDate() - 1);
+            const oldToDate = toIsoDate(dayBeforeWeek);
+            try {
+              const oldRes = await supervisorFetch(
+                `/api/school-visits/supervisor/mine?fromDate=${streakBounds.fromDate}&toDate=${oldToDate}&lite=1`,
+              );
+              if (!oldRes.ok || cancelled) return;
+              const older: SchoolVisit[] = await oldRes.json();
+              if (!cancelled) {
+                setAllVisits((prev) => {
+                  const ids = new Set(prev.map((v) => v.id));
+                  const merged = [...prev, ...older.filter((v) => !ids.has(v.id))];
+                  return merged.sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+                });
+              }
+            } catch {
+              /* streak stats are optional */
             }
-          }
+          }, 300);
         }
       } catch {
         if (!cancelled) {

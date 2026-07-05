@@ -197,9 +197,9 @@ import {
   SALARY_FILTER_DEFINITIONS,
   type RoleUiRestrictions,
 } from "../lib/role-ui-restrictions";
-import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab } from "../routes";
+import { tabToPath, pathToTab, DEFAULT_PATH, isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab, isObserverPath } from "../routes";
 import { useNotificationPoller } from "./useNotificationPoller";
-import { useAuth } from "./useAuth";
+import { useAuthContext } from "../context/AuthContext";
 import { useTenantEntitlements } from "./useTenantEntitlements";
 import { FieldTeamView, getAdminNotificationTarget } from "../lib/notification-navigation";
 import PercentIcon from "../components/ui/PercentIcon";
@@ -381,7 +381,13 @@ function applyBulkEditCustomFieldUpdate(
 export function useHRMSApp() {
   const navigate = useNavigate();
   const location = useLocation();
-  const auth = useAuth();
+  const isObserverApp = isObserverPath(location.pathname);
+
+  const logBackgroundLoadFailure = useCallback((context: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`${context}:`, message);
+  }, []);
+  const auth = useAuthContext();
   const tenantEntitlements = useTenantEntitlements(auth.isLoggedIn);
   const {
     authBootstrapping,
@@ -434,6 +440,11 @@ export function useHRMSApp() {
     setIsUpdatingPassword,
     handleLoginSubmit: authHandleLoginSubmit,
     handleLogout: authHandleLogout,
+    handleForgotPasswordSubmit,
+    handleResetPasswordSubmit,
+    openForgotPassword,
+    openRequestNewResetCode,
+    backToSignIn,
   } = auth;
 
   // Custom Roles & Permissions States
@@ -748,7 +759,7 @@ export function useHRMSApp() {
         localStorage.setItem("hrms_location_pt_enabled", JSON.stringify(ptEnabledMap));
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Could not load locations.");
+      logBackgroundLoadFailure("Could not load locations", err);
     } finally {
       setIsFetchingLocations(false);
     }
@@ -776,7 +787,7 @@ export function useHRMSApp() {
       const apiRoles = Array.isArray(data) ? data.map((role: any) => role.name).filter(Boolean) : [];
       setRegisteredJobRoles(apiRoles);
     } catch (err: any) {
-      setErrorMessage(err.message || "Could not load job roles.");
+      logBackgroundLoadFailure("Could not load job roles", err);
     } finally {
       setIsFetchingJobRoles(false);
     }
@@ -1620,7 +1631,7 @@ export function useHRMSApp() {
       const data = await res.json();
       setHelplines(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setErrorMessage(err.message || "Could not load helplines.");
+      logBackgroundLoadFailure("Could not load helplines", err);
     } finally {
       setIsFetchingHelplines(false);
     }
@@ -2600,7 +2611,7 @@ export function useHRMSApp() {
       setSavedReportTemplates(normalizeTemplates(await reportRes.json()));
       setSavedSalaryTemplates(normalizeTemplates(await salaryRes.json()));
     } catch (err: any) {
-      setErrorMessage(err.message || "Could not load export templates.");
+      logBackgroundLoadFailure("Could not load export templates", err);
     } finally {
       setIsFetchingTemplates(false);
     }
@@ -4578,7 +4589,11 @@ export function useHRMSApp() {
         setRawEmployees(data);
       } catch (err: any) {
         console.error(err);
-        setErrorMessage("Could not connect to HRMS server: " + err.message);
+        if (isObserverApp) {
+          logBackgroundLoadFailure("Could not load employees", err);
+        } else {
+          setErrorMessage("Could not connect to HRMS server: " + err.message);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -4590,7 +4605,7 @@ export function useHRMSApp() {
     } finally {
       employeesFetchInFlightRef.current.delete(url);
     }
-  }, [activeSidebarTab, selectedMonth, location.pathname]);
+  }, [activeSidebarTab, selectedMonth, location.pathname, isObserverApp, logBackgroundLoadFailure]);
 
   const fetchSchoolWorks = async () => {
     setIsSchoolLoading(true);
@@ -4606,8 +4621,7 @@ export function useHRMSApp() {
       const data = await res.json();
       setRawSchoolWorks(data);
     } catch (err: any) {
-      console.warn("Could not load school work records:", err.message);
-      setErrorMessage("Failed to load school records: " + err.message);
+      logBackgroundLoadFailure("Could not load school records", err);
       setRawSchoolWorks([]);
     } finally {
       setIsSchoolLoading(false);
@@ -5175,15 +5189,16 @@ export function useHRMSApp() {
 
 
   useEffect(() => {
-    if (isLoggedIn) {
-      fetchEmployees();
-      fetchRoles();
+    if (!isLoggedIn || authBootstrapping) return;
+    fetchEmployees();
+    fetchRoles();
+    if (!isObserverApp) {
       fetchExportTemplates();
       fetchPendingChangeCount();
-      fetchAdminNotifications();
-      void fetchFinancialYearsWithData();
     }
-  }, [isLoggedIn, fetchFinancialYearsWithData]);
+    fetchAdminNotifications();
+    void fetchFinancialYearsWithData();
+  }, [isLoggedIn, authBootstrapping, isObserverApp, fetchFinancialYearsWithData]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -5234,7 +5249,7 @@ export function useHRMSApp() {
   }, [isLoggedIn, activeSidebarTab]);
 
   useEffect(() => {
-    if (isLoggedIn && activeSidebarTab === "Dashboard") {
+    if (isLoggedIn && activeSidebarTab === "Dashboard" && !isObserverApp) {
       fetchTenders();
       fetchContracts();
       fetchRenewals();
@@ -5244,7 +5259,7 @@ export function useHRMSApp() {
       fetchSchoolVisits();
       fetchSchoolSupervisors();
     }
-  }, [isLoggedIn, activeSidebarTab]);
+  }, [isLoggedIn, activeSidebarTab, isObserverApp]);
 
   useEffect(() => {
     if (isLoggedIn && isBidsTab(activeSidebarTab)) {
@@ -5359,10 +5374,13 @@ export function useHRMSApp() {
   }, [isLoggedIn, location.pathname]);
 
   useEffect(() => {
-    if (isLoggedIn && activeSidebarTab === "Directory") {
+    if (
+      isLoggedIn &&
+      (activeSidebarTab === "Directory" || location.pathname.startsWith("/observer/directory"))
+    ) {
       fetchHelplines();
     }
-  }, [isLoggedIn, activeSidebarTab, fetchHelplines]);
+  }, [isLoggedIn, activeSidebarTab, location.pathname, fetchHelplines]);
 
   useEffect(() => {
     if (isLoggedIn && activeSidebarTab === "Birthdays" && userPermissions.birthdays?.view) {
@@ -5472,141 +5490,6 @@ export function useHRMSApp() {
       setSelectedMonthDirect(getDefaultSelectedMonth());
       triggerSuccess(`Successfully authenticated. Welcome back, ${username}!`);
     });
-
-  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanUser = forgotUsername.trim();
-    if (!cleanUser) {
-      setForgotError("Please enter your username or recovery email.");
-      return;
-    }
-    try {
-      setIsSendingResetCode(true);
-      setForgotError(null);
-      setForgotMessage(null);
-      setIssuedResetToken(null);
-      const res = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: cleanUser }),
-      });
-      if (!res.ok) {
-        throw await parseApiError(res, "Unable to process password reset request.");
-      }
-      const data = await res.json();
-      if (data.tenantId) {
-        localStorage.setItem("flexhrm_tenant_id", String(data.tenantId));
-      }
-      setForgotMessage(data.message);
-      setResetError(null);
-      setResetSuccess(null);
-      setResetNewPassword("");
-      setResetConfirmPassword("");
-      const resolvedUser = data.username || cleanUser;
-      setForgotUsername(resolvedUser);
-      setUsernameInput(resolvedUser);
-      if (data.resetToken) {
-        setIssuedResetToken(data.resetToken);
-        setResetTokenInput(data.resetToken);
-      } else {
-        setResetTokenInput("");
-        setIssuedResetToken(null);
-      }
-      setLoginView("reset");
-    } catch (err: any) {
-      setForgotError(err.message);
-    } finally {
-      setIsSendingResetCode(false);
-    }
-  };
-
-  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setResetError(null);
-    setResetSuccess(null);
-
-    const username = (forgotUsername || usernameInput).trim();
-    const token = resetTokenInput.trim();
-    const newP = resetNewPassword.trim();
-    const confirmP = resetConfirmPassword.trim();
-
-    if (!username || !token || !newP || !confirmP) {
-      setResetError("Please fill in all fields.");
-      return;
-    }
-    if (newP !== confirmP) {
-      setResetError("New passwords do not match.");
-      return;
-    }
-    if (newP.length < 8) {
-      setResetError("Password must be at least 8 characters long.");
-      return;
-    }
-
-    try {
-      setIsUpdatingPassword(true);
-      const payload = { username, resetToken: token, newPassword: newP };
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        throw await parseApiError(res, "Unable to reset password.");
-      }
-      const data = await res.json();
-      setResetSuccess(data.message || "Password updated successfully.");
-      setPasswordInput("");
-      setResetNewPassword("");
-      setResetConfirmPassword("");
-      setResetTokenInput("");
-      setIssuedResetToken(null);
-      setForgotUsername("");
-      setTimeout(() => {
-        setLoginView("signin");
-        setResetSuccess(null);
-        setForgotMessage(null);
-      }, 2500);
-    } catch (err: any) {
-      setResetError(err.message);
-    } finally {
-      setIsUpdatingPassword(false);
-    }
-  };
-
-  const openForgotPassword = () => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.removeItem("flexhrm_tenant_id");
-    }
-    setLoginView("forgot");
-    setLoginError(null);
-    setForgotError(null);
-    setForgotMessage(null);
-    setIssuedResetToken(null);
-    setForgotUsername(usernameInput);
-  };
-
-  const openRequestNewResetCode = () => {
-    setLoginView("forgot");
-    setResetError(null);
-    setResetSuccess(null);
-    setIssuedResetToken(null);
-    setResetTokenInput("");
-    setResetNewPassword("");
-    setResetConfirmPassword("");
-    setForgotError(null);
-    setForgotMessage(null);
-    setForgotUsername((forgotUsername || usernameInput).trim());
-  };
-
-  const backToSignIn = () => {
-    setLoginView("signin");
-    setForgotError(null);
-    setForgotMessage(null);
-    setResetError(null);
-    setResetSuccess(null);
-    setIssuedResetToken(null);
-  };
 
   // Handler for Admin inviting Admin
   const handleInviteAdminSubmit = async (e: React.FormEvent) => {
@@ -5887,7 +5770,7 @@ export function useHRMSApp() {
       setEmployeeChangeRequests(data);
     } catch (err: any) {
       console.error(err);
-      setErrorMessage("Could not load employee change requests: " + err.message);
+      logBackgroundLoadFailure("Could not load employee change requests", err);
     } finally {
       setIsFetchingChangeRequests(false);
     }

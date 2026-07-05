@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
 
 /** OSM-based tiles via CARTO — reliable in Android WebView and desktop browsers. */
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
@@ -19,6 +20,7 @@ export function isTouchMapDevice(): boolean {
 
 export function createMapTileLayer(): L.TileLayer {
   const touch = isTouchMapDevice();
+  const native = isFlexHrmNativeApp();
   return L.tileLayer(MAP_TILE_URL, {
     attribution: MAP_TILE_ATTRIBUTION,
     maxZoom: 19,
@@ -27,7 +29,8 @@ export function createMapTileLayer(): L.TileLayer {
     updateWhenIdle: !touch,
     updateWhenZooming: touch,
     keepBuffer: touch ? 8 : 4,
-    crossOrigin: true,
+    // crossOrigin breaks tile loading in many Android WebViews.
+    ...(native ? {} : { crossOrigin: true }),
   });
 }
 

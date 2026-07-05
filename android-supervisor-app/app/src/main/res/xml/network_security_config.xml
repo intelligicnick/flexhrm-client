@@ -7,6 +7,8 @@
     </base-config>
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">hostingersite.com</domain>
+        <domain includeSubdomains="true">basemaps.cartocdn.com</domain>
+        <domain includeSubdomains="true">cartocdn.com</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

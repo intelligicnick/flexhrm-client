@@ -192,6 +192,191 @@ export function useAuth() {
     return sessionPermissions;
   }, [sessionPermissions]);
 
+  const handleForgotPasswordSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const cleanUser = forgotUsername.trim();
+      if (!cleanUser) {
+        setForgotError("Please enter your username or recovery email.");
+        return;
+      }
+      try {
+        setIsSendingResetCode(true);
+        setForgotError(null);
+        setForgotMessage(null);
+        setIssuedResetToken(null);
+        const res = await fetch(apiUrl("/api/auth/forgot-password"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: cleanUser }),
+        });
+        if (!res.ok) {
+          throw await parseApiError(res, "Unable to process password reset request.");
+        }
+        const data = await res.json();
+        if (data.tenantId) {
+          localStorage.setItem("flexhrm_tenant_id", String(data.tenantId));
+        }
+        setForgotMessage(data.message);
+        setResetError(null);
+        setResetSuccess(null);
+        setResetNewPassword("");
+        setResetConfirmPassword("");
+        const resolvedUser = data.username || cleanUser;
+        setForgotUsername(resolvedUser);
+        setUsernameInput(resolvedUser);
+        if (data.resetToken) {
+          setIssuedResetToken(data.resetToken);
+          setResetTokenInput(data.resetToken);
+        } else {
+          setResetTokenInput("");
+          setIssuedResetToken(null);
+        }
+        setLoginView("reset");
+      } catch (err: unknown) {
+        setForgotError(err instanceof Error ? err.message : "Request failed.");
+      } finally {
+        setIsSendingResetCode(false);
+      }
+    },
+    [forgotUsername, setForgotUsername, setForgotError, setForgotMessage, setIssuedResetToken, setResetError, setResetSuccess, setResetNewPassword, setResetConfirmPassword, setUsernameInput, setResetTokenInput, setLoginView, setIsSendingResetCode],
+  );
+
+  const handleResetPasswordSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setResetError(null);
+      setResetSuccess(null);
+
+      const username = (forgotUsername || usernameInput).trim();
+      const token = resetTokenInput.trim();
+      const newP = resetNewPassword.trim();
+      const confirmP = resetConfirmPassword.trim();
+
+      if (!username || !token || !newP || !confirmP) {
+        setResetError("Please fill in all fields.");
+        return;
+      }
+      if (newP !== confirmP) {
+        setResetError("New passwords do not match.");
+        return;
+      }
+      if (newP.length < 8) {
+        setResetError("Password must be at least 8 characters long.");
+        return;
+      }
+
+      try {
+        setIsUpdatingPassword(true);
+        const res = await fetch(apiUrl("/api/auth/reset-password"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, resetToken: token, newPassword: newP }),
+        });
+        if (!res.ok) {
+          throw await parseApiError(res, "Unable to reset password.");
+        }
+        const data = await res.json();
+        setResetSuccess(data.message || "Password updated successfully.");
+        setPasswordInput("");
+        setResetNewPassword("");
+        setResetConfirmPassword("");
+        setResetTokenInput("");
+        setIssuedResetToken(null);
+        setForgotUsername("");
+        setTimeout(() => {
+          setLoginView("signin");
+          setResetSuccess(null);
+          setForgotMessage(null);
+        }, 2500);
+      } catch (err: unknown) {
+        setResetError(err instanceof Error ? err.message : "Reset failed.");
+      } finally {
+        setIsUpdatingPassword(false);
+      }
+    },
+    [
+      forgotUsername,
+      usernameInput,
+      resetTokenInput,
+      resetNewPassword,
+      resetConfirmPassword,
+      setResetError,
+      setResetSuccess,
+      setIsUpdatingPassword,
+      setPasswordInput,
+      setResetNewPassword,
+      setResetConfirmPassword,
+      setResetTokenInput,
+      setIssuedResetToken,
+      setForgotUsername,
+      setLoginView,
+      setForgotMessage,
+    ],
+  );
+
+  const openForgotPassword = useCallback(() => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("flexhrm_tenant_id");
+    }
+    setLoginView("forgot");
+    setLoginError(null);
+    setForgotError(null);
+    setForgotMessage(null);
+    setIssuedResetToken(null);
+    setForgotUsername(usernameInput);
+  }, [
+    usernameInput,
+    setLoginView,
+    setLoginError,
+    setForgotError,
+    setForgotMessage,
+    setIssuedResetToken,
+    setForgotUsername,
+  ]);
+
+  const openRequestNewResetCode = useCallback(() => {
+    setLoginView("forgot");
+    setResetError(null);
+    setResetSuccess(null);
+    setIssuedResetToken(null);
+    setResetTokenInput("");
+    setResetNewPassword("");
+    setResetConfirmPassword("");
+    setForgotError(null);
+    setForgotMessage(null);
+    setForgotUsername((forgotUsername || usernameInput).trim());
+  }, [
+    forgotUsername,
+    usernameInput,
+    setLoginView,
+    setResetError,
+    setResetSuccess,
+    setIssuedResetToken,
+    setResetTokenInput,
+    setResetNewPassword,
+    setResetConfirmPassword,
+    setForgotError,
+    setForgotMessage,
+    setForgotUsername,
+  ]);
+
+  const backToSignIn = useCallback(() => {
+    setLoginView("signin");
+    setForgotError(null);
+    setForgotMessage(null);
+    setResetError(null);
+    setResetSuccess(null);
+    setIssuedResetToken(null);
+  }, [
+    setLoginView,
+    setForgotError,
+    setForgotMessage,
+    setResetError,
+    setResetSuccess,
+    setIssuedResetToken,
+  ]);
+
   return {
     authBootstrapping,
     isLoggedIn,
@@ -245,5 +430,10 @@ export function useAuth() {
     setIsUpdatingPassword,
     handleLoginSubmit,
     handleLogout,
+    handleForgotPasswordSubmit,
+    handleResetPasswordSubmit,
+    openForgotPassword,
+    openRequestNewResetCode,
+    backToSignIn,
   };
 }

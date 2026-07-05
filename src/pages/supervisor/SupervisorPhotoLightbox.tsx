@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, ZoomIn } from "lucide-react";
 import { useSupervisorOverlayBack } from "../../lib/supervisor-back-handler";
+
+/** Ignore backdrop taps briefly after open — mobile WebView sends a ghost click to new overlays. */
+const BACKDROP_CLOSE_GRACE_MS = 400;
 
 function shouldPreloadFullImage(src: string, thumbSrc?: string): boolean {
   if (!src || src === thumbSrc) return false;
@@ -22,14 +25,20 @@ export default function SupervisorPhotoLightbox({
   caption?: string;
   onClose: () => void;
 }) {
-  const initialSrc = thumbSrc || src;
+  const initialSrc = src || thumbSrc;
   const [displaySrc, setDisplaySrc] = useState(initialSrc);
   const [loadingFull, setLoadingFull] = useState(shouldPreloadFullImage(src, thumbSrc));
+  const suppressBackdropCloseUntil = useRef(Date.now() + BACKDROP_CLOSE_GRACE_MS);
   const closeOverlay = useSupervisorOverlayBack(true, onClose);
 
+  const tryCloseOverlay = () => {
+    if (Date.now() < suppressBackdropCloseUntil.current) return;
+    closeOverlay();
+  };
+
   useEffect(() => {
-    const nextInitial = thumbSrc || src;
-    setDisplaySrc(nextInitial);
+    suppressBackdropCloseUntil.current = Date.now() + BACKDROP_CLOSE_GRACE_MS;
+    setDisplaySrc(src || thumbSrc);
     setLoadingFull(shouldPreloadFullImage(src, thumbSrc));
   }, [src, thumbSrc]);
 
@@ -64,7 +73,7 @@ export default function SupervisorPhotoLightbox({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeOverlay();
+      if (e.key === "Escape") tryCloseOverlay();
     };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -81,7 +90,7 @@ export default function SupervisorPhotoLightbox({
       className="fixed inset-0 z-[260] flex flex-col bg-black/90 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      onClick={closeOverlay}
+      onClick={tryCloseOverlay}
     >
       <div className="flex items-center justify-between px-4 pt-4 safe-area-top">
         <p className="text-xs font-semibold text-white/70 flex items-center gap-1.5">
@@ -90,7 +99,7 @@ export default function SupervisorPhotoLightbox({
         </p>
         <button
           type="button"
-          onClick={closeOverlay}
+          onClick={tryCloseOverlay}
           className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white cursor-pointer hover:bg-white/20"
           aria-label="Close"
         >

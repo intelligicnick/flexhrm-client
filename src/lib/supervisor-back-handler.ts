@@ -9,15 +9,25 @@ export function useSupervisorOverlayBack(active: boolean, onClose: () => void) {
   useEffect(() => {
     if (!active) return;
     closedByBackRef.current = false;
-    window.history.pushState({ supervisorOverlay: 1 }, "");
+    let cancelled = false;
+    let popStateHandler: (() => void) | null = null;
 
-    const onPopState = () => {
-      closedByBackRef.current = true;
-      onCloseRef.current();
-    };
-    window.addEventListener("popstate", onPopState);
+    const armTimer = window.setTimeout(() => {
+      if (cancelled) return;
+      window.history.pushState({ supervisorOverlay: 1 }, "");
+      popStateHandler = () => {
+        closedByBackRef.current = true;
+        onCloseRef.current();
+      };
+      window.addEventListener("popstate", popStateHandler);
+    }, 0);
+
     return () => {
-      window.removeEventListener("popstate", onPopState);
+      cancelled = true;
+      window.clearTimeout(armTimer);
+      if (popStateHandler) {
+        window.removeEventListener("popstate", popStateHandler);
+      }
       if (!closedByBackRef.current && window.history.state?.supervisorOverlay === 1) {
         window.history.back();
       }

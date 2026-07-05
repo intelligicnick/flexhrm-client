@@ -52,7 +52,7 @@ function SupervisorLayoutInner() {
   const { t, setLang, lang } = useSupervisorI18n();
   const token = getSupervisorToken();
   const name = localStorage.getItem("hrms_supervisor_name") || "Supervisor";
-  const [valid, setValid] = useState<boolean | null>(null);
+  const [valid, setValid] = useState<boolean | null>(() => (token ? true : false));
   const [impersonated, setImpersonated] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -122,7 +122,8 @@ function SupervisorLayoutInner() {
   }, [setLang, navigate]);
 
   useEffect(() => {
-    checkSession();
+    restoreSupervisorSessionFromNative();
+    void checkSession();
   }, [checkSession]);
 
   useEffect(() => {

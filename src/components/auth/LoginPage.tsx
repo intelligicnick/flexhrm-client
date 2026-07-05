@@ -1,7 +1,7 @@
 import React from "react";
 import PasswordInput from "../PasswordInput";
 import LoginCaptcha from "./LoginCaptcha";
-import { useHRMS } from "../../context/HRMSContext";
+import { useAuthContext } from "../../context/AuthContext";
 
 const inputClassName =
   "w-full px-3.5 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base text-slate-800 transition bg-slate-50/50 touch-manipulation";
@@ -41,7 +41,7 @@ export default function LoginPage() {
     isLoggingIn,
     isSendingResetCode,
     isUpdatingPassword,
-  } = useHRMS();
+  } = useAuthContext();
 
   const primaryCtaClass = (busy: boolean) =>
     [

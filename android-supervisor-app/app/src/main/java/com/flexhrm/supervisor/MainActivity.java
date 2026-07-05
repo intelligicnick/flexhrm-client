@@ -189,44 +189,48 @@ public class MainActivity extends AppCompatActivity {
     if (securityCheckPassed && portalLoaded) {
       long elapsed = System.currentTimeMillis() - lastSecurityPassAt;
       if (elapsed >= TrackingConfig.SECURITY_SCAN_INTERVAL_MS) {
-        runSecurityCheck();
+        runSecurityCheck(false);
       }
       return;
     }
-    runSecurityCheck();
+    runSecurityCheck(true);
   }
 
   private void runSecurityCheck() {
-    securityCheckPassed = false;
-    hideLocationGate();
-    if (!isOnline()) {
-      List<String> policy = BlockedAppsPolicyCache.resolvePolicy(this);
+    runSecurityCheck(true);
+  }
+
+  private void runSecurityCheck(boolean blocking) {
+    if (blocking) {
+      securityCheckPassed = false;
+      hideLocationGate();
       errorPanel.setVisibility(View.GONE);
       securityCheckPanel.setVisibility(View.VISIBLE);
       webView.setVisibility(View.GONE);
-      securityExecutor.execute(() -> runLocalScan(policy));
-      return;
     }
 
-    errorPanel.setVisibility(View.GONE);
-    securityCheckPanel.setVisibility(View.VISIBLE);
-    webView.setVisibility(View.GONE);
-
+    final List<String> initialPolicy = BlockedAppsPolicyCache.resolvePolicy(this);
     securityExecutor.execute(
         () -> {
-          List<String> policy = BlockedAppsPolicyCache.resolvePolicy(MainActivity.this);
-          try {
-            List<String> remotePolicy = PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
-            BlockedAppsPolicyCache.save(MainActivity.this, remotePolicy);
-            policy = remotePolicy;
-          } catch (Exception error) {
-            Log.w(TAG, "Security policy fetch failed; using cached/bundled policy", error);
+          runLocalScan(initialPolicy, blocking);
+          if (isOnline() && BlockedAppsPolicyCache.shouldRefreshPolicy(MainActivity.this)) {
+            try {
+              List<String> remotePolicy =
+                  PortalPolicyFetcher.fetchBlockedApps(BuildConfig.API_BASE);
+              BlockedAppsPolicyCache.save(MainActivity.this, remotePolicy);
+              runLocalScan(remotePolicy, false);
+            } catch (Exception error) {
+              Log.w(TAG, "Security policy fetch failed; using cached/bundled policy", error);
+            }
           }
-          runLocalScan(policy);
         });
   }
 
   private void runLocalScan(List<String> blockedPolicy) {
+    runLocalScan(blockedPolicy, true);
+  }
+
+  private void runLocalScan(List<String> blockedPolicy, boolean blocking) {
     List<BlockedAppsScanner.InstalledApp> installed =
         BlockedAppsScanner.getAllInstalledApps(MainActivity.this);
     List<DetectedBlockedApp> detected =
@@ -242,14 +246,20 @@ public class MainActivity extends AppCompatActivity {
 
     runOnUiThread(
         () -> {
-          securityCheckPanel.setVisibility(View.GONE);
+          if (blocking) {
+            securityCheckPanel.setVisibility(View.GONE);
+          }
           if (detected.isEmpty()) {
             securityCheckPassed = true;
             lastSecurityPassAt = System.currentTimeMillis();
-            ensureLocationReady();
+            if (blocking) {
+              ensureLocationReady();
+            }
           } else {
-            portalLoaded = false;
-            webView.setVisibility(View.GONE);
+            if (blocking) {
+              portalLoaded = false;
+              webView.setVisibility(View.GONE);
+            }
             showBlockedAppsDialog(detected);
           }
         });

@@ -101,7 +101,12 @@ const LEGACY_PATH_TO_TAB: Record<string, string> = {
   "/filed-bids": "Tenders",
 };
 
+export function isObserverPath(pathname: string): boolean {
+  return pathname.startsWith("/observer");
+}
+
 export function pathToTab(pathname: string): string {
+  if (isObserverPath(pathname)) return "Observer";
   return LEGACY_PATH_TO_TAB[pathname] ?? PATH_TO_TAB[pathname] ?? "Dashboard";
 }
 

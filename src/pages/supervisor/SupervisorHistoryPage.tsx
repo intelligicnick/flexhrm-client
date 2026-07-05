@@ -75,7 +75,9 @@ function VisitCard({
   };
 
   const openLightbox = (photo: SchoolVisitPhoto) => {
-    setLightbox({ thumb: photoThumbSrc(photo), full: photoSrc(photo) });
+    window.setTimeout(() => {
+      setLightbox({ thumb: photoThumbSrc(photo), full: photoSrc(photo) });
+    }, 0);
   };
 
   return (

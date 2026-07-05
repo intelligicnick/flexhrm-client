@@ -12,6 +12,9 @@ public final class BlockedAppsPolicyCache {
   private static final String PREFS = "flexhrm_supervisor_security";
   private static final String KEY_BLOCKED_APPS = "blocked_apps_json";
   private static final String KEY_POLICY_SYNCED = "blocked_apps_synced";
+  private static final String KEY_POLICY_FETCHED_AT = "blocked_apps_fetched_at";
+  /** Refresh server policy at most once per day when online. */
+  private static final long POLICY_REFRESH_MS = 24L * 60L * 60L * 1000L;
 
   /**
    * Offline fallback only: fake-GPS / location-spoofing and remote-access tools.
@@ -74,7 +77,16 @@ public final class BlockedAppsPolicyCache {
         .edit()
         .putString(KEY_BLOCKED_APPS, array.toString())
         .putBoolean(KEY_POLICY_SYNCED, true)
+        .putLong(KEY_POLICY_FETCHED_AT, System.currentTimeMillis())
         .apply();
+  }
+
+  public static boolean shouldRefreshPolicy(Context context) {
+    if (!hasSyncedPolicy(context)) {
+      return true;
+    }
+    long fetchedAt = prefs(context).getLong(KEY_POLICY_FETCHED_AT, 0L);
+    return System.currentTimeMillis() - fetchedAt >= POLICY_REFRESH_MS;
   }
 
   public static boolean hasSyncedPolicy(Context context) {

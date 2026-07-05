@@ -20,6 +20,10 @@ function resolveTenantId(): string {
 
 export function useTenantBranding(): void {
   useEffect(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/supervisor")) {
+      return;
+    }
+
     const tenantId = resolveTenantId();
     if (tenantId !== "default") {
       localStorage.setItem("flexhrm_tenant_id", tenantId);

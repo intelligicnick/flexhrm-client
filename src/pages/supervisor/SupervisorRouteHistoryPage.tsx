@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { CalendarDays, MapPin, Route, Gauge, Timer } from "lucide-react";
+import { CalendarDays, MapPin, Route, Gauge, Timer, Info } from "lucide-react";
 import {
   formatDistanceKm,
   formatDuration,
@@ -13,9 +13,12 @@ import {
 } from "../../lib/supervisor-route-history";
 import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
 import {
+  attachMapResizeObserver,
+  attachMapVisibilityObserver,
   createFieldMap,
   createMapTileLayer,
   scheduleMapInvalidate,
+  waitForMapContainerSize,
 } from "../../lib/leaflet-map-setup";
 import {
   SupervisorEmptyState,
@@ -25,7 +28,6 @@ import {
   SupervisorStatCard,
   SupervisorStatGrid,
 } from "./SupervisorUI";
-import { useSupervisorI18n } from "./SupervisorI18nContext";
 
 const PERIOD_OPTIONS: { key: RoutePeriod; label: string }[] = [
   { key: "today", label: "Today" },
@@ -35,35 +37,70 @@ const PERIOD_OPTIONS: { key: RoutePeriod; label: string }[] = [
   { key: "custom", label: "Custom" },
 ];
 
-function drawRoute(map: L.Map, points: RoutePoint[]) {
+const MAX_ROUTE_MARKERS = 120;
+
+function sampleRoutePoints(points: RoutePoint[]): RoutePoint[] {
+  if (points.length <= MAX_ROUTE_MARKERS) return points;
+  const step = Math.ceil(points.length / MAX_ROUTE_MARKERS);
+  const sampled: RoutePoint[] = [];
+  for (let i = 0; i < points.length; i += step) {
+    sampled.push(points[i]);
+  }
+  const last = points[points.length - 1];
+  if (sampled[sampled.length - 1] !== last) sampled.push(last);
+  return sampled;
+}
+
+function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
   const valid = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  valid.forEach((point) => {
-    L.circleMarker([point.lat, point.lng], {
-      radius: 3,
-      color: point.isMock ? "#ef4444" : "#ff791a",
-      fillOpacity: 0.8,
-    }).addTo(map);
-  });
+  if (valid.length === 0) return;
+
   if (valid.length >= 2) {
     L.polyline(
       valid.map((p) => [p.lat, p.lng] as [number, number]),
       { color: "#ff791a", weight: 4, opacity: 0.85 },
-    ).addTo(map);
-    map.fitBounds(L.latLngBounds(valid.map((p) => [p.lat, p.lng] as [number, number])), {
-      padding: [24, 24],
-    });
-  } else if (valid.length === 1) {
-    map.setView([valid[0].lat, valid[0].lng], 15);
+    ).addTo(layerGroup);
+
+    const start = valid[0];
+    const end = valid[valid.length - 1];
+    L.circleMarker([start.lat, start.lng], {
+      radius: 6,
+      color: "#16a34a",
+      fillColor: "#22c55e",
+      fillOpacity: 1,
+      weight: 2,
+    })
+      .bindTooltip("Start", { permanent: false })
+      .addTo(layerGroup);
+    L.circleMarker([end.lat, end.lng], {
+      radius: 6,
+      color: "#ff791a",
+      fillColor: "#fb923c",
+      fillOpacity: 1,
+      weight: 2,
+    })
+      .bindTooltip("Latest", { permanent: false })
+      .addTo(layerGroup);
+
+    return valid;
   }
+
+  L.circleMarker([valid[0].lat, valid[0].lng], {
+    radius: 6,
+    color: valid[0].isMock ? "#ef4444" : "#ff791a",
+    fillOpacity: 0.9,
+  }).addTo(layerGroup);
+  return valid;
 }
 
 export default function SupervisorRouteHistoryPage() {
-  const { t } = useSupervisorI18n();
   const mapRef = useRef<HTMLDivElement | null>(null);
   const leafletRef = useRef<L.Map | null>(null);
+  const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const [period, setPeriod] = useState<RoutePeriod>("today");
   const [customDate, setCustomDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
   const [points, setPoints] = useState<RoutePoint[]>([]);
   const [summary, setSummary] = useState<ReturnType<typeof readNativeRouteSummary>>(null);
 
@@ -87,28 +124,58 @@ export default function SupervisorRouteHistoryPage() {
   }, [bounds.fromMs, bounds.toMs]);
 
   useEffect(() => {
-    if (!mapRef.current || loading) return;
-    if (!leafletRef.current) {
-      leafletRef.current = createFieldMap(mapRef.current);
-      createMapTileLayer().addTo(leafletRef.current);
-    }
-    const map = leafletRef.current;
-    map.eachLayer((layer) => {
-      if (layer instanceof L.TileLayer) return;
-      map.removeLayer(layer);
-    });
-    drawRoute(map, points);
-    scheduleMapInvalidate(map);
-  }, [loading, points]);
+    if (!isFlexHrmNativeApp() || !mapRef.current) return;
 
-  useEffect(() => {
+    let cancelled = false;
+    let detachResize = () => undefined;
+    let detachVisibility = () => undefined;
+
+    void (async () => {
+      const sized = await waitForMapContainerSize(mapRef.current!);
+      if (!sized || cancelled || !mapRef.current) return;
+
+      if (!leafletRef.current) {
+        leafletRef.current = createFieldMap(mapRef.current);
+        createMapTileLayer().addTo(leafletRef.current);
+        routeLayerRef.current = L.layerGroup().addTo(leafletRef.current);
+        detachResize = attachMapResizeObserver(leafletRef.current, mapRef.current);
+        detachVisibility = attachMapVisibilityObserver(leafletRef.current, mapRef.current);
+        scheduleMapInvalidate(leafletRef.current, 50);
+        scheduleMapInvalidate(leafletRef.current, 250);
+      }
+
+      if (!cancelled) setMapReady(true);
+    })();
+
     return () => {
+      cancelled = true;
+      detachResize();
+      detachVisibility();
       if (leafletRef.current) {
         leafletRef.current.remove();
         leafletRef.current = null;
+        routeLayerRef.current = null;
       }
+      setMapReady(false);
     };
   }, []);
+
+  useEffect(() => {
+    if (!mapReady || !leafletRef.current || !routeLayerRef.current || loading) return;
+
+    routeLayerRef.current.clearLayers();
+    const valid = drawRoute(routeLayerRef.current, sampleRoutePoints(points));
+    const map = leafletRef.current;
+    if (valid && valid.length >= 2) {
+      map.fitBounds(L.latLngBounds(valid.map((p) => [p.lat, p.lng] as [number, number])), {
+        padding: [24, 24],
+      });
+    } else if (valid && valid.length === 1) {
+      map.setView([valid[0].lat, valid[0].lng], 15);
+    }
+    scheduleMapInvalidate(map, 0);
+    scheduleMapInvalidate(map, 200);
+  }, [mapReady, loading, points]);
 
   if (!isFlexHrmNativeApp()) {
     return (
@@ -124,7 +191,7 @@ export default function SupervisorRouteHistoryPage() {
     <div className="space-y-4 pb-24">
       <SupervisorPageHeader
         title="Route history"
-        subtitle="Travel path recorded on this device"
+        subtitle="Travel path recorded on this device while you are logged in"
       />
 
       <div className="flex flex-wrap gap-2">
@@ -186,30 +253,28 @@ export default function SupervisorRouteHistoryPage() {
         </SupervisorStatGrid>
       )}
 
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 flex items-start gap-2">
+        <Info size={16} className="shrink-0 mt-0.5 text-[#ff791a]" />
+        <p className="text-[11px] text-slate-600 leading-relaxed">
+          <span className="font-bold text-slate-800">GPS points</span> are location snapshots recorded
+          by the app while you are logged in — typically every 15–30 seconds when moving, or every
+          2–5 minutes when stationary. They form your travel line on the map and are used to calculate
+          distance and time on the field.
+        </p>
+      </div>
+
       <SupervisorSection title="Travel path">
-        <style>{`
-          .supervisor-route-map-container .leaflet-container {
-            height: 100% !important;
-            width: 100% !important;
-            touch-action: pan-x pan-y pinch-zoom;
-            transform: translateZ(0);
-          }
-          .supervisor-route-map-container .leaflet-pane,
-          .supervisor-route-map-container .leaflet-tile-pane,
-          .supervisor-route-map-container .leaflet-overlay-pane {
-            z-index: 1 !important;
-          }
-          .supervisor-route-map-container .leaflet-top,
-          .supervisor-route-map-container .leaflet-bottom {
-            z-index: 2 !important;
-          }
-        `}</style>
-        <div className="relative supervisor-route-map-container isolate z-0 overflow-hidden rounded-xl border border-slate-100">
+        <div className="relative overflow-hidden rounded-xl border border-slate-100">
           <div ref={mapRef} className="h-72 w-full bg-slate-100" />
+          {!mapReady && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-xs text-slate-500">
+              Loading map…
+            </div>
+          )}
         </div>
         {!loading && points.length === 0 && (
           <p className="text-xs text-slate-500 mt-3 text-center">
-            No GPS points recorded for this period.
+            No GPS points recorded for this period. Keep location on and stay logged in while travelling.
           </p>
         )}
       </SupervisorSection>
