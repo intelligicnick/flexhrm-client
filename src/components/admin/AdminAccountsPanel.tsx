@@ -6,6 +6,7 @@ import {
   Map,
   Search,
   Settings,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -163,6 +164,7 @@ export default function AdminAccountsPanel() {
     setEditAdminNewPassword,
     handleInviteAdminSubmit,
     handleUpdateAdminSubmit,
+    handleDeleteAdmin,
     handleResetAdminPasswordSubmit,
     resetEditAdminPasswordFields,
   } = useHRMS();
@@ -171,6 +173,7 @@ export default function AdminAccountsPanel() {
   const [resetPasswordUsername, setResetPasswordUsername] = useState<string | null>(null);
 
   const canEditAdmin = !!userPermissions.admin?.edit;
+  const canDeleteAdmin = !!userPermissions.admin?.delete;
   const isSuperAdmin =
     String(sessionRole || "").toLowerCase() === "admin" ||
     String(sessionUser || "").toLowerCase() === "admin";
@@ -411,17 +414,19 @@ export default function AdminAccountsPanel() {
                         <p className="text-[10px] text-slate-400 font-mono">
                           {adm.createdAt ? new Date(adm.createdAt).toLocaleDateString() : "Present"}
                         </p>
-                        {!isRootAdmin && canEditAdmin && (
+                        {!isRootAdmin && (canEditAdmin || canDeleteAdmin) && (
                           <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openEditAdmin(adm)}
-                              className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-lg flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
-                            >
-                              <Settings size={11} />
-                              Configure
-                            </button>
-                            {isSuperAdmin && (
+                            {canEditAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => openEditAdmin(adm)}
+                                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 rounded-lg flex items-center gap-1 border border-slate-200 font-medium transition cursor-pointer"
+                              >
+                                <Settings size={11} />
+                                Configure
+                              </button>
+                            )}
+                            {isSuperAdmin && canEditAdmin && (
                               <button
                                 type="button"
                                 onClick={() => openResetPassword(adm)}
@@ -429,6 +434,16 @@ export default function AdminAccountsPanel() {
                               >
                                 <KeyRound size={11} />
                                 Reset password
+                              </button>
+                            )}
+                            {canDeleteAdmin && adm.username !== sessionUser && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAdmin(adm.username)}
+                                className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-600 rounded-lg flex items-center gap-1 border border-rose-200 font-medium transition cursor-pointer"
+                              >
+                                <Trash2 size={11} />
+                                Delete
                               </button>
                             )}
                           </div>

@@ -228,6 +228,12 @@ export function formatAuditLogDetails(action: string, details: unknown): string[
       break;
     }
 
+    case "DELETE_ADMIN": {
+      if (details.deletedUsername) lines.push(`Removed admin: ${formatValue(details.deletedUsername)}`);
+      if (details.previousRole) lines.push(`Previous role: ${formatValue(details.previousRole)}`);
+      break;
+    }
+
     case "UPDATE_ADMIN_SECURITY":
     case "UPDATE_ADMIN_PROFILE":
     case "CHANGE_PASSWORD": {

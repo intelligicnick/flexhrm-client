@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { LucideIcon, Loader2 } from "lucide-react";
 import { busyButtonClasses, inferLoadingLabel, normalizeButtonLabel } from "../../lib/button-loading";
 
@@ -353,5 +354,57 @@ export function SupervisorActionButton({
         </>
       )}
     </button>
+  );
+}
+
+export function SupervisorConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
+  variant = "danger",
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  variant?: "danger" | "default";
+}) {
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[270] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="supervisor-confirm-title"
+    >
+      <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+        <h2 id="supervisor-confirm-title" className="text-lg font-black text-slate-900">
+          {title}
+        </h2>
+        <p className="mt-2 text-sm text-slate-600 leading-relaxed">{message}</p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <SupervisorActionButton type="button" onClick={onCancel} variant="secondary" className="py-3">
+            {cancelLabel}
+          </SupervisorActionButton>
+          <SupervisorActionButton
+            type="button"
+            onClick={onConfirm}
+            variant={variant === "danger" ? "danger" : "gradient"}
+            className="py-3"
+          >
+            {confirmLabel}
+          </SupervisorActionButton>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

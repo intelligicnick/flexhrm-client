@@ -6,13 +6,20 @@ const MATERIAL_LABEL_KEYS: Record<(typeof SCHOOL_MATERIAL_ITEMS)[number], Superv
   Brush: "materialBrush",
   Jhaadu: "materialJhaadu",
   Harpic: "materialHarpic",
-  Broom: "materialBroom",
+  Handwash: "materialHandwash",
   Mop: "materialMop",
 };
 
+const LEGACY_MATERIAL_LABEL_KEYS: Record<string, SupervisorTranslationKey> = {
+  Broom: "materialHandwash",
+};
+
 export function getMaterialLabel(
-  item: (typeof SCHOOL_MATERIAL_ITEMS)[number],
+  item: string,
   t: (key: SupervisorTranslationKey) => string,
 ): string {
-  return t(MATERIAL_LABEL_KEYS[item]);
+  const key =
+    MATERIAL_LABEL_KEYS[item as (typeof SCHOOL_MATERIAL_ITEMS)[number]] ||
+    LEGACY_MATERIAL_LABEL_KEYS[item];
+  return key ? t(key) : item;
 }

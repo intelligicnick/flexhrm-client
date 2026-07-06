@@ -5609,6 +5609,40 @@ export function useHRMSApp() {
     }
   };
 
+  const handleDeleteAdmin = async (username: string) => {
+    if (!ensureDeletePermission("admin", "administrator accounts")) return;
+    if (username.toLowerCase() === "admin") {
+      setErrorMessage("The root administrator account cannot be deleted.");
+      return;
+    }
+    if (username.toLowerCase() === sessionUser.toLowerCase()) {
+      setErrorMessage("You cannot delete your own administrator account.");
+      return;
+    }
+    const confirmed = await confirmAction({
+      title: "Delete administrator",
+      message: `Permanently remove "${username}" from administrator accounts? They will be signed out and cannot log in again.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/admins/${encodeURIComponent(username)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        throw await parseApiError(res, "Failed to delete administrator.");
+      }
+      if (editingAdminUsername?.toLowerCase() === username.toLowerCase()) {
+        setEditingAdminUsername(null);
+      }
+      await fetchAdmins();
+      triggerSuccess(`Administrator "${username}" has been removed.`);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to delete administrator.");
+    }
+  };
+
   // Logout handler
   const handleLogout = async (redirectTo?: string) => {
     setIsProfileOpen(false);
@@ -8524,6 +8558,7 @@ export function useHRMSApp() {
     backToSignIn,
     handleInviteAdminSubmit,
     handleUpdateAdminSubmit,
+    handleDeleteAdmin,
     handleResetAdminPasswordSubmit,
     resetEditAdminPasswordFields,
     handleLogout,

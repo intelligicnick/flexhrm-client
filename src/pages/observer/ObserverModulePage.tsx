@@ -226,6 +226,7 @@ export default function ObserverModulePage() {
     handleObserverUpdateLedgerItem,
     handleDeleteLedgerItem,
     handleCellAttendanceChange,
+    handleEmployeeBulkAttendanceChange,
     fetchEmployees,
     userPermissions,
   } = useHRMS();
@@ -701,6 +702,7 @@ export default function ObserverModulePage() {
         monthKey={selectedMonth}
         attendanceDb={attendanceDb}
         onCellChange={handleCellAttendanceChange}
+        onBulkApply={handleEmployeeBulkAttendanceChange}
       />
     ) : undefined;
 
@@ -742,6 +744,7 @@ export default function ObserverModulePage() {
     handleObserverSaveLedgerBatch,
     handleDeleteLedgerItem,
     handleCellAttendanceChange,
+    handleEmployeeBulkAttendanceChange,
   ]);
 
   const openRenewalDetail = async (title: string, renewal: Renewal) => {

@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { useOutletContext } from "react-router-dom";
+import { Link, useBlocker, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ArrowLeft, Camera, CheckCircle2, ImagePlus, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
-import { SchoolWork, SCHOOL_MATERIAL_ITEMS, SchoolVisit } from "../../types";
+import { SchoolWork, SCHOOL_MATERIAL_ITEMS } from "../../types";
 import { parseApiError } from "../../api";
 import {
   hasValidVisitGps,
@@ -32,8 +31,7 @@ import {
   type PendingVisitDraft,
 } from "../../lib/supervisor-visit-outbox";
 import { useSupervisorOverlayBack, useSupervisorUnsavedBackGuard } from "../../lib/supervisor-back-handler";
-import { SupervisorActionButton, SupervisorLoadingScreen } from "./SupervisorUI";
-import SupervisorToast from "./SupervisorToast";
+import { SupervisorActionButton, SupervisorConfirmDialog, SupervisorLoadingScreen } from "./SupervisorUI";
 
 function photoSrc(photo: StampedVisitPhoto) {
   return resolvePhotoSrc(photo);
@@ -42,6 +40,13 @@ function photoSrc(photo: StampedVisitPhoto) {
 function photoThumbSrc(photo: StampedVisitPhoto) {
   return resolvePhotoThumbnailSrc(photo);
 }
+
+type VisitPhotoLightboxState = {
+  thumbSrc: string;
+  src: string;
+  alt: string;
+  caption?: string;
+};
 
 export default function SupervisorVisitPage() {
   const { schoolId } = useParams<{ schoolId: string }>();
@@ -78,16 +83,12 @@ export default function SupervisorVisitPage() {
   const [success, setSuccess] = useState(false);
   const [earnedXp, setEarnedXp] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<VisitPhotoLightboxState | null>(null);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+  const leaveConfirmedRef = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const backWarnedRef = useRef(false);
   const photosRef = useRef(photos);
   photosRef.current = photos;
-
-  const showToast = useCallback((message: string) => {
-    setToast(message);
-  }, []);
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
 
@@ -199,12 +200,43 @@ export default function SupervisorVisitPage() {
   const hasUnsavedData =
     !success && (notes.trim().length > 0 || materials.length > 0 || photos.length > 0);
 
-  useSupervisorUnsavedBackGuard(
-    hasUnsavedData && lightboxIndex === null,
-    () => showToast(t("unsavedDataWarning")),
+  const promptLeaveConfirm = useCallback(() => {
+    setLeaveConfirmOpen(true);
+  }, []);
+
+  const navigationBlocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasUnsavedData &&
+      !leaveConfirmedRef.current &&
+      currentLocation.pathname !== nextLocation.pathname,
   );
 
+  useEffect(() => {
+    if (navigationBlocker.state !== "blocked") return;
+    promptLeaveConfirm();
+  }, [navigationBlocker.state, promptLeaveConfirm]);
+
+  useSupervisorUnsavedBackGuard(hasUnsavedData && !leaveConfirmOpen, promptLeaveConfirm);
+
   useSupervisorOverlayBack(success, () => setSuccess(false));
+
+  const confirmLeave = useCallback(() => {
+    leaveConfirmedRef.current = true;
+    setLeaveConfirmOpen(false);
+    photosRef.current.forEach(revokeStampedVisitPhotoUrls);
+    if (navigationBlocker.state === "blocked") {
+      navigationBlocker.proceed?.();
+      return;
+    }
+    navigate("/supervisor");
+  }, [navigate, navigationBlocker]);
+
+  const cancelLeave = useCallback(() => {
+    setLeaveConfirmOpen(false);
+    if (navigationBlocker.state === "blocked") {
+      navigationBlocker.reset?.();
+    }
+  }, [navigationBlocker]);
 
   useEffect(() => {
     return () => {
@@ -215,15 +247,16 @@ export default function SupervisorVisitPage() {
   const handleBackToSchools = (e: React.MouseEvent) => {
     if (!hasUnsavedData) return;
     e.preventDefault();
-    showToast(t("unsavedDataWarning"));
-    if (backWarnedRef.current) {
-      navigate("/supervisor");
-      return;
-    }
-    backWarnedRef.current = true;
-    window.setTimeout(() => {
-      backWarnedRef.current = false;
-    }, 3000);
+    promptLeaveConfirm();
+  };
+
+  const openPhotoLightbox = (photo: StampedVisitPhoto) => {
+    setLightbox({
+      thumbSrc: photoThumbSrc(photo),
+      src: photoSrc(photo),
+      alt: photo.caption,
+      caption: photo.locationLabel,
+    });
   };
 
   const removePhoto = (index: number) => {
@@ -232,7 +265,7 @@ export default function SupervisorVisitPage() {
       if (photo) revokeStampedVisitPhotoUrls(photo);
       return prev.filter((_, i) => i !== index);
     });
-    setLightboxIndex(null);
+    setLightbox(null);
   };
 
   const handleLiveCapture = async () => {
@@ -344,7 +377,15 @@ export default function SupervisorVisitPage() {
 
   return (
     <div className="space-y-4 pb-28">
-      {toast && <SupervisorToast message={toast} onDone={() => setToast(null)} />}
+      <SupervisorConfirmDialog
+        open={leaveConfirmOpen}
+        title={t("unsavedLeaveTitle")}
+        message={t("unsavedLeaveMessage")}
+        confirmLabel={t("leavePage")}
+        cancelLabel={t("stayOnPage")}
+        onConfirm={confirmLeave}
+        onCancel={cancelLeave}
+      />
 
       {success &&
         createPortal(
@@ -378,13 +419,13 @@ export default function SupervisorVisitPage() {
           document.body,
         )}
 
-      {lightboxIndex !== null && photos[lightboxIndex] && (
+      {lightbox && (
         <SupervisorPhotoLightbox
-          thumbSrc={photoThumbSrc(photos[lightboxIndex])}
-          src={photoSrc(photos[lightboxIndex])}
-          alt={photos[lightboxIndex].caption}
-          caption={photos[lightboxIndex].locationLabel}
-          onClose={() => setLightboxIndex(null)}
+          thumbSrc={lightbox.thumbSrc}
+          src={lightbox.src}
+          alt={lightbox.alt}
+          caption={lightbox.caption}
+          onClose={() => setLightbox(null)}
         />
       )}
 
@@ -524,7 +565,7 @@ export default function SupervisorVisitPage() {
                       type="button"
                       onClick={(e) => {
                         e.preventDefault();
-                        window.setTimeout(() => setLightboxIndex(i), 0);
+                        window.setTimeout(() => openPhotoLightbox(photo), 0);
                       }}
                       className="block w-full cursor-pointer text-left"
                     >

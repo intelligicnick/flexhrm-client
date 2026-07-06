@@ -743,7 +743,7 @@ export const SCHOOL_MATERIAL_ITEMS = [
   "Brush",
   "Jhaadu",
   "Harpic",
-  "Broom",
+  "Handwash",
   "Mop",
 ];
 

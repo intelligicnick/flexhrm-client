@@ -16,6 +16,7 @@ import SupervisorDateFilter from "./SupervisorDateFilter";
 import { SupervisorEmptyState, SupervisorLoadingScreen } from "./SupervisorUI";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
 import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
+import { getMaterialLabel } from "../../lib/supervisor-materials";
 
 function photoSrc(photo: SchoolVisitPhoto) {
   return resolvePhotoSrc(photo);
@@ -171,7 +172,7 @@ function VisitCard({
                     key={m.item}
                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-orange-50 text-orange-700 border border-orange-100"
                   >
-                    {m.item}
+                    {getMaterialLabel(m.item, t)}
                   </span>
                 ))}
               </div>

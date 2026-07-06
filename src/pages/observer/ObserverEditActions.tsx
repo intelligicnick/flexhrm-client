@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import type {
   CommitmentDiary,
@@ -15,6 +15,7 @@ import {
   getDayOfWeekForMonthDay,
   getEffectiveAttendanceStatus,
   isWeeklyOffDay,
+  resolveBulkAttendanceStatus,
 } from "../../lib/attendance-helpers";
 import { getDaysInMonthStatic } from "../../lib/date-helpers";
 import { isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
@@ -453,6 +454,106 @@ function attendanceCellClass(status: string): string {
   }
 }
 
+/** Calendar rows (Sun–Sat) — matches the month grid layout. */
+function buildCalendarWeekRows(monthKey: string, daysInMonth: number): number[][] {
+  const weeks: number[][] = [];
+  let week: number[] = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    week.push(day);
+    const dow = getDayOfWeekForMonthDay(monthKey, day);
+    if (dow === 6 || day === daysInMonth) {
+      weeks.push(week);
+      week = [];
+    }
+  }
+  return weeks;
+}
+
+function filterActiveDays(
+  employee: Employee,
+  monthKey: string,
+  days: number[],
+): number[] {
+  return days.filter((day) => !isEmployeeExitedOnDayStatic(employee, monthKey, day));
+}
+
+function nextTapAttendanceStatus(currentStatus: string, isWeeklyOff: boolean): string {
+  if (isWeeklyOff) {
+    return currentStatus === "P" ? "" : "P";
+  }
+  if (currentStatus === "P") return "A";
+  if (currentStatus === "A") return "P";
+  return "P";
+}
+
+const ATTENDANCE_LONG_PRESS_MS = 450;
+
+type AttendanceStatusOption = { value: string; label: string };
+
+function getAttendanceStatusOptions(isWeeklyOff: boolean): AttendanceStatusOption[] {
+  if (isWeeklyOff) {
+    return [
+      { value: "WO", label: "Weekly Off" },
+      { value: "P", label: "Present" },
+    ];
+  }
+  return [
+    { value: "", label: "Clear" },
+    { value: "P", label: "Present" },
+    { value: "A", label: "Absent" },
+    { value: "L", label: "Leave" },
+    { value: "H", label: "Holiday" },
+  ];
+}
+
+function attendanceStatusMenuClass(value: string): string {
+  switch (value) {
+    case "P":
+      return "bg-emerald-50 border-emerald-200 text-emerald-800";
+    case "A":
+      return "bg-rose-50 border-rose-200 text-rose-800";
+    case "L":
+      return "bg-amber-50 border-amber-200 text-amber-800";
+    case "H":
+      return "bg-blue-50 border-blue-200 text-blue-800";
+    case "WO":
+      return "bg-red-50 border-red-200 text-red-800";
+    default:
+      return "bg-slate-50 border-slate-200 text-slate-600";
+  }
+}
+
+type AttendanceRangePreset = "month" | "first15" | "last15" | "w1" | "w2" | "w3" | "w4";
+
+function getDaysForRangePreset(
+  preset: AttendanceRangePreset,
+  monthKey: string,
+  daysInMonth: number,
+): number[] {
+  const weeks = buildCalendarWeekRows(monthKey, daysInMonth);
+  switch (preset) {
+    case "month":
+      return Array.from({ length: daysInMonth }, (_, i) => i + 1);
+    case "first15":
+      return Array.from({ length: Math.min(15, daysInMonth) }, (_, i) => i + 1);
+    case "last15":
+      return Array.from(
+        { length: Math.min(15, daysInMonth) },
+        (_, i) => Math.max(1, daysInMonth - 14) + i,
+      );
+    case "w1":
+      return weeks[0] || [];
+    case "w2":
+      return weeks[1] || [];
+    case "w3":
+      return weeks[2] || [];
+    case "w4":
+      return weeks[3] || [];
+    default:
+      return [];
+  }
+}
+
 function LedgerBatchForm({
   form,
   monthKey,
@@ -728,96 +829,302 @@ export function ObserverAttendanceActions({
   monthKey,
   attendanceDb,
   onCellChange,
+  onBulkApply,
 }: {
   employee: Employee;
   monthKey: string;
   attendanceDb: Record<string, Record<string, Record<number, string>>>;
   onCellChange: (empId: string, day: number, status: string, monthKey?: string) => Promise<void>;
+  onBulkApply?: (empId: string, monthKey: string, days: number[], status: string) => Promise<void>;
 }) {
   const daysInMonth = getDaysInMonthStatic(monthKey);
   const empData = attendanceDb[monthKey]?.[employee.id] || {};
+  const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
+  const [activeRange, setActiveRange] = useState<AttendanceRangePreset | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"P" | "A" | null>(null);
+  const [statusMenuDay, setStatusMenuDay] = useState<number | null>(null);
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  useEffect(() => {
+    setStatusMenuDay(null);
+  }, [employee.id, monthKey]);
+
+  useEffect(() => {
+    return () => {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    };
+  }, []);
+
+  const clearPressTimer = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  };
+
+  const startLongPress = (dayNum: number) => {
+    longPressFiredRef.current = false;
+    clearPressTimer();
+    pressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      setStatusMenuDay(dayNum);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate(12);
+      }
+    }, ATTENDANCE_LONG_PRESS_MS);
+  };
+
+  const cancelLongPress = () => {
+    clearPressTimer();
+    longPressFiredRef.current = false;
+  };
+
+  const endLongPress = (onTap: () => void) => {
+    clearPressTimer();
+    if (!longPressFiredRef.current) {
+      onTap();
+    }
+    longPressFiredRef.current = false;
+  };
+
+  const applyStatusFromMenu = (dayNum: number, val: string, isWeeklyOff: boolean) => {
+    const status = isWeeklyOff && val === "WO" ? "" : val;
+    void onCellChange(employee.id, dayNum, status, monthKey);
+    setStatusMenuDay(null);
+  };
+
+  const selectRange = (preset: AttendanceRangePreset) => {
+    const days = filterActiveDays(
+      employee,
+      monthKey,
+      getDaysForRangePreset(preset, monthKey, daysInMonth),
+    );
+    setSelectedDays(new Set(days));
+    setActiveRange(preset);
+  };
+
+  const applyBulkStatus = async (status: "P" | "A") => {
+    const days = Array.from(selectedDays).sort((a, b) => a - b);
+    if (days.length === 0) return;
+    setBulkBusy(status);
+    try {
+      if (onBulkApply) {
+        await onBulkApply(employee.id, monthKey, days, status);
+      } else {
+        await Promise.all(
+          days.map((day) => {
+            const resolved = resolveBulkAttendanceStatus(
+              employee.workingDaysType,
+              monthKey,
+              day,
+              status,
+            );
+            return onCellChange(employee.id, day, resolved, monthKey);
+          }),
+        );
+      }
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const rangeButtons: Array<{ preset: AttendanceRangePreset; label: string }> = [
+    { preset: "month", label: "Month" },
+    { preset: "first15", label: "1–15" },
+    { preset: "last15", label: "Last 15" },
+    { preset: "w1", label: "W1" },
+    { preset: "w2", label: "W2" },
+    { preset: "w3", label: "W3" },
+    { preset: "w4", label: "W4" },
+  ];
+
+  const renderDayCell = (dayNum: number) => {
+    const isExited = isEmployeeExitedOnDayStatic(employee, monthKey, dayNum);
+    const currentStatus = empData[dayNum] || "";
+    const isWeeklyOff = isWeeklyOffDay(employee.workingDaysType, monthKey, dayNum);
+    const isSunday = getDayOfWeekForMonthDay(monthKey, dayNum) === 0;
+    const effectiveStatus = getEffectiveAttendanceStatus(
+      employee.workingDaysType,
+      monthKey,
+      dayNum,
+      currentStatus,
+    );
+    const isSelected = selectedDays.has(dayNum);
+
+    if (isExited) {
+      return (
+        <div
+          key={dayNum}
+          className="h-11 flex flex-col items-center justify-center rounded-lg border bg-slate-100 border-slate-200 text-slate-400"
+        >
+          <span className="text-[9px] font-bold">{dayNum}</span>
+          <span className="text-[8px]">—</span>
+        </div>
+      );
+    }
+
+  const displayStatus =
+      isWeeklyOff && currentStatus !== "P"
+        ? "WO"
+        : effectiveStatus || currentStatus;
+    const cellClass = attendanceCellClass(displayStatus);
+
+    const handleTap = () => {
+      const nextStatus = nextTapAttendanceStatus(currentStatus, isWeeklyOff);
+      void onCellChange(employee.id, dayNum, nextStatus, monthKey);
+    };
+
+    return (
+      <div
+        key={dayNum}
+        className={`relative h-11 rounded-lg border ${cellClass} ${
+          isWeeklyOff || isSunday ? "ring-1 ring-red-100" : ""
+        } ${isSelected ? "ring-2 ring-[#ff791a] ring-offset-1" : ""}`}
+      >
+        <span className="absolute top-0.5 left-0.5 text-[8px] font-bold opacity-70 leading-none pointer-events-none z-[1]">
+          {dayNum}
+        </span>
+        <span
+          className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-slate-400 leading-none pointer-events-none z-[1]"
+          aria-hidden
+        >
+          ⋮
+        </span>
+        <button
+          type="button"
+          onPointerDown={() => startLongPress(dayNum)}
+          onPointerUp={() => endLongPress(handleTap)}
+          onPointerLeave={cancelLongPress}
+          onPointerCancel={cancelLongPress}
+          onContextMenu={(e) => e.preventDefault()}
+          className="absolute inset-0 z-0 flex items-center justify-center text-[10px] font-black cursor-pointer active:opacity-70 select-none"
+          aria-label={
+            isWeeklyOff
+              ? `Day ${dayNum}: ${displayStatus || "weekly off"}. Tap to toggle present. Hold for more options.`
+              : `Day ${dayNum}: ${displayStatus || "unmarked"}. Tap to toggle present or absent. Hold for more options.`
+          }
+        >
+          {displayStatus || "—"}
+        </button>
+      </div>
+    );
+  };
+
+  const menuDay = statusMenuDay;
+  const menuIsWeeklyOff =
+    menuDay !== null && isWeeklyOffDay(employee.workingDaysType, monthKey, menuDay);
+  const menuCurrentStatus = menuDay !== null ? empData[menuDay] || "" : "";
+  const menuOptions = getAttendanceStatusOptions(!!menuIsWeeklyOff);
+  const menuDisplayValue = menuIsWeeklyOff
+    ? menuCurrentStatus === "P"
+      ? "P"
+      : "WO"
+    : menuCurrentStatus;
 
   return (
     <ActionShell>
       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Mark Attendance</p>
-      <div className="grid grid-cols-7 gap-1.5">
-        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((dayNum) => {
-          const isExited = isEmployeeExitedOnDayStatic(employee, monthKey, dayNum);
-          const currentStatus = empData[dayNum] || "";
-          const isWeeklyOff = isWeeklyOffDay(employee.workingDaysType, monthKey, dayNum);
-          const isSunday = getDayOfWeekForMonthDay(monthKey, dayNum) === 0;
-          const effectiveStatus = getEffectiveAttendanceStatus(
-            employee.workingDaysType,
-            monthKey,
-            dayNum,
-            currentStatus,
-          );
 
-          if (isExited) {
-            return (
-              <div
-                key={dayNum}
-                className="h-11 flex flex-col items-center justify-center rounded-lg border bg-slate-100 border-slate-200 text-slate-400"
-              >
-                <span className="text-[9px] font-bold">{dayNum}</span>
-                <span className="text-[8px]">—</span>
-              </div>
-            );
-          }
-
-          const displayStatus =
-            isWeeklyOff && currentStatus !== "P" ? "WO" : effectiveStatus || currentStatus;
-          const cellClass = attendanceCellClass(displayStatus);
-
-          return (
-            <div
-              key={dayNum}
-              className={`h-11 flex flex-col items-center justify-center rounded-lg border gap-0.5 ${cellClass} ${isSunday ? "ring-1 ring-red-100" : ""}`}
-            >
-              <span className="text-[9px] font-bold opacity-70">{dayNum}</span>
-              {isWeeklyOff && currentStatus !== "P" ? (
-                <select
-                  value="WO"
-                  onChange={(e) => {
-                    if (e.target.value === "P") {
-                      void onCellChange(employee.id, dayNum, "P", monthKey);
-                    }
-                  }}
-                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
-                >
-                  <option value="WO">WO</option>
-                  <option value="P">P</option>
-                </select>
-              ) : isWeeklyOff && currentStatus === "P" ? (
-                <select
-                  value="P"
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    void onCellChange(employee.id, dayNum, val === "WO" ? "" : val, monthKey);
-                  }}
-                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
-                >
-                  <option value="WO">WO</option>
-                  <option value="P">P</option>
-                </select>
-              ) : (
-                <select
-                  value={currentStatus}
-                  onChange={(e) => void onCellChange(employee.id, dayNum, e.target.value, monthKey)}
-                  className="text-[8px] font-black text-center border-0 rounded bg-transparent cursor-pointer"
-                >
-                  <option value="">—</option>
-                  <option value="P">P</option>
-                  <option value="A">A</option>
-                  <option value="L">L</option>
-                  <option value="H">H</option>
-                </select>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex flex-wrap gap-1">
+        {rangeButtons.map(({ preset, label }) => (
+          <button
+            key={preset}
+            type="button"
+            onClick={() => selectRange(preset)}
+            className={`px-2 py-1 rounded-md text-[9px] font-bold border transition cursor-pointer ${
+              activeRange === preset
+                ? "bg-[#ff791a] text-white border-[#ff791a]"
+                : "bg-white text-slate-600 border-slate-200 hover:border-[#ff791a]/40"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
-      <p className="text-[10px] text-slate-400 font-medium">P = Present · A = Absent · L = Leave · H = Holiday · WO = Weekly Off</p>
+
+      {selectedDays.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[9px] font-semibold text-slate-500">{selectedDays.size} days</span>
+          <button
+            type="button"
+            disabled={!!bulkBusy}
+            onClick={() => void applyBulkStatus("P")}
+            className="px-2 py-1 rounded-md text-[9px] font-bold bg-emerald-600 text-white disabled:opacity-60 cursor-pointer"
+          >
+            {bulkBusy === "P" ? "…" : "Mark P"}
+          </button>
+          <button
+            type="button"
+            disabled={!!bulkBusy}
+            onClick={() => void applyBulkStatus("A")}
+            className="px-2 py-1 rounded-md text-[9px] font-bold bg-rose-600 text-white disabled:opacity-60 cursor-pointer"
+          >
+            {bulkBusy === "A" ? "…" : "Mark A"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDays(new Set());
+              setActiveRange(null);
+            }}
+            className="px-2 py-1 rounded-md text-[9px] font-bold bg-slate-100 text-slate-600 border border-slate-200 cursor-pointer"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-7 gap-1">
+        {["S", "M", "T", "W", "T", "F", "S"].map((label, index) => (
+          <div
+            key={`${label}-${index}`}
+            className={`text-center text-[8px] font-black uppercase py-0.5 ${
+              index === 0 ? "text-red-400" : "text-slate-400"
+            }`}
+          >
+            {label}
+          </div>
+        ))}
+        {Array.from({ length: getDayOfWeekForMonthDay(monthKey, 1) }).map((_, i) => (
+          <div key={`pad-${i}`} className="h-11" />
+        ))}
+        {Array.from({ length: daysInMonth }, (_, i) => renderDayCell(i + 1))}
+      </div>
+
+      <p className="text-[10px] text-slate-400 font-medium">
+        Tap to toggle P/A · Hold for L/H/WO · Weekly off = red (same as admin)
+      </p>
+
+      {menuDay !== null && (
+        <>
+          <button
+            type="button"
+            aria-label="Close status menu"
+            className="fixed inset-0 z-[60] bg-black/20"
+            onClick={() => setStatusMenuDay(null)}
+          />
+          <div className="fixed inset-x-3 bottom-4 z-[61] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+              Day {menuDay} · Choose status
+            </p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {menuOptions.map((opt) => (
+                <button
+                  key={opt.value || "clear"}
+                  type="button"
+                  onClick={() => applyStatusFromMenu(menuDay, opt.value, !!menuIsWeeklyOff)}
+                  className={`min-h-[40px] px-2 py-2 rounded-xl border text-[10px] font-bold cursor-pointer active:scale-[0.98] transition ${
+                    attendanceStatusMenuClass(opt.value)
+                  } ${menuDisplayValue === opt.value ? "ring-2 ring-[#ff791a]" : ""}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </ActionShell>
   );
 }

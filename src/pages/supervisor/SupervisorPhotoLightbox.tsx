@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, ZoomIn } from "lucide-react";
 import { useSupervisorOverlayBack } from "../../lib/supervisor-back-handler";
@@ -8,7 +8,7 @@ const BACKDROP_CLOSE_GRACE_MS = 400;
 
 function shouldPreloadFullImage(src: string, thumbSrc?: string): boolean {
   if (!src || src === thumbSrc) return false;
-  if (src.startsWith("data:")) return false;
+  if (src.startsWith("data:") || src.startsWith("blob:")) return false;
   return true;
 }
 
@@ -25,9 +25,14 @@ export default function SupervisorPhotoLightbox({
   caption?: string;
   onClose: () => void;
 }) {
-  const initialSrc = src || thumbSrc;
-  const [displaySrc, setDisplaySrc] = useState(initialSrc);
-  const [loadingFull, setLoadingFull] = useState(shouldPreloadFullImage(src, thumbSrc));
+  const resolvedSrc = src || thumbSrc || "";
+  const resolvedThumb = thumbSrc || src || "";
+  const preloadFull = useMemo(
+    () => shouldPreloadFullImage(resolvedSrc, resolvedThumb),
+    [resolvedSrc, resolvedThumb],
+  );
+  const [displaySrc, setDisplaySrc] = React.useState(resolvedThumb || resolvedSrc);
+  const [loadingFull, setLoadingFull] = React.useState(preloadFull);
   const suppressBackdropCloseUntil = useRef(Date.now() + BACKDROP_CLOSE_GRACE_MS);
   const closeOverlay = useSupervisorOverlayBack(true, onClose);
 
@@ -38,15 +43,13 @@ export default function SupervisorPhotoLightbox({
 
   useEffect(() => {
     suppressBackdropCloseUntil.current = Date.now() + BACKDROP_CLOSE_GRACE_MS;
-    setDisplaySrc(src || thumbSrc);
-    setLoadingFull(shouldPreloadFullImage(src, thumbSrc));
-  }, [src, thumbSrc]);
+    setDisplaySrc(resolvedThumb || resolvedSrc);
+    setLoadingFull(preloadFull);
+  }, [resolvedSrc, resolvedThumb, preloadFull]);
 
   useEffect(() => {
-    if (!shouldPreloadFullImage(src, thumbSrc)) {
-      if (src && src !== thumbSrc) {
-        setDisplaySrc(src);
-      }
+    if (!preloadFull) {
+      setDisplaySrc(resolvedSrc || resolvedThumb);
       setLoadingFull(false);
       return;
     }
@@ -55,21 +58,21 @@ export default function SupervisorPhotoLightbox({
     const img = new Image();
     img.onload = () => {
       if (!cancelled) {
-        setDisplaySrc(src);
+        setDisplaySrc(resolvedSrc);
         setLoadingFull(false);
       }
     };
     img.onerror = () => {
       if (!cancelled) {
-        setDisplaySrc(thumbSrc || src);
+        setDisplaySrc(resolvedThumb || resolvedSrc);
         setLoadingFull(false);
       }
     };
-    img.src = src;
+    img.src = resolvedSrc;
     return () => {
       cancelled = true;
     };
-  }, [src, thumbSrc]);
+  }, [resolvedSrc, resolvedThumb, preloadFull]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,7 +86,7 @@ export default function SupervisorPhotoLightbox({
     };
   }, [closeOverlay]);
 
-  if (!src) return null;
+  if (!resolvedSrc && !resolvedThumb) return null;
 
   return createPortal(
     <div

@@ -161,6 +161,28 @@
         rel="stylesheet"
       />
     </noscript>
+    <style>
+      #root:empty {
+        display: flex;
+        min-height: 100dvh;
+        align-items: center;
+        justify-content: center;
+        background: #f1f5f9;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      #root:empty::after {
+        content: "";
+        width: 2rem;
+        height: 2rem;
+        border: 2px solid #ff791a;
+        border-top-color: transparent;
+        border-radius: 9999px;
+        animation: flexhrm-spin 0.8s linear infinite;
+      }
+      @keyframes flexhrm-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
     <title>Flex HRM an Intelligic product</title>
     <script>
       (function () {
@@ -188,17 +210,11 @@
         } catch (e) {}
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-CPDvcV6k.js"></script>
+    <script type="module" crossorigin src="/assets/index-CxKozm4f.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/jspdf-CpcpKoph.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-QZl3zRgs.js">
-    <link rel="modulepreload" crossorigin href="/assets/xlsx-BUMc1vyu.js">
-    <link rel="modulepreload" crossorigin href="/assets/pdfjs-DqlYt5g3.js">
-    <link rel="modulepreload" crossorigin href="/assets/icons-8Xwt-lIc.js">
-    <link rel="modulepreload" crossorigin href="/assets/html2canvas-ezMWrafe.js">
-    <link rel="modulepreload" crossorigin href="/assets/qrcode-D1ZI4WSn.js">
-    <link rel="modulepreload" crossorigin href="/assets/leaflet-Dmu3Dol9.js">
-    <link rel="stylesheet" crossorigin href="/assets/leaflet-CIGW-MKW.css">
-    <link rel="stylesheet" crossorigin href="/assets/index-CBdCDqlM.css">
+    <link rel="modulepreload" crossorigin href="/assets/icons-DnC1CCaQ.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-Do09_z4S.css">
   </head>
   <body>
     <div id="root"></div>
