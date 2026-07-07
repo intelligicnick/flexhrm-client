@@ -53,7 +53,7 @@ const STATUS_LABELS: Record<TenderStatus, string> = {
   not_filed: "Not Participated",
   not_evaluated: "Participated and Not Evaluated",
   filed: "Participated and Not Evaluated",
-  technical_qualified: "Technical Qualified",
+  technical_qualified: "Technical Completed",
   qualified: "Qualified",
   disqualified: "Disqualified",
   technical_not_open: "Technical Not Open",
@@ -72,7 +72,7 @@ const STATUS_STYLES: Record<TenderStatus, string> = {
   filed: "bg-sky-50 text-sky-700 border-sky-200",
   technical_qualified: "bg-emerald-50 text-emerald-700 border-emerald-200",
   qualified: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  disqualified: "bg-red-50 text-red-700 border-red-200",
+  disqualified: "bg-red-50 text-red-600 border-red-400",
   technical_not_open: "bg-amber-50 text-amber-700 border-amber-200",
   cancelled: "bg-slate-200 text-slate-500 border-slate-300",
   representation_asked: "bg-violet-50 text-violet-700 border-violet-200",
@@ -447,7 +447,7 @@ function normalizeTenderStatus(raw: string): TenderStatus {
     return "bid_not_awarded";
   }
   if (value.includes("bid awarded")) return "bid_awarded";
-  if (value.includes("technical") && value.includes("qualified")) {
+  if (value.includes("technical") && (value.includes("completed") || value.includes("qualified"))) {
     return "technical_qualified";
   }
   if (value.includes("qualified") && !value.includes("disqualified")) {

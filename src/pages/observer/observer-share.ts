@@ -1,4 +1,5 @@
 import { apiUrl } from "../../api";
+import { unwrapChromePdfViewerUrl, wrapChromePdfViewerUrl } from "../../lib/gem-helpers";
 import { getObserverToken, isObserverNativeClient } from "../../lib/observer-session";
 import {
   canUseObserverNativePdf,
@@ -43,7 +44,7 @@ export function resolvePdfFetchUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return trimmed;
   if (trimmed.startsWith("/api/")) return apiUrl(trimmed);
-  const absolute = resolveAbsoluteUrl(trimmed);
+  const absolute = resolveAbsoluteUrl(unwrapChromePdfViewerUrl(trimmed));
   if (shouldProxyPdfUrl(absolute)) {
     return apiUrl(`/api/proxy/pdf?url=${encodeURIComponent(absolute)}`);
   }
@@ -85,15 +86,18 @@ export async function fetchPdfFile(url: string, title: string): Promise<File> {
 function openPdfExternally(url: string): void {
   const trimmed = url.trim();
   if (!trimmed || trimmed.startsWith("/api/")) return;
-  const absolute = resolveAbsoluteUrl(trimmed);
+  const absolute = resolveAbsoluteUrl(unwrapChromePdfViewerUrl(trimmed));
   if (absolute.includes("/api/")) return;
-  window.open(absolute, "_blank", "noopener,noreferrer");
+  const openUrl = /^chrome-extension:\/\//i.test(trimmed)
+    ? trimmed
+    : wrapChromePdfViewerUrl(absolute);
+  window.open(openUrl, "_blank", "noopener,noreferrer");
 }
 
 export function canOpenPdfExternally(url: string): boolean {
   const trimmed = url.trim();
   if (!trimmed || trimmed.startsWith("/api/")) return false;
-  const absolute = resolveAbsoluteUrl(trimmed);
+  const absolute = resolveAbsoluteUrl(unwrapChromePdfViewerUrl(trimmed));
   return !absolute.includes("/api/") && /^https?:\/\//i.test(absolute);
 }
 

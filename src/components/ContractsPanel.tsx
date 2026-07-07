@@ -35,7 +35,7 @@ import {
 } from "../lib/date-helpers";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
-import { resolveGemContractNoLabel, resolveGemContractPdfUrl } from "../lib/gem-helpers";
+import { resolveGemContractNoLabel, resolveGemContractPdfUrl, extractGemContractId } from "../lib/gem-helpers";
 import { validateOptionalAmountString } from "../lib/number-validation";
 import {
   formatContractLabel,
@@ -366,6 +366,10 @@ function ContractExpandedDetails({
 }) {
   const pdfUrl = resolveGemContractPdfUrl(contract);
   const contractLabel = resolveGemContractNoLabel(contract);
+  const gemContractId =
+    contract.gemContractId?.trim() ||
+    extractGemContractId(contract.gemContractPdfUrl ?? "") ||
+    extractGemContractId(contract.contractNo ?? "");
   const end = effectiveEndDate(contract);
 
   const rows: Array<{ key: ContractColumnKey | "detail"; label: string; value: React.ReactNode }> = [
@@ -443,11 +447,16 @@ function ContractExpandedDetails({
           className="text-blue-600 hover:underline break-all"
           onClick={(event) => event.stopPropagation()}
         >
-          {pdfUrl}
+          Open contract PDF
         </a>
       ) : (
         "—"
       ),
+    },
+    {
+      key: "detail",
+      label: "GeM Contract ID",
+      value: gemContractId || "—",
     },
     { key: "detail", label: "Notes", value: displayValue(contract.notes) },
     {
