@@ -7,6 +7,7 @@ import {
   extractGemDocId,
   resolveGemBidPdfSourceUrl,
   resolveGemBidPdfUrl,
+  resolveGemContractFullLinkForCopy,
   resolveGemContractId,
   resolveGemContractIdForCopy,
   resolveGemContractPdfSourceUrl,
@@ -70,6 +71,26 @@ describe("resolveGemContractId", () => {
   });
 });
 
+describe("resolveGemContractFullLinkForCopy", () => {
+  const contractId = "dmdOUEJHbnRYWWN3NlpTMnNLUGhkc3RqN3BMakMvcWNsQmFWRVhtVHJVcz0=";
+
+  it("returns full https link with complete contractId including trailing =", () => {
+    expect(resolveGemContractFullLinkForCopy({ gemContractId: contractId })).toBe(
+      `https://fulfilment.gem.gov.in/contract/fds?contractId=${contractId}`,
+    );
+  });
+
+  it("rebuilds full link from truncated stored URL when gemContractId is present", () => {
+    expect(
+      resolveGemContractFullLinkForCopy({
+        gemContractId: contractId,
+        gemContractPdfUrl:
+          "https://fulfilment.gem.gov.in/contract/fds?contractId=dmdOUEJHbnRYWWN3NlpTMnNLUGhkc3RqN3BMakMvcWN",
+      }),
+    ).toBe(`https://fulfilment.gem.gov.in/contract/fds?contractId=${contractId}`);
+  });
+});
+
 describe("resolveGemContractIdForCopy", () => {
   const contractIdEncoded = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0%3D";
   const contractIdDecoded = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0=";
@@ -85,7 +106,11 @@ describe("resolveGemContractIdForCopy", () => {
 
   it("extracts raw query value from wrapped chrome-extension link", () => {
     expect(extractGemContractIdQueryValue(chromePdfUrl)).toBe(contractIdEncoded);
-    expect(resolveGemContractIdForCopy({ gemContractPdfUrl: chromePdfUrl })).toBe(contractIdEncoded);
+    expect(
+      resolveGemContractIdForCopy({
+        gemContractPdfUrl: `https://fulfilment.gem.gov.in/contract/fds?contractId=${contractIdEncoded}`,
+      }),
+    ).toBe(contractIdEncoded);
   });
 
   it("encodes stored decoded gemContractId for copy", () => {
@@ -110,6 +135,7 @@ describe("resolveGemBidPdfUrl", () => {
 
 describe("resolveGemContractPdfUrl", () => {
   const contractId = "SE85WXlFRndqK3RYcFd2TGF2dWtHeVJEYTNKMEhlK3F2NW1JYlhmTGRhbz0=";
+  const contractIdEncoded = encodeURIComponent(contractId);
 
   it("builds chrome-extension link from gemContractId", () => {
     const url = resolveGemContractPdfUrl({ gemContractId: contractId });
@@ -121,9 +147,37 @@ describe("resolveGemContractPdfUrl", () => {
     expect(url).toBe(buildGemContractPdfUrl(contractId));
   });
 
-  it("prefers stored gemContractPdfUrl", () => {
-    const source = buildGemContractPdfUrl(contractId);
-    const url = resolveGemContractPdfUrl({ gemContractPdfUrl: source });
-    expect(url).toBe(`${CHROME_PREFIX}${source}`);
+  it("rebuilds canonical URL from stored gemContractPdfUrl with raw =", () => {
+    const brokenStored = `https://fulfilment.gem.gov.in/contract/fds?contractId=${contractId}`;
+    const url = resolveGemContractPdfUrl({ gemContractPdfUrl: brokenStored });
+    expect(url).toBe(`${CHROME_PREFIX}${buildGemContractPdfUrl(contractId)}`);
+    expect(url).toContain(contractIdEncoded);
+    expect(url).not.toMatch(/contractId=.*[^%]=/);
+  });
+
+  it("prefers gemContractId over broken stored gemContractPdfUrl", () => {
+    const goodId = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0=";
+    const brokenStored = "https://fulfilment.gem.gov.in/contract/fds?contractId=broken";
+    const url = resolveGemContractPdfUrl({
+      gemContractId: goodId,
+      gemContractPdfUrl: brokenStored,
+    });
+    expect(url).toBe(`${CHROME_PREFIX}${buildGemContractPdfUrl(goodId)}`);
+  });
+
+  it("extracts contractId from notes when fields are missing", () => {
+    const id = "dmdOUEJHbnRYWWN3NlpTMnNLUGhkc3RqN3BMakMvcWNsQmFWRVhtVHJVcz0=";
+    const url = resolveGemContractPdfUrl({
+      contractNo: "GEMC-123",
+      notes: `GeM contract number: GEMC-123\nGeM contractId: ${id}`,
+    });
+    expect(url).toBe(`${CHROME_PREFIX}${buildGemContractPdfUrl(id)}`);
+  });
+
+  it("extracts contractId when contractNo is the stored PDF URL", () => {
+    const id = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0=";
+    const stored = `https://fulfilment.gem.gov.in/contract/fds?contractId=${id}`;
+    const url = resolveGemContractPdfUrl({ contractNo: stored });
+    expect(url).toContain(encodeURIComponent(id));
   });
 });

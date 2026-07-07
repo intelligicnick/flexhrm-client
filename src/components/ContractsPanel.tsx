@@ -37,7 +37,11 @@ import {
 } from "../lib/date-helpers";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
-import { resolveGemContractNoLabel, resolveGemContractPdfUrl, resolveGemContractIdForCopy } from "../lib/gem-helpers";
+import {
+  resolveGemContractFullLinkForCopy,
+  resolveGemContractNoLabel,
+  resolveGemContractPdfUrl,
+} from "../lib/gem-helpers";
 import { validateOptionalAmountString } from "../lib/number-validation";
 import {
   formatContractLabel,
@@ -361,18 +365,18 @@ function ContractTableCell({
 
 function GemContractPdfBlock({ contract }: { contract: Contract }) {
   const pdfUrl = resolveGemContractPdfUrl(contract);
-  const gemContractId = resolveGemContractIdForCopy(contract);
+  const fullPdfLink = resolveGemContractFullLinkForCopy(contract);
   const [copied, setCopied] = useState(false);
 
-  if (!pdfUrl && !gemContractId) return <>—</>;
+  if (!pdfUrl && !fullPdfLink) return <>—</>;
 
-  const copyContractId = async (event: React.MouseEvent) => {
+  const copyFullPdfLink = async (event: React.MouseEvent) => {
     event.stopPropagation();
-    if (!gemContractId) return;
+    if (!fullPdfLink) return;
     try {
-      await navigator.clipboard.writeText(gemContractId);
+      await navigator.clipboard.writeText(fullPdfLink);
     } catch {
-      window.prompt("Copy contract ID:", gemContractId);
+      window.prompt("Copy full contract PDF link:", fullPdfLink);
     }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
@@ -392,16 +396,16 @@ function GemContractPdfBlock({ contract }: { contract: Contract }) {
           <ExternalLink size={11} className="shrink-0" />
         </a>
       ) : null}
-      {gemContractId ? (
+      {fullPdfLink ? (
         <div className="flex items-start gap-1">
           <code className="flex-1 font-mono text-[11px] leading-snug break-all text-slate-700">
-            {gemContractId}
+            {fullPdfLink}
           </code>
           <button
             type="button"
-            onClick={copyContractId}
+            onClick={copyFullPdfLink}
             className="shrink-0 rounded p-0.5 text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-700"
-            title={copied ? "Copied!" : "Copy contract ID from PDF link"}
+            title={copied ? "Copied!" : "Copy full contract PDF link"}
           >
             {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
           </button>
