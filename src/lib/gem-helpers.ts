@@ -27,19 +27,93 @@ export function extractGemDocId(gemDocUrl: string): string {
   return match?.[1] ?? "";
 }
 
+function normalizeGemContractId(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
 /** Extract GeM fulfilment contractId token from a URL or stored value. */
 export function extractGemContractId(input: string): string {
   const trimmed = unwrapChromePdfViewerUrl(input?.trim() ?? "");
   if (!trimmed) return "";
 
-  const fromQuery = trimmed.match(/[?&]contractId=([^&]+)/i)?.[1];
-  if (fromQuery) return decodeURIComponent(fromQuery);
+  const fromQuery = trimmed.match(/[?&]contractId=([^&#]+)/i)?.[1];
+  if (fromQuery) return normalizeGemContractId(fromQuery);
 
   if (!/^https?:\/\//i.test(trimmed) && /^[A-Za-z0-9+/=%._-]+$/.test(trimmed)) {
-    return decodeURIComponent(trimmed);
+    return normalizeGemContractId(trimmed);
   }
 
   return "";
+}
+
+/** Extract raw contractId query value from a URL (everything after contractId=, not decoded). */
+export function extractGemContractIdQueryValue(input: string): string {
+  const trimmed = unwrapChromePdfViewerUrl(input?.trim() ?? "");
+  if (!trimmed) return "";
+
+  const fromQuery = trimmed.match(/[?&]contractId=([^&#]*)/i)?.[1];
+  if (fromQuery) return fromQuery;
+
+  if (!/^https?:\/\//i.test(trimmed) && /^[A-Za-z0-9+/=%._-]+$/.test(trimmed)) {
+    if (/%[0-9A-Fa-f]{2}/.test(trimmed)) return trimmed;
+    return encodeURIComponent(normalizeGemContractId(trimmed));
+  }
+
+  return "";
+}
+
+/** Full GeM contractId token (decoded, including trailing = padding). */
+export function resolveGemContractId(contract: {
+  gemContractId?: string;
+  gemContractPdfUrl?: string;
+  contractNo?: string;
+}): string {
+  const fromField = contract.gemContractId?.trim();
+  if (fromField) return normalizeGemContractId(fromField);
+
+  const fromPdf = extractGemContractId(contract.gemContractPdfUrl ?? "");
+  if (fromPdf) return fromPdf;
+
+  return extractGemContractId(contract.contractNo ?? "");
+}
+
+/** ContractId as it appears in the PDF URL after contractId= (for copy). */
+export function resolveGemContractIdForCopy(contract: {
+  gemContractId?: string;
+  gemContractPdfUrl?: string;
+  contractNo?: string;
+}): string {
+  const pdfUrl = resolveGemContractPdfUrl(contract);
+  if (pdfUrl) {
+    const fromPdfUrl = extractGemContractIdQueryValue(pdfUrl);
+    if (fromPdfUrl) return fromPdfUrl;
+  }
+
+  const sourceUrl = resolveGemContractPdfSourceUrl(contract);
+  if (sourceUrl) {
+    const fromSource = extractGemContractIdQueryValue(sourceUrl);
+    if (fromSource) return fromSource;
+  }
+
+  const storedPdf = contract.gemContractPdfUrl?.trim();
+  if (storedPdf) {
+    const fromStored = extractGemContractIdQueryValue(storedPdf);
+    if (fromStored) return fromStored;
+  }
+
+  const fromField = contract.gemContractId?.trim();
+  if (fromField) {
+    if (/%[0-9A-Fa-f]{2}/.test(fromField)) return fromField;
+    return encodeURIComponent(normalizeGemContractId(fromField));
+  }
+
+  return extractGemContractIdQueryValue(contract.contractNo ?? "");
 }
 
 export function buildGemContractPdfUrl(contractId: string): string {
@@ -76,10 +150,7 @@ export function resolveGemContractPdfSourceUrl(contract: {
   const explicit = contract.gemContractPdfUrl?.trim() ?? "";
   if (explicit) return unwrapChromePdfViewerUrl(explicit);
 
-  const contractId =
-    contract.gemContractId?.trim() ||
-    extractGemContractId(contract.contractNo ?? "") ||
-    extractGemContractId(contract.gemContractPdfUrl ?? "");
+  const contractId = resolveGemContractId(contract);
   if (contractId) return buildGemContractPdfUrl(contractId);
 
   const raw = contract.contractNo?.trim() ?? "";

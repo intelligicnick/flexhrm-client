@@ -18,6 +18,8 @@ import {
   Shield,
   ExternalLink,
   MapPin,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   Contract,
@@ -35,7 +37,7 @@ import {
 } from "../lib/date-helpers";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput } from "./ui/DateInput";
-import { resolveGemContractNoLabel, resolveGemContractPdfUrl, extractGemContractId } from "../lib/gem-helpers";
+import { resolveGemContractNoLabel, resolveGemContractPdfUrl, resolveGemContractIdForCopy } from "../lib/gem-helpers";
 import { validateOptionalAmountString } from "../lib/number-validation";
 import {
   formatContractLabel,
@@ -357,6 +359,58 @@ function ContractTableCell({
   );
 }
 
+function GemContractPdfBlock({ contract }: { contract: Contract }) {
+  const pdfUrl = resolveGemContractPdfUrl(contract);
+  const gemContractId = resolveGemContractIdForCopy(contract);
+  const [copied, setCopied] = useState(false);
+
+  if (!pdfUrl && !gemContractId) return <>—</>;
+
+  const copyContractId = async (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!gemContractId) return;
+    try {
+      await navigator.clipboard.writeText(gemContractId);
+    } catch {
+      window.prompt("Copy contract ID:", gemContractId);
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="space-y-2">
+      {pdfUrl ? (
+        <a
+          href={pdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+          onClick={(event) => event.stopPropagation()}
+        >
+          Open contract PDF
+          <ExternalLink size={11} className="shrink-0" />
+        </a>
+      ) : null}
+      {gemContractId ? (
+        <div className="flex items-start gap-1">
+          <code className="flex-1 font-mono text-[11px] leading-snug break-all text-slate-700">
+            {gemContractId}
+          </code>
+          <button
+            type="button"
+            onClick={copyContractId}
+            className="shrink-0 rounded p-0.5 text-slate-400 transition hover:bg-slate-200/80 hover:text-slate-700"
+            title={copied ? "Copied!" : "Copy contract ID from PDF link"}
+          >
+            {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ContractExpandedDetails({
   contract,
   highlightKey,
@@ -366,10 +420,6 @@ function ContractExpandedDetails({
 }) {
   const pdfUrl = resolveGemContractPdfUrl(contract);
   const contractLabel = resolveGemContractNoLabel(contract);
-  const gemContractId =
-    contract.gemContractId?.trim() ||
-    extractGemContractId(contract.gemContractPdfUrl ?? "") ||
-    extractGemContractId(contract.contractNo ?? "");
   const end = effectiveEndDate(contract);
 
   const rows: Array<{ key: ContractColumnKey | "detail"; label: string; value: React.ReactNode }> = [
@@ -439,24 +489,7 @@ function ContractExpandedDetails({
     {
       key: "detail",
       label: "GeM Contract PDF",
-      value: pdfUrl ? (
-        <a
-          href={pdfUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:underline break-all"
-          onClick={(event) => event.stopPropagation()}
-        >
-          Open contract PDF
-        </a>
-      ) : (
-        "—"
-      ),
-    },
-    {
-      key: "detail",
-      label: "GeM Contract ID",
-      value: gemContractId || "—",
+      value: <GemContractPdfBlock contract={contract} />,
     },
     { key: "detail", label: "Notes", value: displayValue(contract.notes) },
     {

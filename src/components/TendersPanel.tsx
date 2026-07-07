@@ -312,6 +312,21 @@ function canManageTender(tender: Tender, canManageLockedTenders: boolean): boole
   return !isTenderDeleted(tender) && (!isStatusLocked(tender) || canManageLockedTenders);
 }
 
+function canPermanentlyDeleteTender(tender: Tender, canManageLockedTenders: boolean): boolean {
+  return isTenderDeleted(tender) && canManageLockedTenders;
+}
+
+function canSelectTenderForBulk(
+  tender: Tender,
+  canManageLockedTenders: boolean,
+  includeDeletedInView: boolean,
+): boolean {
+  if (isTenderDeleted(tender)) {
+    return includeDeletedInView && canManageLockedTenders;
+  }
+  return canManageTender(tender, canManageLockedTenders);
+}
+
 function tenderMatchesDateRange(
   tender: Tender,
   field: "endDate" | "filedDate",
@@ -1085,6 +1100,7 @@ type TenderCardRowProps = {
   onStatusChange: (tender: Tender, status: TenderStatus) => void;
   onEdit: (tender: Tender) => void;
   onDelete: (tender: Tender) => void;
+  onPermanentDelete: (tender: Tender) => void;
 };
 
 const TenderCardRow = React.memo(function TenderCardRow({
@@ -1102,6 +1118,7 @@ const TenderCardRow = React.memo(function TenderCardRow({
   onStatusChange,
   onEdit,
   onDelete,
+  onPermanentDelete,
 }: TenderCardRowProps) {
   const {
     tender,
@@ -1222,6 +1239,16 @@ const TenderCardRow = React.memo(function TenderCardRow({
                 <ChevronDown size={11} className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
               </div>
             )}
+            {!readOnly && deleted && canManageLockedTenders && (
+              <button
+                type="button"
+                onClick={() => void onPermanentDelete(tender)}
+                className="p-1.5 rounded-md hover:bg-red-100 text-red-500 hover:text-red-700 cursor-pointer shrink-0"
+                title="Delete permanently"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
             {!readOnly && !deleted && (!locked || canManageLockedTenders) && (
               <>
                 <button
@@ -1280,6 +1307,7 @@ const TenderTableRow = React.memo(function TenderTableRow({
   onStatusChange,
   onEdit,
   onDelete,
+  onPermanentDelete,
 }: TenderTableRowProps) {
   const { tender, deadline, deadlineCellClass, organisation, deleted, locked, urgent, missed, syncNote, previousSyncStatus } =
     item;
@@ -1393,7 +1421,16 @@ const TenderTableRow = React.memo(function TenderTableRow({
         </td>
         {!readOnly && (
           <td className="px-2 py-2.5 align-middle whitespace-nowrap">
-            {!deleted && (!locked || canManageLockedTenders) && (
+            {deleted && canManageLockedTenders ? (
+              <button
+                type="button"
+                onClick={() => void onPermanentDelete(tender)}
+                className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 hover:text-red-700 cursor-pointer"
+                title="Delete permanently"
+              >
+                <Trash2 size={14} />
+              </button>
+            ) : !deleted && (!locked || canManageLockedTenders) ? (
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -1412,7 +1449,7 @@ const TenderTableRow = React.memo(function TenderTableRow({
                   <Trash2 size={14} />
                 </button>
               </div>
-            )}
+            ) : null}
           </td>
         )}
       </tr>
@@ -1436,11 +1473,13 @@ interface TendersPanelProps {
   onCreate: (payload: CreateTenderInput) => Promise<void>;
   onUpdate: (id: string, payload: Partial<CreateTenderInput>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onPermanentDelete: (id: string) => Promise<void>;
   onBulkUpdate: (
     ids: string[],
     payload: Partial<CreateTenderInput>,
   ) => Promise<{ updated: number; errors: string[] }>;
   onBulkDelete: (ids: string[]) => Promise<{ deleted: number; errors: string[] }>;
+  onBulkPermanentDelete: (ids: string[]) => Promise<{ deleted: number; errors: string[] }>;
   onImport: (items: CreateTenderInput[]) => Promise<{ created: number; updated: number; skipped: number }>;
 }
 
@@ -1453,8 +1492,10 @@ export default function TendersPanel({
   onCreate,
   onUpdate,
   onDelete,
+  onPermanentDelete,
   onBulkUpdate,
   onBulkDelete,
+  onBulkPermanentDelete,
   onImport,
 }: TendersPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1533,12 +1574,16 @@ export default function TendersPanel({
 
   const selectedTenderSet = useMemo(() => new Set(selectedTenderIds), [selectedTenderIds]);
 
+  const includeDeletedInView = search.trim().length > 0;
+
   const allSelectableTenderIds = useMemo(
     () =>
       normalizedTenders
-        .filter((tender) => canManageTender(tender, canManageLockedTenders))
+        .filter((tender) =>
+          canSelectTenderForBulk(tender, canManageLockedTenders, includeDeletedInView),
+        )
         .map((tender) => tender.id),
-    [normalizedTenders, canManageLockedTenders],
+    [normalizedTenders, canManageLockedTenders, includeDeletedInView],
   );
 
   useEffect(() => {
@@ -1637,9 +1682,19 @@ export default function TendersPanel({
   const selectableVisibleIds = useMemo(
     () =>
       listItems
-        .filter((item) => canManageTender(item.tender, canManageLockedTenders))
+        .filter((item) =>
+          canSelectTenderForBulk(item.tender, canManageLockedTenders, includeDeletedInView),
+        )
         .map((item) => item.tender.id),
-    [listItems, canManageLockedTenders],
+    [listItems, canManageLockedTenders, includeDeletedInView],
+  );
+
+  const selectedDeletedTenderIds = useMemo(
+    () =>
+      selectedTenders
+        .filter((tender) => canPermanentlyDeleteTender(tender, canManageLockedTenders))
+        .map((tender) => tender.id),
+    [selectedTenders, canManageLockedTenders],
   );
 
   const selectedVisibleCount = useMemo(
@@ -1830,6 +1885,24 @@ export default function TendersPanel({
     }
   }, [canManageLockedTenders, onDelete]);
 
+  const handlePermanentDelete = useCallback(async (tender: Tender) => {
+    if (!canPermanentlyDeleteTender(tender, canManageLockedTenders)) return;
+    if (
+      !window.confirm(
+        `Permanently delete tender ${tender.bidNo}? This removes it from FlexHRM and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await onPermanentDelete(tender.id);
+      setSelectedTenderIds((current) => current.filter((id) => id !== tender.id));
+      setToast("Tender permanently deleted.");
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Permanent delete failed.");
+    }
+  }, [canManageLockedTenders, onPermanentDelete]);
+
   const handleBulkDelete = useCallback(async () => {
     if (selectedTenderIds.length === 0) {
       setToast("Select at least one tender to bulk delete.");
@@ -1851,6 +1924,36 @@ export default function TendersPanel({
       setToast(err instanceof Error ? err.message : "Bulk delete failed.");
     }
   }, [onBulkDelete, selectedTenderIds]);
+
+  const handleBulkPermanentDelete = useCallback(async () => {
+    if (selectedDeletedTenderIds.length === 0) {
+      setToast("Select soft-deleted tenders to permanently remove.");
+      return;
+    }
+    const count = selectedDeletedTenderIds.length;
+    if (
+      !window.confirm(
+        `Permanently delete ${count} selected tender${count === 1 ? "" : "s"}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const result = await onBulkPermanentDelete(selectedDeletedTenderIds);
+      if (result.deleted > 0) {
+        setSelectedTenderIds((current) =>
+          current.filter((id) => !selectedDeletedTenderIds.includes(id)),
+        );
+      }
+      setToast(
+        result.errors.length > 0
+          ? `Permanently deleted ${result.deleted} tender${result.deleted === 1 ? "" : "s"} · ${result.errors.length} failed.`
+          : `Permanently deleted ${result.deleted} tender${result.deleted === 1 ? "" : "s"}.`,
+      );
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Permanent delete failed.");
+    }
+  }, [onBulkPermanentDelete, selectedDeletedTenderIds]);
 
   const handleBulkUpdate = useCallback(async () => {
     if (selectedTenderIds.length === 0) {
@@ -2303,6 +2406,17 @@ export default function TendersPanel({
                 >
                   Bulk Delete
                 </button>
+                {canManageLockedTenders && (
+                  <button
+                    type="button"
+                    onClick={() => void handleBulkPermanentDelete()}
+                    disabled={selectedDeletedTenderIds.length === 0}
+                    className="px-3.5 py-2 text-xs rounded-xl border border-red-300 bg-red-50 text-red-700 font-semibold hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    title="Remove selected soft-deleted tenders from FlexHRM permanently"
+                  >
+                    Delete Permanently
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -2455,7 +2569,11 @@ export default function TendersPanel({
                   readOnly={readOnly}
                   canManageLockedTenders={canManageLockedTenders}
                   selected={selectedTenderSet.has(item.tender.id)}
-                  selectable={canManageTender(item.tender, canManageLockedTenders)}
+                  selectable={canSelectTenderForBulk(
+                    item.tender,
+                    canManageLockedTenders,
+                    includeDeletedInView,
+                  )}
                   copiedBidId={copiedBidId}
                   updatingStatusId={updatingStatusId}
                   onToggleSelect={toggleTenderSelection}
@@ -2464,6 +2582,7 @@ export default function TendersPanel({
                   onStatusChange={handleStatusChange}
                   onEdit={openEdit}
                   onDelete={handleDelete}
+                  onPermanentDelete={handlePermanentDelete}
                 />
               ))}
             </div>
@@ -2503,7 +2622,11 @@ export default function TendersPanel({
                       readOnly={readOnly}
                       canManageLockedTenders={canManageLockedTenders}
                       selected={selectedTenderSet.has(item.tender.id)}
-                      selectable={canManageTender(item.tender, canManageLockedTenders)}
+                      selectable={canSelectTenderForBulk(
+                        item.tender,
+                        canManageLockedTenders,
+                        includeDeletedInView,
+                      )}
                       copiedBidId={copiedBidId}
                       updatingStatusId={updatingStatusId}
                       onToggleSelect={toggleTenderSelection}
@@ -2512,6 +2635,7 @@ export default function TendersPanel({
                       onStatusChange={handleStatusChange}
                       onEdit={openEdit}
                       onDelete={handleDelete}
+                      onPermanentDelete={handlePermanentDelete}
                     />
                   ))}
                 </tbody>

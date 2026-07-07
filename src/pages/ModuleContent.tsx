@@ -556,8 +556,10 @@ export default function ModuleContent() {
     handleCreateTender,
     handleUpdateTender,
     handleDeleteTender,
+    handlePermanentDeleteTender,
     handleBulkUpdateTenders,
     handleBulkDeleteTenders,
+    handleBulkPermanentDeleteTenders,
     handleImportTenders,
     rawContracts,
     fetchContracts,
@@ -5462,8 +5464,10 @@ export default function ModuleContent() {
                                   onCreate={handleCreateTender}
                                   onUpdate={handleUpdateTender}
                                   onDelete={handleDeleteTender}
+                                  onPermanentDelete={handlePermanentDeleteTender}
                                   onBulkUpdate={handleBulkUpdateTenders}
                                   onBulkDelete={handleBulkDeleteTenders}
+                                  onBulkPermanentDelete={handleBulkPermanentDeleteTenders}
                                   onImport={handleImportTenders}
                                 />
                               )}

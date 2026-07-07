@@ -3,9 +3,12 @@ import {
   buildGemContractPdfUrl,
   CHROME_PDF_VIEWER_EXTENSION_ID,
   extractGemContractId,
+  extractGemContractIdQueryValue,
   extractGemDocId,
   resolveGemBidPdfSourceUrl,
   resolveGemBidPdfUrl,
+  resolveGemContractId,
+  resolveGemContractIdForCopy,
   resolveGemContractPdfSourceUrl,
   resolveGemContractPdfUrl,
   unwrapChromePdfViewerUrl,
@@ -34,8 +37,9 @@ describe("gem-helpers chrome PDF viewer URLs", () => {
 });
 
 describe("extractGemContractId", () => {
-  it("pulls contractId from fulfilment PDF URL", () => {
-    const contractId = "SE85WXlFRndqK3RYcFd2TGF2dWtHeVJEYTNKMEhlK3F2NW1JYlhmTGRhbz0=";
+  const contractId = "dmdOUEJHbnRYWWN3NlpTMnNLUGhkc3RqN3BMakMvcWNsQmFWRVhtVHJVcz0=";
+
+  it("pulls full contractId including trailing = from fulfilment PDF URL", () => {
     const url = buildGemContractPdfUrl(contractId);
     expect(extractGemContractId(url)).toBe(contractId);
   });
@@ -44,6 +48,48 @@ describe("extractGemContractId", () => {
     const contractId = "SE85WXlFRndqK3RYcFd2TGF2dWtHeVJEYTNKMEhlK3F2NW1JYlhmTGRhbz0=";
     const wrapped = `${CHROME_PREFIX}${buildGemContractPdfUrl(contractId)}`;
     expect(extractGemContractId(wrapped)).toBe(contractId);
+  });
+
+  it("decodes percent-encoded trailing =", () => {
+    const url = `https://fulfilment.gem.gov.in/contract/fds?contractId=${encodeURIComponent(contractId)}`;
+    expect(extractGemContractId(url)).toBe(contractId);
+  });
+});
+
+describe("resolveGemContractId", () => {
+  const contractId = "dmdOUEJHbnRYWWN3NlpTMnNLUGhkc3RqN3BMakMvcWNsQmFWRVhtVHJVcz0=";
+
+  it("returns stored gemContractId with trailing =", () => {
+    expect(resolveGemContractId({ gemContractId: contractId })).toBe(contractId);
+  });
+
+  it("extracts from gemContractPdfUrl when gemContractId is missing", () => {
+    expect(
+      resolveGemContractId({ gemContractPdfUrl: buildGemContractPdfUrl(contractId) }),
+    ).toBe(contractId);
+  });
+});
+
+describe("resolveGemContractIdForCopy", () => {
+  const contractIdEncoded = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0%3D";
+  const contractIdDecoded = "MnBEckVmZDFneUdidXRoQVQ3QzN0clZRdTJOdU5JelE5bTR3VHN6dTJvcz0=";
+  const chromePdfUrl = `${CHROME_PREFIX}https://fulfilment.gem.gov.in/contract/fds?contractId=${contractIdEncoded}`;
+
+  it("copies everything after contractId= from chrome-extension PDF URL", () => {
+    expect(
+      resolveGemContractIdForCopy({
+        gemContractPdfUrl: `https://fulfilment.gem.gov.in/contract/fds?contractId=${contractIdEncoded}`,
+      }),
+    ).toBe(contractIdEncoded);
+  });
+
+  it("extracts raw query value from wrapped chrome-extension link", () => {
+    expect(extractGemContractIdQueryValue(chromePdfUrl)).toBe(contractIdEncoded);
+    expect(resolveGemContractIdForCopy({ gemContractPdfUrl: chromePdfUrl })).toBe(contractIdEncoded);
+  });
+
+  it("encodes stored decoded gemContractId for copy", () => {
+    expect(resolveGemContractIdForCopy({ gemContractId: contractIdDecoded })).toBe(contractIdEncoded);
   });
 });
 

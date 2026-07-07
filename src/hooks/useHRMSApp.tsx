@@ -6929,6 +6929,35 @@ export function useHRMSApp() {
     triggerSuccess("Tender deleted.");
   };
 
+  const handlePermanentDeleteTender = async (id: string): Promise<void> => {
+    if (!ensureDeletePermission("bids", "tenders")) return;
+    const res = await fetch(`/api/tenders/${id}/permanent`, { method: "DELETE" });
+    if (!res.ok) throw await parseApiError(res, "Failed to permanently delete tender.");
+    await fetchTenders();
+    triggerSuccess("Tender permanently deleted.");
+  };
+
+  const handleBulkPermanentDeleteTenders = async (
+    ids: string[],
+  ): Promise<{ deleted: number; errors: string[] }> => {
+    if (!ensureDeletePermission("bids", "tenders")) {
+      return { deleted: 0, errors: ["Delete permission is required."] };
+    }
+    const res = await fetch("/api/tenders/bulk-permanent-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to permanently delete tenders.");
+    const data = await res.json();
+    await fetchTenders();
+    triggerSuccess(`Permanently deleted ${data.deleted || 0} tender${data.deleted === 1 ? "" : "s"}.`);
+    return {
+      deleted: data.deleted || 0,
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
+  };
+
   const handleBulkUpdateTenders = async (
     ids: string[],
     payload: Partial<CreateTenderInput>,
@@ -8694,8 +8723,10 @@ export function useHRMSApp() {
     handleCreateTender,
     handleUpdateTender,
     handleDeleteTender,
+    handlePermanentDeleteTender,
     handleBulkUpdateTenders,
     handleBulkDeleteTenders,
+    handleBulkPermanentDeleteTenders,
     handleImportTenders,
     rawContracts,
     fetchContracts,
