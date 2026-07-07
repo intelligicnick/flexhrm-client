@@ -242,11 +242,74 @@ export function locateSchoolHeaderRow(rows: unknown[][]): {
   return { headerRowIndex: bestRowIndex, idxMap: bestIdxMap };
 }
 
+export const SCHOOL_WORK_FIELD_LABELS: Record<string, string> = {
+  schoolName: "School Name",
+  udise: "UDISE",
+  schoolCategory: "School Category",
+  headmasterName: "Headmaster Name",
+  headmasterNumber: "Headmaster Number",
+  sweeperName: "Cleaning Partner",
+  accountHolderName: "Account Holder Name",
+  accountNumber: "Account Number",
+  ifscCode: "IFSC Code",
+  noOfToilets: "No of Toilets",
+  govtUnitRate: "Govt Unit Rate",
+  partnerMonthlyPay: "Partner Monthly Pay",
+  rates: "Rates",
+  block: "Block",
+  district: "District",
+  remarks: "Remarks",
+  materialCost: "Material Cost",
+};
+
+const SCHOOL_FIELD_TO_HEADER: Record<string, string> = {
+  schoolName: "School Name",
+  udise: "UDISE",
+  schoolCategory: "School Category",
+  headmasterName: "Headmaster Name",
+  headmasterNumber: "Headmaster Number",
+  sweeperName: "Cleaning Partner",
+  accountHolderName: "Account Holder Name",
+  accountNumber: "Account Number",
+  ifscCode: "IFSC Code",
+  noOfToilets: "No of Toilets",
+  govtUnitRate: "Govt Unit Rate",
+  partnerMonthlyPay: "Partner Monthly Pay",
+  rates: "Rates",
+  block: "Block",
+  district: "District",
+  remarks: "Remarks",
+};
+
+export function columnIndexToExcelLetter(index: number): string {
+  if (index < 0) return "";
+  let letter = "";
+  let n = index + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letter;
+}
+
+export function formatSchoolFieldColumnRef(
+  field: string,
+  idxMap?: Record<string, number>,
+): string {
+  const header = SCHOOL_FIELD_TO_HEADER[field] || SCHOOL_WORK_FIELD_LABELS[field] || field;
+  if (!idxMap) return header;
+  const idx = idxMap[header];
+  if (idx === undefined || idx < 0) return header;
+  return `${header} (column ${columnIndexToExcelLetter(idx)})`;
+}
+
 export function analyzeSchoolHeaders(rows: unknown[][]): {
   matched: string[];
   unmatched: string[];
   headerRowIndex: number;
   actualHeaderNames: string[];
+  idxMap: Record<string, number>;
 } {
   if (rows.length === 0) {
     return {
@@ -254,6 +317,7 @@ export function analyzeSchoolHeaders(rows: unknown[][]): {
       unmatched: [...SCHOOL_EXCEL_ROW_HEADERS],
       headerRowIndex: -1,
       actualHeaderNames: [],
+      idxMap: {},
     };
   }
   const { headerRowIndex, idxMap } = locateSchoolHeaderRow(rows);
@@ -267,13 +331,19 @@ export function analyzeSchoolHeaders(rows: unknown[][]): {
   const actualHeaderNames = rawHeaderRow
     .map((cell) => (cell !== undefined && cell !== null ? String(cell).trim() : ""))
     .filter((s) => s !== "");
-  return { matched, unmatched, headerRowIndex, actualHeaderNames };
+  return { matched, unmatched, headerRowIndex, actualHeaderNames, idxMap };
 }
 
-export function parseSchoolSheetRows(sheetRows: unknown[][]): Partial<SchoolWork>[] {
+export interface ParsedSchoolSheetRow {
+  row: Partial<SchoolWork>;
+  /** 1-based Excel row number */
+  sheetRow: number;
+}
+
+export function parseSchoolSheetRows(sheetRows: unknown[][]): ParsedSchoolSheetRow[] {
   if (sheetRows.length === 0) return [];
   const { headerRowIndex, idxMap } = locateSchoolHeaderRow(sheetRows);
-  const parsed: Partial<SchoolWork>[] = [];
+  const parsed: ParsedSchoolSheetRow[] = [];
 
   for (let i = headerRowIndex + 1; i < sheetRows.length; i++) {
     const values = sheetRows[i];
@@ -302,26 +372,29 @@ export function parseSchoolSheetRows(sheetRows: unknown[][]): Partial<SchoolWork
       Number(getVal("Govt Unit Rate")) || defaults.govtUnitRate;
 
     parsed.push({
-      udise,
-      schoolName,
-      schoolCategory,
-      headmasterName: getVal("Headmaster Name"),
-      headmasterNumber: getVal("Headmaster Number"),
-      sweeperName: getVal("Cleaning Partner") || getVal("Sweeper Name"),
-      accountHolderName: getVal("Account Holder Name"),
-      accountNumber: getVal("Account Number"),
-      ifscCode: getVal("IFSC Code"),
-      paymentMethod: "",
-      noOfToilets: Number(getVal("No of Toilets")) || 0,
-      govtUnitRate,
-      partnerMonthlyPay,
-      rates: Number(getVal("Rates")) || partnerMonthlyPay,
-      rateExplanation: "",
-      block: getVal("Block"),
-      district: getVal("District"),
-      materialCost: 0,
-      remarks: getVal("Remarks"),
-      srNo: Number(getVal("SR NO")) || 0,
+      sheetRow: i + 1,
+      row: {
+        udise,
+        schoolName,
+        schoolCategory,
+        headmasterName: getVal("Headmaster Name"),
+        headmasterNumber: getVal("Headmaster Number"),
+        sweeperName: getVal("Cleaning Partner") || getVal("Sweeper Name"),
+        accountHolderName: getVal("Account Holder Name"),
+        accountNumber: getVal("Account Number"),
+        ifscCode: getVal("IFSC Code"),
+        paymentMethod: "",
+        noOfToilets: Number(getVal("No of Toilets")) || 0,
+        govtUnitRate,
+        partnerMonthlyPay,
+        rates: Number(getVal("Rates")) || partnerMonthlyPay,
+        rateExplanation: "",
+        block: getVal("Block"),
+        district: getVal("District"),
+        materialCost: 0,
+        remarks: getVal("Remarks"),
+        srNo: Number(getVal("SR NO")) || 0,
+      },
     });
   }
 

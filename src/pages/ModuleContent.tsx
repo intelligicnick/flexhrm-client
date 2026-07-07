@@ -566,6 +566,8 @@ export default function ModuleContent() {
     handleCreateContract,
     handleUpdateContract,
     handleDeleteContract,
+    handleBulkUpdateContracts,
+    handleBulkDeleteContracts,
     handleImportContracts,
     rawRenewals,
     fetchRenewals,
@@ -5482,6 +5484,7 @@ export default function ModuleContent() {
                                   onCreate={handleCreateContract}
                                   onUpdate={handleUpdateContract}
                                   onDelete={handleDeleteContract}
+                                  onBulkDelete={handleBulkDeleteContracts}
                                   onImport={handleImportContracts}
                                 />
                               )}

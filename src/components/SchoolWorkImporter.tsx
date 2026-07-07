@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { SchoolBlock, SchoolDistrict, SchoolWork, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
 import {
   analyzeSchoolHeaders,
+  formatSchoolFieldColumnRef,
   parseSchoolSheetRows,
   validateSchoolWork,
 } from "../lib/school-work-helpers";
@@ -30,10 +31,15 @@ export default function SchoolWorkImporter({
     unmatched: string[];
     headerRowIndex: number;
     actualHeaderNames: string[];
+    idxMap: Record<string, number>;
   } | null>(null);
   const [validationResults, setValidationResults] = useState<{
     valid: Partial<SchoolWork>[];
-    invalid: { row: Partial<SchoolWork>; index: number; errors: Record<string, string> }[];
+    invalid: {
+      row: Partial<SchoolWork>;
+      sheetRow: number;
+      errors: Record<string, string>;
+    }[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const configuredDistricts = districts.filter((d) => !d.deleted && d.name.trim());
@@ -67,21 +73,25 @@ export default function SchoolWorkImporter({
         const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
         const analysis = analyzeSchoolHeaders(sheetRows);
         setHeaderAnalysis(analysis);
-        const rows = parseSchoolSheetRows(sheetRows);
+        const parsedRows = parseSchoolSheetRows(sheetRows);
 
         const valid: Partial<SchoolWork>[] = [];
-        const invalid: { row: Partial<SchoolWork>; index: number; errors: Record<string, string> }[] = [];
-        rows.forEach((row, i) => {
+        const invalid: {
+          row: Partial<SchoolWork>;
+          sheetRow: number;
+          errors: Record<string, string>;
+        }[] = [];
+        parsedRows.forEach(({ row, sheetRow }) => {
           const errors = validateSchoolWork(row, { districts, blocks });
           const udise = row.udise || "";
           if (existingUdiseCodes.includes(udise)) {
-            errors.udise = `UDISE "${udise}" already exists.`;
+            errors.udise = `UDISE "${udise}" already exists in the system.`;
           }
-          const dupeInFile = rows.findIndex((r) => r.udise === udise) !== i;
+          const dupeInFile = parsedRows.findIndex((r) => r.row.udise === udise) !== parsedRows.findIndex((r) => r.sheetRow === sheetRow);
           if (dupeInFile && udise) {
             errors.udise = `UDISE "${udise}" is repeated in this file.`;
           }
-          if (Object.keys(errors).length > 0) invalid.push({ row, index: i + 1, errors });
+          if (Object.keys(errors).length > 0) invalid.push({ row, sheetRow, errors });
           else valid.push(row);
         });
         setValidationResults({ valid, invalid });
@@ -177,39 +187,124 @@ export default function SchoolWorkImporter({
 
       {validationResults && createPortal(
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[80] flex items-center justify-center p-4" onClick={() => setValidationResults(null)}>
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[85vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <h3 className="text-sm font-extrabold text-slate-800">Import Preview</h3>
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
+              <h3 className="text-sm font-extrabold text-slate-800">School Import Preview</h3>
               <button type="button" onClick={() => setValidationResults(null)} className="p-1 rounded hover:bg-slate-100 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-5 overflow-y-auto max-h-[60vh] space-y-3 text-xs">
-              <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 p-3 rounded-lg">
-                <CheckCircle size={16} />
-                <span className="font-bold">{validationResults.valid.length} valid row(s) ready to import</span>
+            <div className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 p-3 rounded-lg border border-emerald-100">
+                  <CheckCircle size={16} className="shrink-0" />
+                  <div>
+                    <span className="font-bold block">{validationResults.valid.length} valid row(s)</span>
+                    <span className="text-emerald-600">Ready to import</span>
+                  </div>
+                </div>
+                {validationResults.invalid.length > 0 && (
+                  <div className="flex items-center gap-2 text-rose-700 bg-rose-50 p-3 rounded-lg border border-rose-100">
+                    <AlertTriangle size={16} className="shrink-0" />
+                    <div>
+                      <span className="font-bold block">{validationResults.invalid.length} row(s) with errors</span>
+                      <span className="text-rose-600">Fix these in Excel and re-upload</span>
+                    </div>
+                  </div>
+                )}
               </div>
+
               {validationResults.invalid.length > 0 && (
-                <div className="text-rose-700 bg-rose-50 p-3 rounded-lg">
-                  <span className="font-bold">{validationResults.invalid.length} row(s) skipped due to errors</span>
+                <div>
+                  <h4 className="font-semibold text-slate-700 text-sm mb-2">
+                    Errors by row and column ({validationResults.invalid.length})
+                  </h4>
+                  <div className="border border-amber-200 bg-amber-50/20 rounded-lg overflow-hidden">
+                    <div className="max-h-[320px] overflow-y-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="sticky top-0 z-10">
+                          <tr className="bg-amber-50/90 text-slate-700 border-b border-amber-100 font-medium">
+                            <th className="p-2.5 w-16 text-center">Row</th>
+                            <th className="p-2.5 w-40">UDISE / School</th>
+                            <th className="p-2.5">Column &amp; Error</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-amber-100 bg-white">
+                          {validationResults.invalid.map(({ row, sheetRow, errors }) => (
+                            <tr key={sheetRow} className="hover:bg-amber-50/20 align-top">
+                              <td className="p-2.5 text-center font-bold text-slate-600">#{sheetRow}</td>
+                              <td className="p-2.5">
+                                <div className="font-semibold text-slate-800">{row.udise || "—"}</div>
+                                <div className="text-slate-500 truncate max-w-[150px]" title={row.schoolName || ""}>
+                                  {row.schoolName || "No school name"}
+                                </div>
+                              </td>
+                              <td className="p-2.5">
+                                <div className="flex flex-col gap-1.5">
+                                  {Object.entries(errors).map(([field, errMsg]) => (
+                                    <div key={field} className="text-rose-800 bg-rose-50 border border-rose-100 px-2 py-1 rounded">
+                                      <span className="font-bold">
+                                        {formatSchoolFieldColumnRef(field, headerAnalysis?.idxMap)}:
+                                      </span>{" "}
+                                      {errMsg}
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2">
+                    Row numbers match your Excel sheet. Column letters refer to the matched header row
+                    {headerAnalysis && headerAnalysis.headerRowIndex >= 0
+                      ? ` (row ${headerAnalysis.headerRowIndex + 1})`
+                      : ""}.
+                  </p>
+                </div>
+              )}
+
+              {validationResults.invalid.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <div className="bg-emerald-100 text-emerald-800 p-3 rounded-full mb-3">
+                    <CheckCircle size={32} />
+                  </div>
+                  <h4 className="font-bold text-slate-800 text-sm">All rows passed validation</h4>
+                  <p className="text-xs text-slate-500 mt-1">You can proceed with the import.</p>
                 </div>
               )}
             </div>
-            <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex justify-between gap-2 shrink-0">
               <button type="button" onClick={() => setValidationResults(null)} className="px-4 py-2 text-xs font-bold text-slate-600 cursor-pointer">
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={validationResults.valid.length === 0}
-                onClick={() => {
-                  onImportSuccess(validationResults.valid);
-                  setValidationResults(null);
-                }}
-                className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white text-xs font-bold rounded-lg cursor-pointer disabled:opacity-40"
-              >
-                Import {validationResults.valid.length} School(s)
-              </button>
+              <div className="flex gap-2">
+                {validationResults.invalid.length > 0 && validationResults.valid.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onImportSuccess(validationResults.valid);
+                      setValidationResults(null);
+                    }}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg cursor-pointer"
+                  >
+                    Import Only Valid ({validationResults.valid.length})
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={validationResults.valid.length === 0}
+                  onClick={() => {
+                    onImportSuccess(validationResults.valid);
+                    setValidationResults(null);
+                  }}
+                  className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] text-white text-xs font-bold rounded-lg cursor-pointer disabled:opacity-40"
+                >
+                  Import {validationResults.valid.length} School(s)
+                </button>
+              </div>
             </div>
           </div>
         </div>,

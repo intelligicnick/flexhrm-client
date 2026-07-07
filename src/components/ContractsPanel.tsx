@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
 import {
   FileText,
@@ -20,6 +20,9 @@ import {
   MapPin,
   Copy,
   Check,
+  Pencil,
+  RotateCcw,
+  Filter,
 } from "lucide-react";
 import {
   Contract,
@@ -48,6 +51,10 @@ import {
   otherContractsUsingLocation,
 } from "../lib/contract-locations";
 import { fetchBgDdRecords } from "../lib/bg-dd";
+import { inferContractCompanyName } from "../utils/inferContractCompanyName";
+import { inferTenderTypeFromCategory } from "../utils/inferTenderType";
+import { useBulkColumnSelection } from "../hooks/useBulkColumnSelection";
+import BulkColumnFillBar from "./BulkColumnFillBar";
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
@@ -72,7 +79,7 @@ const EMPTY_FORM: CreateContractInput = {
   correspondingOffice: "",
   fromDate: "",
   toDate: "",
-  companyName: "",
+  companyName: "Intelligic",
   category: "",
   contractType: "manpower",
   hasExtension: false,
@@ -254,8 +261,9 @@ async function parseContractsWorkbook(buffer: ArrayBuffer): Promise<CreateContra
     const contractNo = pick(row, "contract no", "contract number", "contract nur", "contract");
     if (!contractNo) return;
 
-    const companyName = pick(row, "company name", "company nan", "company");
-    const isTravel = /travel/i.test(companyName) || /travel/i.test(pick(row, "category"));
+    const category = pick(row, "category");
+    const contractType = inferTenderTypeFromCategory(category);
+    const companyName = inferContractCompanyName(category, contractType);
     const hasExtension = normalizeBool(pick(row, "extension"));
     const bgApplicable = normalizeBool(pick(row, "bg applicable", "bg applicabl", "bank guarantee"));
 
@@ -267,8 +275,8 @@ async function parseContractsWorkbook(buffer: ArrayBuffer): Promise<CreateContra
       fromDate: pick(row, "from date", "start date"),
       toDate: pick(row, "to date", "end date"),
       companyName,
-      category: pick(row, "category"),
-      contractType: isTravel ? "travel" : "manpower",
+      category,
+      contractType,
       hasExtension,
       extensionEndDate: hasExtension ? pick(row, "extension end date", "extended to") : "",
       bgApplicable,
@@ -308,7 +316,121 @@ const TABLE_COLUMNS = [
   { key: "actions", label: "Actions", width: 108 },
 ] as const;
 
-type ContractColumnKey = (typeof TABLE_COLUMNS)[number]["key"];
+type ContractColumnKey = (typeof TABLE_COLUMNS)[number]["key"] | "select";
+type YesNoColumnFilter = "" | "yes" | "no";
+type ContractDateRangeField =
+  | "fromDate"
+  | "toDate"
+  | "effectiveEnd"
+  | "bgExpiryDate"
+  | "entryDate";
+
+type ContractBulkEditableField = Exclude<keyof ContractBulkEditRowDraft, "id">;
+
+interface ContractBulkEditRowDraft {
+  id: string;
+  contractNo: string;
+  officerName: string;
+  officeName: string;
+  fromDate: string;
+  toDate: string;
+  companyName: string;
+  category: string;
+  contractType: ContractType;
+  hasExtension: boolean;
+  extensionEndDate: string;
+  bgApplicable: boolean;
+  status: ContractStatus;
+}
+
+function matchesColumnText(value: string | undefined | null, filter: string): boolean {
+  if (!filter.trim()) return true;
+  const term = filter.trim().toLowerCase();
+  const raw = (value ?? "").toLowerCase();
+  const formatted = formatAppDate(value || "").toLowerCase();
+  return raw.includes(term) || formatted.includes(term);
+}
+
+function matchesYesNoColumn(value: boolean, filter: YesNoColumnFilter): boolean {
+  if (!filter) return true;
+  return filter === "yes" ? value : !value;
+}
+
+function toBulkEditRowDraft(contract: Contract): ContractBulkEditRowDraft {
+  return {
+    id: contract.id,
+    contractNo: coerceText(contract.contractNo),
+    officerName: coerceText(contract.officerName),
+    officeName: coerceText(contract.officeName),
+    fromDate: coerceText(contract.fromDate),
+    toDate: coerceText(contract.toDate),
+    companyName: coerceText(contract.companyName),
+    category: coerceText(contract.category),
+    contractType: contract.contractType || "manpower",
+    hasExtension: Boolean(contract.hasExtension),
+    extensionEndDate: coerceText(contract.extensionEndDate),
+    bgApplicable: Boolean(contract.bgApplicable),
+    status: contract.status || "active",
+  };
+}
+
+function buildBulkEditDraftMap(contracts: Contract[]): Record<string, ContractBulkEditRowDraft> {
+  return Object.fromEntries(contracts.map((contract) => [contract.id, toBulkEditRowDraft(contract)]));
+}
+
+function contractDateForRange(contract: Contract, field: ContractDateRangeField): string {
+  switch (field) {
+    case "fromDate":
+      return contract.fromDate;
+    case "toDate":
+      return contract.toDate;
+    case "effectiveEnd":
+      return effectiveEndDate(contract);
+    case "bgExpiryDate":
+      return contract.bgExpiryDate;
+    case "entryDate":
+      return contract.entryDate;
+    default:
+      return contract.toDate;
+  }
+}
+
+function SelectionCheckbox({
+  checked,
+  indeterminate = false,
+  disabled = false,
+  onChange,
+  title,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  title: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+      title={title}
+      aria-label={title}
+      className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30 disabled:opacity-40"
+      onClick={(event) => event.stopPropagation()}
+    />
+  );
+}
+
+const COLUMN_FILTER_INPUT =
+  "w-full min-w-0 px-1.5 py-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:border-orange-300 focus:ring-1 focus:ring-orange-100";
 
 function displayValue(value: string | undefined | null): string {
   const trimmed = value?.trim() ?? "";
@@ -539,6 +661,7 @@ interface ContractsPanelProps {
   onCreate: (payload: CreateContractInput) => Promise<void>;
   onUpdate: (id: string, payload: Partial<CreateContractInput>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onBulkDelete?: (ids: string[]) => Promise<{ deleted: number; errors: string[] }>;
   onImport: (items: CreateContractInput[]) => Promise<{ created: number; updated: number; skipped: number }>;
 }
 
@@ -551,16 +674,32 @@ export default function ContractsPanel({
   onCreate,
   onUpdate,
   onDelete,
+  onBulkDelete,
   onImport,
 }: ContractsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"" | ContractType>("");
-  const [statusFilter, setStatusFilter] = useState<"" | ContractStatus>("");
   const [expiryFilter, setExpiryFilter] = useState<"all" | "active" | "expiring_soon" | "expired">("all");
   const [bgDueOnly, setBgDueOnly] = useState(false);
+  const [dateRangeField, setDateRangeField] = useState<ContractDateRangeField>("effectiveEnd");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [contractNoFilter, setContractNoFilter] = useState("");
+  const [officerFilter, setOfficerFilter] = useState("");
+  const [officeFilter, setOfficeFilter] = useState("");
+  const [fromDateFilter, setFromDateFilter] = useState("");
+  const [toDateFilter, setToDateFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [hasExtensionFilter, setHasExtensionFilter] = useState<YesNoColumnFilter>("");
+  const [bgApplicableFilter, setBgApplicableFilter] = useState<YesNoColumnFilter>("");
+  const [statusColumnFilter, setStatusColumnFilter] = useState<"" | ContractStatus>("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditRows, setBulkEditRows] = useState<Record<string, ContractBulkEditRowDraft>>({});
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
+  const [bulkAction, setBulkAction] = useState<"edit" | "delete" | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CreateContractInput>(EMPTY_FORM);
@@ -586,10 +725,68 @@ export default function ContractsPanel({
     return sortedLocations.filter((loc) => !linked.has(loc.toLowerCase()));
   }, [sortedLocations, form.linkedLocations]);
 
-  const visibleColumns = useMemo(
-    () => TABLE_COLUMNS.filter((column) => readOnly ? column.key !== "actions" : true),
-    [readOnly],
+  const visibleColumns = useMemo(() => {
+    const cols = TABLE_COLUMNS.filter((column) => (readOnly ? column.key !== "actions" : true));
+    if (readOnly) return cols;
+    return [{ key: "select" as const, label: "", width: 36 }, ...cols];
+  }, [readOnly]);
+
+  const selectedContracts = useMemo(
+    () => contracts.filter((contract) => selectedIds.includes(contract.id)),
+    [contracts, selectedIds],
   );
+
+  const bulkEditRowsList = useMemo(
+    () => selectedContracts.map((contract) => bulkEditRows[contract.id] ?? toBulkEditRowDraft(contract)),
+    [selectedContracts, bulkEditRows],
+  );
+
+  useEffect(() => {
+    const validIds = new Set(contracts.map((contract) => contract.id));
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [contracts]);
+
+  const activeColumnFilterCount = useMemo(() => {
+    let count = 0;
+    if (contractNoFilter.trim()) count += 1;
+    if (officerFilter.trim()) count += 1;
+    if (officeFilter.trim()) count += 1;
+    if (fromDateFilter.trim()) count += 1;
+    if (toDateFilter.trim()) count += 1;
+    if (companyFilter.trim()) count += 1;
+    if (categoryFilter.trim()) count += 1;
+    if (hasExtensionFilter) count += 1;
+    if (bgApplicableFilter) count += 1;
+    if (statusColumnFilter) count += 1;
+    return count;
+  }, [
+    contractNoFilter,
+    officerFilter,
+    officeFilter,
+    fromDateFilter,
+    toDateFilter,
+    companyFilter,
+    categoryFilter,
+    hasExtensionFilter,
+    bgApplicableFilter,
+    statusColumnFilter,
+  ]);
+
+  const resetColumnFilters = () => {
+    setContractNoFilter("");
+    setOfficerFilter("");
+    setOfficeFilter("");
+    setFromDateFilter("");
+    setToDateFilter("");
+    setCompanyFilter("");
+    setCategoryFilter("");
+    setHasExtensionFilter("");
+    setBgApplicableFilter("");
+    setStatusColumnFilter("");
+  };
 
   const tableMinWidth = useMemo(
     () => visibleColumns.reduce((sum, column) => sum + column.width, 0),
@@ -598,7 +795,12 @@ export default function ContractsPanel({
 
   const toggleContractRow = (contractId: string, columnKey?: ContractColumnKey) => {
     if (expandedId === contractId) {
-      if (columnKey && columnKey !== "expand" && columnKey !== "actions") {
+      if (
+        columnKey &&
+        columnKey !== "expand" &&
+        columnKey !== "actions" &&
+        columnKey !== "select"
+      ) {
         setExpandedColumnKey(columnKey);
         return;
       }
@@ -607,7 +809,11 @@ export default function ContractsPanel({
       return;
     }
     setExpandedId(contractId);
-    setExpandedColumnKey(columnKey && columnKey !== "expand" && columnKey !== "actions" ? columnKey : null);
+    setExpandedColumnKey(
+      columnKey && columnKey !== "expand" && columnKey !== "actions" && columnKey !== "select"
+        ? columnKey
+        : null,
+    );
   };
 
   const wonTenders = useMemo(
@@ -662,7 +868,7 @@ export default function ContractsPanel({
       );
     }
     if (typeFilter) rows = rows.filter((c) => c.contractType === typeFilter);
-    if (statusFilter) rows = rows.filter((c) => c.status === statusFilter);
+    if (statusColumnFilter) rows = rows.filter((c) => c.status === statusColumnFilter);
     if (expiryFilter !== "all") {
       const now = Date.now();
       const soonCutoff = now + 60 * 24 * 60 * 60 * 1000;
@@ -685,16 +891,393 @@ export default function ContractsPanel({
     }
     if (dateFrom || dateTo) {
       rows = rows.filter((c) => {
-        const ts = parseFlexibleDateMs(c.toDate);
+        const ts = parseFlexibleDateMs(contractDateForRange(c, dateRangeField));
         return matchesIsoDateRange(ts, dateFrom, dateTo);
       });
     }
+    rows = rows.filter(
+      (c) =>
+        matchesColumnText(c.contractNo, contractNoFilter) &&
+        matchesColumnText(c.officerName, officerFilter) &&
+        matchesColumnText(c.officeName, officeFilter) &&
+        matchesColumnText(c.fromDate, fromDateFilter) &&
+        matchesColumnText(effectiveEndDate(c), toDateFilter) &&
+        matchesColumnText(c.companyName, companyFilter) &&
+        matchesColumnText(c.category, categoryFilter) &&
+        matchesYesNoColumn(Boolean(c.hasExtension), hasExtensionFilter) &&
+        matchesYesNoColumn(Boolean(c.bgApplicable), bgApplicableFilter),
+    );
     return rows.sort((a, b) => {
       const aTs = parseFlexibleDateMs(effectiveEndDate(a)) ?? 0;
       const bTs = parseFlexibleDateMs(effectiveEndDate(b)) ?? 0;
       return bTs - aTs;
     });
-  }, [contracts, search, typeFilter, statusFilter, expiryFilter, bgDueOnly, dateFrom, dateTo]);
+  }, [
+    contracts,
+    search,
+    typeFilter,
+    statusColumnFilter,
+    expiryFilter,
+    bgDueOnly,
+    dateFrom,
+    dateTo,
+    dateRangeField,
+    contractNoFilter,
+    officerFilter,
+    officeFilter,
+    fromDateFilter,
+    toDateFilter,
+    companyFilter,
+    categoryFilter,
+    hasExtensionFilter,
+    bgApplicableFilter,
+  ]);
+
+  const areAllVisibleSelected = useMemo(() => {
+    if (filtered.length === 0) return false;
+    return filtered.every((contract) => selectedIds.includes(contract.id));
+  }, [filtered, selectedIds]);
+
+  const hasSomeVisibleSelected = useMemo(() => {
+    if (filtered.length === 0) return false;
+    const selectedVisible = filtered.filter((contract) => selectedIds.includes(contract.id)).length;
+    return selectedVisible > 0 && selectedVisible < filtered.length;
+  }, [filtered, selectedIds]);
+
+  const bulkEditChangeStats = useMemo(() => {
+    let fields = 0;
+    let rows = 0;
+    const changedIds: string[] = [];
+
+    for (const contract of selectedContracts) {
+      const original = toBulkEditRowDraft(contract);
+      const draft = bulkEditRows[contract.id] ?? original;
+      let rowChanged = false;
+
+      (Object.keys(original) as ContractBulkEditableField[]).forEach((key) => {
+        if (draft[key] !== original[key]) {
+          fields += 1;
+          rowChanged = true;
+        }
+      });
+
+      if (rowChanged) {
+        rows += 1;
+        changedIds.push(contract.id);
+      }
+    }
+
+    return { fields, rows, changedIds };
+  }, [selectedContracts, bulkEditRows]);
+
+  const toggleSelectContract = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const toggleSelectVisibleContracts = () => {
+    if (areAllVisibleSelected) {
+      const filteredIdSet = new Set(filtered.map((contract) => contract.id));
+      setSelectedIds((prev) => prev.filter((id) => !filteredIdSet.has(id)));
+      return;
+    }
+    setSelectedIds((prev) => Array.from(new Set([...prev, ...filtered.map((contract) => contract.id)])));
+  };
+
+  const clearSelectedContracts = () => setSelectedIds([]);
+
+  const openBulkEdit = () => {
+    if (selectedContracts.length === 0) {
+      setToast("Select at least one contract to bulk edit.");
+      return;
+    }
+    setBulkEditRows(buildBulkEditDraftMap(selectedContracts));
+    setBulkEditError(null);
+    setIsBulkEditOpen(true);
+  };
+
+  const closeBulkEdit = () => {
+    if (bulkAction === "edit") return;
+    if (bulkEditChangeStats.fields > 0) {
+      const ok = window.confirm("Close bulk edit? Unsaved changes will be lost.");
+      if (!ok) return;
+    }
+    setIsBulkEditOpen(false);
+    setBulkEditError(null);
+  };
+
+  const resetBulkEditRows = () => {
+    setBulkEditRows(buildBulkEditDraftMap(selectedContracts));
+    setBulkEditError(null);
+  };
+
+  const handleBulkRowChange = (
+    id: string,
+    updates: Partial<Pick<ContractBulkEditRowDraft, ContractBulkEditableField>>,
+  ) => {
+    setBulkEditRows((prev) => {
+      const source = selectedContracts.find((contract) => contract.id === id);
+      const base = prev[id] ?? (source ? toBulkEditRowDraft(source) : undefined);
+      if (!base) return prev;
+      return { ...prev, [id]: { ...base, ...updates } };
+    });
+  };
+
+  const handleBulkDeleteSelected = async () => {
+    if (selectedContracts.length === 0) {
+      setToast("Select at least one contract to bulk delete.");
+      return;
+    }
+    const label = `${selectedContracts.length} contract${selectedContracts.length === 1 ? "" : "s"}`;
+    if (!window.confirm(`Delete ${label}?`)) return;
+
+    setBulkAction("delete");
+    try {
+      const ids = selectedContracts.map((contract) => contract.id);
+      if (onBulkDelete) {
+        const result = await onBulkDelete(ids);
+        await onRefresh();
+        setSelectedIds([]);
+        if (result.errors.length > 0) {
+          setToast(
+            `Deleted ${result.deleted} contract${result.deleted === 1 ? "" : "s"}. ${result.errors.length} failed.`,
+          );
+        }
+        return;
+      }
+
+      const results = await Promise.allSettled(ids.map((id) => onDelete(id)));
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+      await onRefresh();
+      if (failed.length === 0) {
+        setSelectedIds([]);
+        setToast(`Deleted ${succeeded} contract${succeeded === 1 ? "" : "s"}.`);
+        return;
+      }
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to delete some contracts.";
+      setToast(
+        succeeded > 0
+          ? `Deleted ${succeeded} contract${succeeded === 1 ? "" : "s"}. ${failed.length} failed: ${firstError}`
+          : firstError,
+      );
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Bulk delete failed.");
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const handleBulkSave = async () => {
+    if (selectedContracts.length === 0) {
+      setBulkEditError("Select at least one contract to update.");
+      return;
+    }
+
+    const updates = selectedContracts
+      .map((contract) => {
+        const original = toBulkEditRowDraft(contract);
+        const draft = bulkEditRows[contract.id] ?? original;
+        const label = draft.contractNo.trim() || contract.contractNo || "Contract";
+
+        if (!draft.contractNo.trim()) {
+          throw new Error(`Contract number is required for ${label}.`);
+        }
+        if (draft.hasExtension && !draft.extensionEndDate.trim()) {
+          throw new Error(`Extension end date is required for ${label}.`);
+        }
+
+        const payload: Partial<CreateContractInput> = {};
+        if (original.contractNo !== draft.contractNo.trim()) payload.contractNo = draft.contractNo.trim();
+        if (original.officerName !== draft.officerName) payload.officerName = draft.officerName;
+        if (original.officeName !== draft.officeName) payload.officeName = draft.officeName;
+        if (original.fromDate !== draft.fromDate) payload.fromDate = draft.fromDate;
+        if (original.toDate !== draft.toDate) payload.toDate = draft.toDate;
+        if (original.companyName !== draft.companyName) payload.companyName = draft.companyName;
+        if (original.category !== draft.category) payload.category = draft.category;
+        if (original.contractType !== draft.contractType) payload.contractType = draft.contractType;
+        if (original.hasExtension !== draft.hasExtension) payload.hasExtension = draft.hasExtension;
+        if (original.extensionEndDate !== draft.extensionEndDate) {
+          payload.extensionEndDate = draft.extensionEndDate;
+        }
+        if (original.bgApplicable !== draft.bgApplicable) payload.bgApplicable = draft.bgApplicable;
+        if (original.status !== draft.status) payload.status = draft.status;
+
+        if (Object.keys(payload).length === 0) return null;
+        return { id: contract.id, payload };
+      })
+      .filter((entry): entry is { id: string; payload: Partial<CreateContractInput> } => entry !== null);
+
+    if (updates.length === 0) {
+      setBulkEditError("No changes to save.");
+      return;
+    }
+
+    setBulkAction("edit");
+    setBulkEditError(null);
+    try {
+      const results = await Promise.allSettled(
+        updates.map(({ id, payload }) => onUpdate(id, payload)),
+      );
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+      await onRefresh();
+
+      if (failed.length === 0) {
+        setIsBulkEditOpen(false);
+        setBulkEditRows({});
+        setSelectedIds([]);
+        setToast(`Updated ${succeeded} contract${succeeded === 1 ? "" : "s"}.`);
+        return;
+      }
+
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to update some contracts.";
+      setBulkEditError(
+        succeeded > 0
+          ? `Updated ${succeeded} contract${succeeded === 1 ? "" : "s"}. ${failed.length} failed: ${firstError}`
+          : firstError,
+      );
+    } catch (err) {
+      setBulkEditError(err instanceof Error ? err.message : "Bulk update failed.");
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const renderColumnFilter = (columnKey: ContractColumnKey | "select") => {
+    switch (columnKey) {
+      case "select":
+      case "expand":
+      case "index":
+      case "actions":
+        return null;
+      case "contractNo":
+        return (
+          <input
+            value={contractNoFilter}
+            onChange={(e) => setContractNoFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by contract number"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "officerName":
+        return (
+          <input
+            value={officerFilter}
+            onChange={(e) => setOfficerFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by officer"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "officeName":
+        return (
+          <input
+            value={officeFilter}
+            onChange={(e) => setOfficeFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by office"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "fromDate":
+        return (
+          <input
+            value={fromDateFilter}
+            onChange={(e) => setFromDateFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by from date"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "toDate":
+        return (
+          <input
+            value={toDateFilter}
+            onChange={(e) => setToDateFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by end date"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "companyName":
+        return (
+          <input
+            value={companyFilter}
+            onChange={(e) => setCompanyFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by company"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "category":
+        return (
+          <input
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            placeholder="Filter…"
+            aria-label="Filter by category"
+            className={COLUMN_FILTER_INPUT}
+          />
+        );
+      case "hasExtension":
+        return (
+          <select
+            value={hasExtensionFilter}
+            onChange={(e) => setHasExtensionFilter(e.target.value as YesNoColumnFilter)}
+            aria-label="Filter by extension"
+            className={COLUMN_FILTER_INPUT}
+          >
+            <option value="">Any</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        );
+      case "bgApplicable":
+        return (
+          <select
+            value={bgApplicableFilter}
+            onChange={(e) => setBgApplicableFilter(e.target.value as YesNoColumnFilter)}
+            aria-label="Filter by bank guarantee"
+            className={COLUMN_FILTER_INPUT}
+          >
+            <option value="">Any</option>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        );
+      case "status":
+        return (
+          <select
+            value={statusColumnFilter}
+            onChange={(e) => setStatusColumnFilter(e.target.value as "" | ContractStatus)}
+            aria-label="Filter by status"
+            className={COLUMN_FILTER_INPUT}
+          >
+            <option value="">Any</option>
+            {(Object.keys(STATUS_LABELS) as ContractStatus[]).map((status) => (
+              <option key={status} value={status}>
+                {STATUS_LABELS[status]}
+              </option>
+            ))}
+          </select>
+        );
+      default:
+        return null;
+    }
+  };
 
   const openCreate = () => {
     setEditingId(null);
@@ -939,7 +1522,7 @@ export default function ContractsPanel({
       officeName: tender.department || prev.officeName,
       category: tender.category || prev.category,
       contractType: tender.tenderType,
-      companyName: tender.tenderType === "travel" ? "Travel Plus" : prev.companyName,
+      companyName: inferContractCompanyName(tender.category || "", tender.tenderType),
     }));
   };
 
@@ -1050,19 +1633,6 @@ export default function ContractsPanel({
             <option value="travel">Travel Plus</option>
           </select>
           <select
-            id="contracts-status-filter"
-            name="contracts-status-filter"
-            aria-label="Filter by contract status"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "" | ContractStatus)}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white"
-          >
-            <option value="">All statuses</option>
-            {(Object.keys(STATUS_LABELS) as ContractStatus[]).map((s) => (
-              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-            ))}
-          </select>
-          <select
             id="contracts-expiry-filter"
             name="contracts-expiry-filter"
             aria-label="Filter by expiry"
@@ -1090,14 +1660,97 @@ export default function ContractsPanel({
         </div>
 
         <DateRangeField
-          title="Filter by end date"
-          field="toDate"
+          title="Date range"
+          field={dateRangeField}
+          fieldOptions={[
+            { value: "fromDate", label: "From date" },
+            { value: "toDate", label: "To date" },
+            { value: "effectiveEnd", label: "Effective end" },
+            { value: "bgExpiryDate", label: "BG expiry" },
+            { value: "entryDate", label: "Entry date" },
+          ]}
+          onFieldChange={(value) => setDateRangeField(value as ContractDateRangeField)}
           from={dateFrom}
           to={dateTo}
           onFromChange={setDateFrom}
           onToChange={setDateTo}
-          onClear={() => { setDateFrom(""); setDateTo(""); }}
+          onClear={() => {
+            setDateFrom("");
+            setDateTo("");
+          }}
         />
+
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-2 mb-1">
+          <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
+            <Filter size={13} />
+            Column filters
+            {activeColumnFilterCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-[#ff791a] text-white text-[10px]">
+                {activeColumnFilterCount}
+              </span>
+            )}
+            <span className="font-normal text-slate-400">
+              Showing {filtered.length} of {contracts.length}
+            </span>
+          </div>
+          {activeColumnFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={resetColumnFilters}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+            >
+              <RotateCcw size={11} />
+              Clear column filters
+            </button>
+          )}
+        </div>
+
+        {!readOnly && (filtered.length > 0 || selectedIds.length > 0) && (
+          <div className="rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-2.5 flex flex-col lg:flex-row lg:items-center gap-2.5 mb-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <div className="flex items-center gap-2 font-semibold">
+                <SelectionCheckbox
+                  checked={areAllVisibleSelected}
+                  indeterminate={hasSomeVisibleSelected}
+                  disabled={filtered.length === 0}
+                  onChange={toggleSelectVisibleContracts}
+                  title={areAllVisibleSelected ? "Clear visible selection" : "Select all visible contracts"}
+                />
+                <span>
+                  {selectedIds.length} selected
+                  {filtered.length > 0 ? ` · ${filtered.length} in view` : ""}
+                </span>
+              </div>
+              {selectedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSelectedContracts}
+                  className="text-slate-500 hover:text-slate-700 font-semibold underline underline-offset-2"
+                >
+                  Clear selection
+                </button>
+              )}
+            </div>
+            <div className="lg:ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={openBulkEdit}
+                disabled={selectedIds.length === 0 || bulkAction !== null}
+                className="px-3.5 py-2 text-xs rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold hover:border-orange-200 hover:text-[#ff791a] disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                Bulk Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleBulkDeleteSelected()}
+                disabled={selectedIds.length === 0 || bulkAction !== null}
+                className="px-3.5 py-2 text-xs rounded-xl bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {bulkAction === "delete" ? "Deleting…" : `Bulk Delete (${selectedIds.length || 0})`}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto px-5 pb-4">
@@ -1126,7 +1779,7 @@ export default function ContractsPanel({
                     <th
                       key={column.key}
                       className={`px-2 py-2 border-b border-slate-200 border-r border-slate-100 last:border-r-0 ${
-                        column.key === "hasExtension" || column.key === "bgApplicable"
+                        column.key === "hasExtension" || column.key === "bgApplicable" || column.key === "select"
                           ? "text-center"
                           : column.key === "actions"
                             ? "text-right"
@@ -1134,7 +1787,27 @@ export default function ContractsPanel({
                       }`}
                       style={{ height: CONTRACT_ROW_HEIGHT_PX }}
                     >
-                      {column.label}
+                      {column.key === "select" ? (
+                        <SelectionCheckbox
+                          checked={areAllVisibleSelected}
+                          indeterminate={hasSomeVisibleSelected}
+                          disabled={filtered.length === 0}
+                          onChange={toggleSelectVisibleContracts}
+                          title={areAllVisibleSelected ? "Clear visible selection" : "Select all visible contracts"}
+                        />
+                      ) : (
+                        column.label
+                      )}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="bg-white border-b border-slate-200">
+                  {visibleColumns.map((column) => (
+                    <th
+                      key={`filter-${column.key}`}
+                      className="px-1 py-1 border-r border-slate-100 last:border-r-0 font-normal normal-case"
+                    >
+                      {renderColumnFilter(column.key)}
                     </th>
                   ))}
                 </tr>
@@ -1144,11 +1817,12 @@ export default function ContractsPanel({
                   const end = effectiveEndDate(contract);
                   const endMeta = endDateMeta(end);
                   const isExpanded = expandedId === contract.id;
+                  const isSelected = selectedIds.includes(contract.id);
                   const pdfUrl = resolveGemContractPdfUrl(contract);
                   const contractLabel = resolveGemContractNoLabel(contract);
 
                   const activateCell = (columnKey: ContractColumnKey) => {
-                    if (columnKey === "actions") return;
+                    if (columnKey === "actions" || columnKey === "select") return;
                     toggleContractRow(contract.id, columnKey);
                   };
 
@@ -1156,9 +1830,23 @@ export default function ContractsPanel({
                     <React.Fragment key={contract.id}>
                       <tr
                         className={`border-t border-slate-100 ${
-                          isExpanded ? "bg-orange-50/40" : "hover:bg-orange-50/30"
+                          isExpanded
+                            ? "bg-orange-50/40"
+                            : isSelected
+                              ? "bg-orange-50/25 hover:bg-orange-50/40"
+                              : "hover:bg-orange-50/30"
                         }`}
                       >
+                        {!readOnly && (
+                          <ContractTableCell align="center">
+                            <SelectionCheckbox
+                              checked={isSelected}
+                              onChange={() => toggleSelectContract(contract.id)}
+                              title={isSelected ? "Deselect contract" : "Select contract"}
+                            />
+                          </ContractTableCell>
+                        )}
+
                         <ContractTableCell
                           onActivate={() => toggleContractRow(contract.id, "expand")}
                           className="cursor-pointer"
@@ -1443,7 +2131,16 @@ export default function ContractsPanel({
                     id="contract-form-category"
                     name="category"
                     value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    onChange={(e) => {
+                      const category = e.target.value;
+                      const contractType = inferTenderTypeFromCategory(category);
+                      setForm({
+                        ...form,
+                        category,
+                        contractType,
+                        companyName: inferContractCompanyName(category, contractType),
+                      });
+                    }}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   />
                 </label>
@@ -1453,7 +2150,14 @@ export default function ContractsPanel({
                     id="contract-form-contractType"
                     name="contractType"
                     value={form.contractType}
-                    onChange={(e) => setForm({ ...form, contractType: e.target.value as ContractType })}
+                    onChange={(e) => {
+                      const contractType = e.target.value as ContractType;
+                      setForm({
+                        ...form,
+                        contractType,
+                        companyName: inferContractCompanyName(form.category, contractType),
+                      });
+                    }}
                     className="mt-1 w-full px-3 py-2 text-xs border border-slate-200 rounded-lg"
                   >
                     <option value="manpower">Manpower</option>
@@ -1745,6 +2449,446 @@ export default function ContractsPanel({
           </div>
         </div>
       )}
+
+      {!readOnly && isBulkEditOpen && (
+        <ContractBulkEditModal
+          count={selectedContracts.length}
+          rows={bulkEditRowsList}
+          changedRowCount={bulkEditChangeStats.rows}
+          changeCount={bulkEditChangeStats.fields}
+          changedIds={bulkEditChangeStats.changedIds}
+          saving={bulkAction === "edit"}
+          error={bulkEditError}
+          onClose={closeBulkEdit}
+          onReset={resetBulkEditRows}
+          onRowChange={handleBulkRowChange}
+          onSave={() => void handleBulkSave()}
+        />
+      )}
     </section>
+  );
+}
+
+interface ContractBulkEditModalProps {
+  count: number;
+  rows: ContractBulkEditRowDraft[];
+  changedRowCount: number;
+  changeCount: number;
+  changedIds: string[];
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onReset: () => void;
+  onRowChange: (
+    id: string,
+    updates: Partial<Pick<ContractBulkEditRowDraft, ContractBulkEditableField>>,
+  ) => void;
+  onSave: () => void;
+}
+
+function ContractBulkEditModal({
+  count,
+  rows,
+  changedRowCount,
+  changeCount,
+  changedIds,
+  saving,
+  error,
+  onClose,
+  onReset,
+  onRowChange,
+  onSave,
+}: ContractBulkEditModalProps) {
+  const changedIdSet = useMemo(() => new Set(changedIds), [changedIds]);
+  const cellInputClass =
+    "w-full min-w-[100px] rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20";
+
+  const {
+    selectedRowIds,
+    selectedColumnId,
+    activateCell,
+    handleColumnHeaderClick,
+    isCellSelected,
+    clearColumnSelection,
+  } = useBulkColumnSelection(rows);
+
+  const columnLabels: Record<ContractBulkEditableField, string> = {
+    contractNo: "Contract No",
+    officerName: "Officer",
+    officeName: "Office",
+    fromDate: "From",
+    toDate: "To",
+    companyName: "Company",
+    category: "Category",
+    contractType: "Type",
+    hasExtension: "Extension",
+    extensionEndDate: "Ext End",
+    bgApplicable: "BG",
+    status: "Status",
+  };
+
+  const applyToSelection = (
+    rowId: string,
+    columnId: ContractBulkEditableField,
+    updates: Partial<Pick<ContractBulkEditRowDraft, ContractBulkEditableField>>,
+  ) => {
+    if (selectedColumnId === columnId && selectedRowIds.length > 1 && selectedRowIds.includes(rowId)) {
+      selectedRowIds.forEach((id) => onRowChange(id, updates));
+      return;
+    }
+    onRowChange(rowId, updates);
+  };
+
+  const applyBulkFill = (value: string) => {
+    if (!selectedColumnId || selectedRowIds.length === 0) return;
+    const columnId = selectedColumnId as ContractBulkEditableField;
+    selectedRowIds.forEach((id) => {
+      if (columnId === "contractType") {
+        applyToSelection(id, columnId, { contractType: value as ContractType });
+      } else if (columnId === "hasExtension") {
+        applyToSelection(id, columnId, {
+          hasExtension: value === "yes",
+          extensionEndDate: value === "yes" ? rows.find((row) => row.id === id)?.extensionEndDate ?? "" : "",
+        });
+      } else if (columnId === "bgApplicable") {
+        applyToSelection(id, columnId, { bgApplicable: value === "yes" });
+      } else if (columnId === "status") {
+        applyToSelection(id, columnId, { status: value as ContractStatus });
+      } else {
+        applyToSelection(id, columnId, { [columnId]: value } as Partial<
+          Pick<ContractBulkEditRowDraft, ContractBulkEditableField>
+        >);
+      }
+    });
+  };
+
+  const selectedColumnLabel = selectedColumnId
+    ? columnLabels[selectedColumnId as ContractBulkEditableField] ?? selectedColumnId
+    : "";
+  const selectedColumnFillType =
+    selectedColumnId === "contractType" ||
+    selectedColumnId === "hasExtension" ||
+    selectedColumnId === "bgApplicable" ||
+    selectedColumnId === "status"
+      ? "select"
+      : "text";
+  const selectedColumnOptions =
+    selectedColumnId === "contractType"
+      ? ["manpower", "travel"]
+      : selectedColumnId === "hasExtension" || selectedColumnId === "bgApplicable"
+        ? ["no", "yes"]
+        : selectedColumnId === "status"
+          ? Object.keys(STATUS_LABELS)
+          : [];
+
+  const cellClass = (rowId: string, columnId: ContractBulkEditableField) =>
+    `p-2 ${isCellSelected(rowId, columnId) ? "bg-blue-50 ring-1 ring-inset ring-blue-200" : ""}`;
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+      onClick={saving ? undefined : onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-[95vw] max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-orange-100 bg-orange-50 shrink-0">
+          <div className="min-w-0">
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <Pencil size={16} className="text-[#ff791a]" />
+              Bulk Edit Contracts
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Update {count} selected contract{count === 1 ? "" : "s"} in tabular format, then save all changes at once.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-white disabled:opacity-40"
+            >
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white text-xs font-bold rounded-lg"
+            >
+              <Pencil size={14} />
+              {saving ? "Saving..." : `Save ${changeCount} change${changeCount === 1 ? "" : "s"}`}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-orange-100 transition disabled:opacity-50"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-slate-600">
+            <span className="font-semibold">{count} selected</span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changedRowCount} row{changedRowCount === 1 ? "" : "s"} changed
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changeCount} field change{changeCount === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Orange rows have unsaved changes. Click a column header or cell to select rows for bulk fill (Shift+click for range).
+          </p>
+        </div>
+
+        <BulkColumnFillBar
+          selectedRowCount={selectedRowIds.length}
+          columnLabel={selectedColumnLabel}
+          inputType={selectedColumnFillType}
+          selectOptions={selectedColumnOptions}
+          onApply={applyBulkFill}
+          onClear={clearColumnSelection}
+        />
+
+        {error && (
+          <div className="mx-5 mt-3 px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto bg-slate-50/60 p-4">
+          <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[1200px] text-left text-xs border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-slate-200 bg-slate-100 text-slate-600 uppercase tracking-wide">
+                  <th className="px-3 py-2 font-bold">#</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("contractNo")}>Contract No</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("officerName")}>Officer</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("officeName")}>Office</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("fromDate")}>From</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("toDate")}>To</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("extensionEndDate")}>Ext End</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("companyName")}>Company</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("category")}>Category</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("contractType")}>Type</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("hasExtension")}>Ext</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("bgApplicable")}>BG</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("status")}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => {
+                  const rowChanged = changedIdSet.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-100 align-top ${
+                        rowChanged ? "bg-orange-50/35 hover:bg-orange-50/55" : "hover:bg-slate-50/80"
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-bold text-slate-500">{index + 1}</td>
+                      <td
+                        className={cellClass(row.id, "contractNo")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "contractNo", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.contractNo}
+                          onChange={(e) => applyToSelection(row.id, "contractNo", { contractNo: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "officerName")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "officerName", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.officerName}
+                          onChange={(e) => applyToSelection(row.id, "officerName", { officerName: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "officeName")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "officeName", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.officeName}
+                          onChange={(e) => applyToSelection(row.id, "officeName", { officeName: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "fromDate")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "fromDate", e.shiftKey);
+                        }}
+                      >
+                        <DateInput
+                          value={row.fromDate}
+                          onChange={(e) => applyToSelection(row.id, "fromDate", { fromDate: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "toDate")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "toDate", e.shiftKey);
+                        }}
+                      >
+                        <DateInput
+                          value={row.toDate}
+                          onChange={(e) => applyToSelection(row.id, "toDate", { toDate: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "extensionEndDate")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "extensionEndDate", e.shiftKey);
+                        }}
+                      >
+                        <DateInput
+                          value={row.extensionEndDate}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "extensionEndDate", { extensionEndDate: e.target.value })
+                          }
+                          disabled={!row.hasExtension}
+                          className={`${cellInputClass} disabled:bg-slate-50 disabled:text-slate-400`}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "companyName")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "companyName", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.companyName}
+                          onChange={(e) => applyToSelection(row.id, "companyName", { companyName: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "category")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "category", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.category}
+                          onChange={(e) => {
+                            const category = e.target.value;
+                            const contractType = inferTenderTypeFromCategory(category);
+                            applyToSelection(row.id, "category", {
+                              category,
+                              contractType,
+                              companyName: inferContractCompanyName(category, contractType),
+                            });
+                          }}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "contractType")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "contractType", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={row.contractType}
+                          onChange={(e) => {
+                            const contractType = e.target.value as ContractType;
+                            applyToSelection(row.id, "contractType", {
+                              contractType,
+                              companyName: inferContractCompanyName(row.category, contractType),
+                            });
+                          }}
+                          className={cellInputClass}
+                        >
+                          <option value="manpower">Manpower</option>
+                          <option value="travel">Travel Plus</option>
+                        </select>
+                      </td>
+                      <td
+                        className={cellClass(row.id, "hasExtension")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "hasExtension", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={row.hasExtension ? "yes" : "no"}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "hasExtension", {
+                              hasExtension: e.target.value === "yes",
+                              extensionEndDate: e.target.value === "yes" ? row.extensionEndDate : "",
+                            })
+                          }
+                          className={cellInputClass}
+                        >
+                          <option value="no">No</option>
+                          <option value="yes">Yes</option>
+                        </select>
+                      </td>
+                      <td
+                        className={cellClass(row.id, "bgApplicable")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "bgApplicable", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={row.bgApplicable ? "yes" : "no"}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "bgApplicable", { bgApplicable: e.target.value === "yes" })
+                          }
+                          className={cellInputClass}
+                        >
+                          <option value="no">No</option>
+                          <option value="yes">Yes</option>
+                        </select>
+                      </td>
+                      <td
+                        className={cellClass(row.id, "status")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "status", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={row.status}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "status", { status: e.target.value as ContractStatus })
+                          }
+                          className={cellInputClass}
+                        >
+                          {(Object.keys(STATUS_LABELS) as ContractStatus[]).map((status) => (
+                            <option key={status} value={status}>
+                              {STATUS_LABELS[status]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

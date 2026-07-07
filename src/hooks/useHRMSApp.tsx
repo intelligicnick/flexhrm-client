@@ -6156,7 +6156,14 @@ export function useHRMSApp() {
       await fetchSchoolWorks();
       await fetchSchoolPartners();
       let summary = `Bulk import complete! Added ${report.added} school(s).`;
-      if (report.skipped > 0) summary += ` ${report.skipped} duplicate UDISE(s) skipped.`;
+      if (report.skipped > 0) {
+        const codes = Array.isArray(report.skippedCodes) ? report.skippedCodes : [];
+        summary += ` ${report.skipped} duplicate UDISE(s) skipped`;
+        if (codes.length > 0) {
+          summary += `: ${codes.slice(0, 10).join(", ")}${codes.length > 10 ? ` and ${codes.length - 10} more` : ""}`;
+        }
+        summary += ".";
+      }
       triggerSuccess(summary);
     } catch (err: any) {
       setErrorMessage("Failed to perform school bulk upload: " + err.message);
@@ -7052,6 +7059,48 @@ export function useHRMSApp() {
     if (!res.ok) throw await parseApiError(res, "Failed to delete contract.");
     await fetchContracts();
     triggerSuccess("Contract deleted.");
+  };
+
+  const handleBulkUpdateContracts = async (
+    ids: string[],
+    payload: Partial<CreateContractInput>,
+  ): Promise<{ updated: number; errors: string[] }> => {
+    const res = await fetch("/api/contracts/bulk-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, patch: payload }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to bulk update contracts.");
+    const data = await res.json();
+    await fetchContracts();
+    await fetchBgDdRecords();
+    triggerSuccess(`Updated ${data.updated || 0} contract${data.updated === 1 ? "" : "s"}.`);
+    return {
+      updated: data.updated || 0,
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
+  };
+
+  const handleBulkDeleteContracts = async (
+    ids: string[],
+  ): Promise<{ deleted: number; errors: string[] }> => {
+    if (!ensureDeletePermission("bids", "contracts")) {
+      return { deleted: 0, errors: ["Delete permission is required."] };
+    }
+    const res = await fetch("/api/contracts/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw await parseApiError(res, "Failed to bulk delete contracts.");
+    const data = await res.json();
+    await fetchContracts();
+    await fetchBgDdRecords();
+    triggerSuccess(`Deleted ${data.deleted || 0} contract${data.deleted === 1 ? "" : "s"}.`);
+    return {
+      deleted: data.deleted || 0,
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
   };
 
   const handleImportContracts = async (
@@ -8733,6 +8782,8 @@ export function useHRMSApp() {
     handleCreateContract,
     handleUpdateContract,
     handleDeleteContract,
+    handleBulkUpdateContracts,
+    handleBulkDeleteContracts,
     handleImportContracts,
     rawRenewals,
     fetchRenewals,

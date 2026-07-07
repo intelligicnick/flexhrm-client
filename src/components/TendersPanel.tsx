@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Car,
   Briefcase,
+  RotateCcw,
   Filter,
   Zap,
   TrendingUp,
@@ -28,6 +29,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { resolveGemBidPdfUrl, resolveGemBidSearchUrl } from "../lib/gem-helpers";
+import { inferTenderTypeFromCategory } from "../utils/inferTenderType";
 import {
   Tender,
   TenderType,
@@ -48,6 +50,8 @@ import {
 import { validateOptionalAmountString } from "../lib/number-validation";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput, DateTimeInput } from "./ui/DateInput";
+import { useBulkColumnSelection } from "../hooks/useBulkColumnSelection";
+import BulkColumnFillBar from "./BulkColumnFillBar";
 
 const STATUS_LABELS: Record<TenderStatus, string> = {
   not_filed: "Not Participated",
@@ -660,6 +664,50 @@ function selectableStatuses(current: TenderStatus): TenderStatus[] {
   return STATUS_ORDER.filter((status) => status !== "not_filed" && status !== "not_evaluated");
 }
 
+type TenderBulkEditableField = Exclude<keyof TenderBulkEditRowDraft, "id">;
+
+interface TenderBulkEditRowDraft {
+  id: string;
+  bidNo: string;
+  tenderType: TenderType;
+  quantity: number;
+  category: string;
+  ministry: string;
+  organisation: string;
+  consigneeOfficer: string;
+  address: string;
+  rate: string;
+  status: TenderStatus;
+  endDateTimeLocal: string;
+  startDateIso: string;
+  filedDateIso: string;
+  notes: string;
+}
+
+function toTenderBulkEditRowDraft(tender: Tender): TenderBulkEditRowDraft {
+  return {
+    id: tender.id,
+    bidNo: tender.bidNo || "",
+    tenderType: tender.tenderType || "manpower",
+    quantity: tender.quantity || 0,
+    category: tender.category || "",
+    ministry: tender.ministry || "",
+    organisation: tenderOrganisation(tender),
+    consigneeOfficer: tenderConsignee(tender) || tender.consigneeOfficer || "",
+    address: tender.address || "",
+    rate: tender.rate || "",
+    status: isFiledBucket(tender.status) ? "filed" : tender.status,
+    endDateTimeLocal: parseTenderEndDateToDateTimeLocal(tender.endDate),
+    startDateIso: parseFlexibleDateToIso(tender.startDate || ""),
+    filedDateIso: parseFlexibleDateToIso(tender.filedDate || ""),
+    notes: tender.notes || "",
+  };
+}
+
+function buildTenderBulkEditDraftMap(tenders: Tender[]): Record<string, TenderBulkEditRowDraft> {
+  return Object.fromEntries(tenders.map((tender) => [tender.id, toTenderBulkEditRowDraft(tender)]));
+}
+
 function truncatePreview(
   text: string,
   max = 40,
@@ -766,41 +814,6 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
 
 const TENDER_VIEW_KEY = "flexhrm:tenders:view";
 type TenderViewMode = "cards" | "table";
-type BulkTenderField =
-  | "tenderType"
-  | "quantity"
-  | "category"
-  | "ministry"
-  | "organisation"
-  | "consigneeOfficer"
-  | "address"
-  | "rate"
-  | "additionalRequirements"
-  | "endDate"
-  | "startDate"
-  | "filedDate"
-  | "status"
-  | "preBid"
-  | "outcome"
-  | "notes";
-
-const DEFAULT_BULK_TENDER_FORM: Partial<CreateTenderInput> = {
-  tenderType: "manpower",
-  quantity: 0,
-  category: "",
-  ministry: "",
-  organisation: "",
-  consigneeOfficer: "",
-  address: "",
-  rate: "",
-  additionalRequirements: "",
-  status: "not_filed",
-  noPreBid: true,
-  preBidAt: "",
-  preBidVenue: "",
-  outcome: "",
-  notes: "",
-};
 
 function readTenderViewPreference(): TenderViewMode {
   try {
@@ -882,8 +895,7 @@ async function parseTendersWorkbook(
 
   for (const worksheet of workbook.worksheets) {
     const sheetName = worksheet.name.trim().toUpperCase();
-    const isTravel = sheetName.includes("TRAVEL");
-    const tenderType: TenderType = isTravel ? "travel" : "manpower";
+    const sheetTenderType: TenderType = sheetName.includes("TRAVEL") ? "travel" : "manpower";
 
     let headerRow = 0;
     for (let r = 1; r <= Math.min(worksheet.rowCount, 5); r++) {
@@ -938,7 +950,10 @@ async function parseTendersWorkbook(
         department: cellStr(row.getCell(3).value),
         officerName: cellStr(row.getCell(4).value),
         address: cellStr(row.getCell(5).value),
-        tenderType,
+        tenderType: (() => {
+          const category = cellStr(row.getCell(2).value);
+          return category ? inferTenderTypeFromCategory(category) : sheetTenderType;
+        })(),
         quantity: parseQuantity(row.getCell(6).value),
         rate: cellStr(row.getCell(7).value),
         additionalRequirements: "",
@@ -1526,12 +1541,9 @@ export default function TendersPanel({
   const [viewMode, setViewMode] = useState<TenderViewMode>(readTenderViewPreference);
   const [selectedTenderIds, setSelectedTenderIds] = useState<string[]>([]);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [bulkSubmitting, setBulkSubmitting] = useState(false);
-  const [bulkEditFields, setBulkEditFields] = useState<Partial<Record<BulkTenderField, boolean>>>({});
-  const [bulkForm, setBulkForm] = useState<Partial<CreateTenderInput>>(DEFAULT_BULK_TENDER_FORM);
-  const [bulkEndDateTimeLocal, setBulkEndDateTimeLocal] = useState("");
-  const [bulkStartDateIso, setBulkStartDateIso] = useState("");
-  const [bulkFiledDateIso, setBulkFiledDateIso] = useState("");
+  const [bulkEditRows, setBulkEditRows] = useState<Record<string, TenderBulkEditRowDraft>>({});
+  const [bulkEditError, setBulkEditError] = useState<string | null>(null);
+  const [bulkAction, setBulkAction] = useState<"edit" | null>(null);
   const copyBidTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setTenderViewMode = useCallback((mode: TenderViewMode) => {
@@ -1679,6 +1691,37 @@ export default function TendersPanel({
     [normalizedTenders, selectedTenderSet],
   );
 
+  const bulkEditRowsList = useMemo(
+    () => selectedTenders.map((tender) => bulkEditRows[tender.id] ?? toTenderBulkEditRowDraft(tender)),
+    [selectedTenders, bulkEditRows],
+  );
+
+  const bulkEditChangeStats = useMemo(() => {
+    let fields = 0;
+    let rows = 0;
+    const changedIds: string[] = [];
+
+    for (const tender of selectedTenders) {
+      const original = toTenderBulkEditRowDraft(tender);
+      const draft = bulkEditRows[tender.id] ?? original;
+      let rowChanged = false;
+
+      (Object.keys(original) as TenderBulkEditableField[]).forEach((key) => {
+        if (draft[key] !== original[key]) {
+          fields += 1;
+          rowChanged = true;
+        }
+      });
+
+      if (rowChanged) {
+        rows += 1;
+        changedIds.push(tender.id);
+      }
+    }
+
+    return { fields, rows, changedIds };
+  }, [selectedTenders, bulkEditRows]);
+
   const selectableVisibleIds = useMemo(
     () =>
       listItems
@@ -1759,37 +1802,37 @@ export default function TendersPanel({
       setToast("Select at least one tender to bulk edit.");
       return;
     }
-    const sample = selectedTenders[0];
-    setBulkForm({
-      ...DEFAULT_BULK_TENDER_FORM,
-      tenderType: sample.tenderType,
-      quantity: sample.quantity,
-      category: sample.category,
-      ministry: sample.ministry || "",
-      organisation: tenderOrganisation(sample),
-      consigneeOfficer: tenderConsignee(sample) || sample.consigneeOfficer || "",
-      address: sample.address,
-      rate: sample.rate,
-      additionalRequirements: sample.additionalRequirements || "",
-      status: isFiledBucket(sample.status) ? "filed" : sample.status,
-      noPreBid: Boolean(sample.noPreBid),
-      preBidAt: sample.preBidAt || "",
-      preBidVenue: sample.preBidVenue || "",
-      outcome: sample.outcome,
-      notes: sample.notes,
-    });
-    setBulkEditFields({});
-    setBulkEndDateTimeLocal(parseTenderEndDateToDateTimeLocal(sample.endDate));
-    setBulkStartDateIso(parseFlexibleDateToIso(sample.startDate || ""));
-    setBulkFiledDateIso(parseFlexibleDateToIso(sample.filedDate || ""));
+    setBulkEditRows(buildTenderBulkEditDraftMap(selectedTenders));
+    setBulkEditError(null);
     setBulkEditOpen(true);
   }, [selectedTenders]);
 
   const closeBulkEdit = useCallback(() => {
+    if (bulkAction === "edit") return;
+    if (bulkEditChangeStats.fields > 0) {
+      const ok = window.confirm("Close bulk edit? Unsaved changes will be lost.");
+      if (!ok) return;
+    }
     setBulkEditOpen(false);
-    setBulkSubmitting(false);
-    setBulkEditFields({});
-  }, []);
+    setBulkEditError(null);
+  }, [bulkAction, bulkEditChangeStats.fields]);
+
+  const resetBulkEditRows = useCallback(() => {
+    setBulkEditRows(buildTenderBulkEditDraftMap(selectedTenders));
+    setBulkEditError(null);
+  }, [selectedTenders]);
+
+  const handleBulkRowChange = useCallback(
+    (id: string, updates: Partial<Pick<TenderBulkEditRowDraft, TenderBulkEditableField>>) => {
+      setBulkEditRows((prev) => {
+        const source = selectedTenders.find((tender) => tender.id === id);
+        const base = prev[id] ?? (source ? toTenderBulkEditRowDraft(source) : undefined);
+        if (!base) return prev;
+        return { ...prev, [id]: { ...base, ...updates } };
+      });
+    },
+    [selectedTenders],
+  );
 
   const handleSubmit = async () => {
     if (!form.bidNo.trim()) {
@@ -1955,88 +1998,105 @@ export default function TendersPanel({
     }
   }, [onBulkPermanentDelete, selectedDeletedTenderIds]);
 
-  const handleBulkUpdate = useCallback(async () => {
-    if (selectedTenderIds.length === 0) {
-      setToast("Select at least one tender to bulk edit.");
-      return;
-    }
-    const enabledFields = Object.entries(bulkEditFields)
-      .filter(([, enabled]) => Boolean(enabled))
-      .map(([field]) => field as BulkTenderField);
-    if (enabledFields.length === 0) {
-      setToast("Choose at least one field to update.");
+  const handleBulkSave = useCallback(async () => {
+    if (selectedTenders.length === 0) {
+      setBulkEditError("Select at least one tender to update.");
       return;
     }
 
-    const rateError = bulkEditFields.rate
-      ? validateOptionalAmountString(String(bulkForm.rate ?? ""), "Estimated bid value")
-      : "";
-    if (rateError) {
-      setToast(rateError);
-      return;
-    }
-    if (
-      bulkEditFields.status &&
-      bulkForm.status === "not_filed" &&
-      selectedTenders.some((tender) => tender.status !== "not_filed")
-    ) {
-      setToast("Bulk edit cannot move selected tenders back to Not Participated.");
-      return;
-    }
-
-    const payload: Partial<CreateTenderInput> = {};
-    if (bulkEditFields.tenderType) payload.tenderType = bulkForm.tenderType as TenderType;
-    if (bulkEditFields.quantity) payload.quantity = Math.max(0, Number(bulkForm.quantity) || 0);
-    if (bulkEditFields.category) payload.category = String(bulkForm.category ?? "");
-    if (bulkEditFields.ministry) payload.ministry = String(bulkForm.ministry ?? "");
-    if (bulkEditFields.organisation) {
-      const organisation = String(bulkForm.organisation ?? "");
-      payload.organisation = organisation;
-      payload.department = organisation;
-    }
-    if (bulkEditFields.consigneeOfficer) {
-      const consigneeOfficer = String(bulkForm.consigneeOfficer ?? "");
-      payload.consigneeOfficer = consigneeOfficer;
-      payload.officerName = consigneeOfficer;
-    }
-    if (bulkEditFields.address) payload.address = String(bulkForm.address ?? "");
-    if (bulkEditFields.rate) payload.rate = String(bulkForm.rate ?? "");
-    if (bulkEditFields.additionalRequirements) {
-      payload.additionalRequirements = String(bulkForm.additionalRequirements ?? "");
-    }
-    if (bulkEditFields.endDate) {
-      payload.endDate = composeTenderEndDateFromDateTimeLocal(bulkEndDateTimeLocal);
-    }
-    if (bulkEditFields.startDate) payload.startDate = bulkStartDateIso;
-    if (bulkEditFields.filedDate) payload.filedDate = bulkFiledDateIso;
-    if (bulkEditFields.status) payload.status = bulkForm.status as TenderStatus;
-    if (bulkEditFields.preBid) {
-      const noPreBid = Boolean(bulkForm.noPreBid);
-      payload.noPreBid = noPreBid;
-      payload.preBidAt = noPreBid ? "" : String(bulkForm.preBidAt ?? "");
-      payload.preBidVenue = noPreBid ? "" : String(bulkForm.preBidVenue ?? "");
-    }
-    if (bulkEditFields.outcome) payload.outcome = String(bulkForm.outcome ?? "");
-    if (bulkEditFields.notes) payload.notes = String(bulkForm.notes ?? "");
-
-    setBulkSubmitting(true);
     try {
-      const result = await onBulkUpdate(selectedTenderIds, payload);
-      if (result.updated > 0) {
-        setSelectedTenderIds([]);
-        closeBulkEdit();
+      const updates = selectedTenders
+        .map((tender) => {
+          const original = toTenderBulkEditRowDraft(tender);
+          const draft = bulkEditRows[tender.id] ?? original;
+          const label = draft.bidNo.trim() || tender.bidNo || "Tender";
+
+          if (!draft.bidNo.trim()) {
+            throw new Error(`Bid number is required for ${label}.`);
+          }
+
+          const rateError = validateOptionalAmountString(draft.rate, "Estimated bid value");
+          if (rateError) {
+            throw new Error(`${label}: ${rateError}`);
+          }
+
+          if (
+            draft.status === "not_filed" &&
+            tender.status !== "not_filed" &&
+            !isFiledBucket(tender.status)
+          ) {
+            throw new Error(`${label}: cannot move back to Not Participated.`);
+          }
+
+          const payload: Partial<CreateTenderInput> = {};
+          if (original.bidNo !== draft.bidNo.trim()) payload.bidNo = draft.bidNo.trim();
+          if (original.tenderType !== draft.tenderType) payload.tenderType = draft.tenderType;
+          if (original.quantity !== draft.quantity) payload.quantity = Math.max(0, draft.quantity);
+          if (original.category !== draft.category) payload.category = draft.category;
+          if (original.ministry !== draft.ministry) payload.ministry = draft.ministry;
+          if (original.organisation !== draft.organisation) {
+            payload.organisation = draft.organisation;
+            payload.department = draft.organisation;
+          }
+          if (original.consigneeOfficer !== draft.consigneeOfficer) {
+            payload.consigneeOfficer = draft.consigneeOfficer;
+            payload.officerName = draft.consigneeOfficer;
+          }
+          if (original.address !== draft.address) payload.address = draft.address;
+          if (original.rate !== draft.rate) payload.rate = draft.rate;
+          if (original.status !== draft.status) payload.status = draft.status;
+          if (original.endDateTimeLocal !== draft.endDateTimeLocal) {
+            payload.endDate = composeTenderEndDateFromDateTimeLocal(draft.endDateTimeLocal);
+          }
+          if (original.startDateIso !== draft.startDateIso) payload.startDate = draft.startDateIso;
+          if (original.filedDateIso !== draft.filedDateIso) payload.filedDate = draft.filedDateIso;
+          if (original.notes !== draft.notes) payload.notes = draft.notes;
+
+          if (Object.keys(payload).length === 0) return null;
+          return { id: tender.id, payload };
+        })
+        .filter((entry): entry is { id: string; payload: Partial<CreateTenderInput> } => entry !== null);
+
+      if (updates.length === 0) {
+        setBulkEditError("No changes to save.");
+        return;
       }
-      setToast(
-        result.errors.length > 0
-          ? `Updated ${result.updated} tender${result.updated === 1 ? "" : "s"} · ${result.errors.length} failed.`
-          : `Updated ${result.updated} tender${result.updated === 1 ? "" : "s"}.`,
+
+      setBulkAction("edit");
+      setBulkEditError(null);
+
+      const results = await Promise.allSettled(
+        updates.map(({ id, payload }) => onUpdate(id, payload)),
+      );
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+      await onRefresh();
+
+      if (failed.length === 0) {
+        setBulkEditOpen(false);
+        setBulkEditRows({});
+        setSelectedTenderIds([]);
+        setToast(`Updated ${succeeded} tender${succeeded === 1 ? "" : "s"}.`);
+        return;
+      }
+
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to update some tenders.";
+      setBulkEditError(
+        succeeded > 0
+          ? `Updated ${succeeded} tender${succeeded === 1 ? "" : "s"}. ${failed.length} failed: ${firstError}`
+          : firstError,
       );
     } catch (err) {
-      setToast(err instanceof Error ? err.message : "Bulk update failed.");
+      setBulkEditError(err instanceof Error ? err.message : "Bulk update failed.");
     } finally {
-      setBulkSubmitting(false);
+      setBulkAction(null);
     }
-  }, [bulkEditFields, bulkEndDateTimeLocal, bulkFiledDateIso, bulkForm, bulkStartDateIso, closeBulkEdit, onBulkUpdate, selectedTenderIds, selectedTenders]);
+  }, [bulkEditRows, onRefresh, onUpdate, selectedTenders]);
 
   const handleImportFile = async (file: File) => {
     setImporting(true);
@@ -2659,424 +2719,20 @@ export default function TendersPanel({
         </div>
       )}
 
-      {bulkEditOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border border-slate-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-linear-to-r from-orange-50 to-white shrink-0">
-              <div>
-                <h3 className="font-extrabold text-slate-900 text-base">Bulk Edit Tenders</h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Apply the checked fields to {selectedTenderIds.length} selected tender{selectedTenderIds.length === 1 ? "" : "s"}.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeBulkEdit}
-                className="p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition"
-              >
-                <X size={18} className="text-slate-400" />
-              </button>
-            </div>
-            <div className="p-5 overflow-y-auto space-y-4">
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-900">
-                Only checked fields will be updated. Leave a checked field blank if you want to clear that value on all selected tenders.
-              </div>
-              <div className="overflow-auto rounded-xl border border-slate-200">
-                <table className="w-full min-w-[900px] border-separate border-spacing-0 text-xs">
-                  <thead className="bg-slate-100 sticky top-0 z-10">
-                    <tr className="text-[10px] uppercase tracking-wide text-slate-500">
-                      <th className="px-3 py-2.5 text-left font-bold w-24">Apply</th>
-                      <th className="px-3 py-2.5 text-left font-bold w-56">Field</th>
-                      <th className="px-3 py-2.5 text-left font-bold">Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.tenderType)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, tenderType: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Type</td>
-                      <td className="px-3 py-3">
-                        <select
-                          value={bulkForm.tenderType || "manpower"}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, tenderType: e.target.value as TenderType }))}
-                          disabled={!bulkEditFields.tenderType}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        >
-                          <option value="manpower">Manpower</option>
-                          <option value="travel">Car tenders</option>
-                        </select>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.quantity)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, quantity: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Quantity</td>
-                      <td className="px-3 py-3">
-                        <input
-                          type="number"
-                          min={0}
-                          value={bulkForm.quantity ?? 0}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, quantity: Math.max(0, Number(e.target.value) || 0) }))}
-                          disabled={!bulkEditFields.quantity}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.category)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, category: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Item Category</td>
-                      <td className="px-3 py-3">
-                        <textarea
-                          value={bulkForm.category ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, category: e.target.value }))}
-                          disabled={!bulkEditFields.category}
-                          rows={2}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.ministry)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, ministry: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Ministry / State</td>
-                      <td className="px-3 py-3">
-                        <input
-                          value={bulkForm.ministry ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, ministry: e.target.value }))}
-                          disabled={!bulkEditFields.ministry}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.organisation)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, organisation: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Organisation</td>
-                      <td className="px-3 py-3">
-                        <input
-                          value={bulkForm.organisation ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, organisation: e.target.value }))}
-                          disabled={!bulkEditFields.organisation}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.consigneeOfficer)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, consigneeOfficer: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Consignee Reporting/Officer</td>
-                      <td className="px-3 py-3">
-                        <input
-                          value={bulkForm.consigneeOfficer ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, consigneeOfficer: e.target.value }))}
-                          disabled={!bulkEditFields.consigneeOfficer}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.address)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, address: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Address</td>
-                      <td className="px-3 py-3">
-                        <textarea
-                          value={bulkForm.address ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, address: e.target.value }))}
-                          disabled={!bulkEditFields.address}
-                          rows={2}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.rate)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, rate: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Estimated Bid Value</td>
-                      <td className="px-3 py-3">
-                        <input
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={bulkForm.rate ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, rate: e.target.value }))}
-                          disabled={!bulkEditFields.rate}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.status)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, status: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Status</td>
-                      <td className="px-3 py-3">
-                        <select
-                          value={isFiledBucket((bulkForm.status as TenderStatus) || "not_filed") ? "filed" : bulkForm.status || "not_filed"}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, status: e.target.value as TenderStatus }))}
-                          disabled={!bulkEditFields.status}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        >
-                          {STATUS_ORDER.map((key) => (
-                            <option key={key} value={key}>
-                              {STATUS_LABELS[key]}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.additionalRequirements)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, additionalRequirements: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Additional Requirements</td>
-                      <td className="px-3 py-3">
-                        <textarea
-                          value={bulkForm.additionalRequirements ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, additionalRequirements: e.target.value }))}
-                          disabled={!bulkEditFields.additionalRequirements}
-                          rows={4}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.preBid)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, preBid: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Pre-Bid</td>
-                      <td className="px-3 py-3 space-y-3">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(bulkForm.noPreBid)}
-                            onChange={(e) =>
-                              setBulkForm((current) => ({
-                                ...current,
-                                noPreBid: e.target.checked,
-                                preBidAt: e.target.checked ? "" : current.preBidAt,
-                                preBidVenue: e.target.checked ? "" : current.preBidVenue,
-                              }))
-                            }
-                            disabled={!bulkEditFields.preBid}
-                            className="rounded border-slate-300"
-                          />
-                          <span className={!bulkEditFields.preBid ? "text-slate-400" : "text-slate-700"}>No Pre Bid</span>
-                        </label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <input
-                            value={bulkForm.preBidAt ?? ""}
-                            onChange={(e) =>
-                              setBulkForm((current) => ({
-                                ...current,
-                                preBidAt: e.target.value,
-                                noPreBid: !e.target.value.trim() && !String(current.preBidVenue ?? "").trim(),
-                              }))
-                            }
-                            disabled={!bulkEditFields.preBid || Boolean(bulkForm.noPreBid)}
-                            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                            placeholder="01-06-2026 15:00:00"
-                          />
-                          <textarea
-                            value={bulkForm.preBidVenue ?? ""}
-                            onChange={(e) =>
-                              setBulkForm((current) => ({
-                                ...current,
-                                preBidVenue: e.target.value,
-                                noPreBid: !e.target.value.trim() && !String(current.preBidAt ?? "").trim(),
-                              }))
-                            }
-                            disabled={!bulkEditFields.preBid || Boolean(bulkForm.noPreBid)}
-                            rows={2}
-                            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                            placeholder="Pre-bid venue"
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.endDate)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, endDate: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Bid End Date & Time</td>
-                      <td className="px-3 py-3">
-                        <DateTimeInput
-                          value={bulkEndDateTimeLocal}
-                          onChange={(e) => setBulkEndDateTimeLocal(e.target.value)}
-                          disabled={!bulkEditFields.endDate}
-                          className="disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.startDate)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, startDate: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Bid Start Date</td>
-                      <td className="px-3 py-3">
-                        <DateInput
-                          value={bulkStartDateIso}
-                          onChange={(e) => setBulkStartDateIso(e.target.value)}
-                          disabled={!bulkEditFields.startDate}
-                          className="disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.filedDate)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, filedDate: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Participation Filed Date</td>
-                      <td className="px-3 py-3">
-                        <DateInput
-                          value={bulkFiledDateIso}
-                          onChange={(e) => setBulkFiledDateIso(e.target.value)}
-                          disabled={!bulkEditFields.filedDate}
-                          className="disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.outcome)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, outcome: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Outcome / Notes</td>
-                      <td className="px-3 py-3">
-                        <textarea
-                          value={bulkForm.outcome ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, outcome: e.target.value }))}
-                          disabled={!bulkEditFields.outcome}
-                          rows={3}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(bulkEditFields.notes)}
-                          onChange={(e) => setBulkEditFields((current) => ({ ...current, notes: e.target.checked }))}
-                          className="rounded border-slate-300"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-semibold text-slate-700">Internal Notes</td>
-                      <td className="px-3 py-3">
-                        <textarea
-                          value={bulkForm.notes ?? ""}
-                          onChange={(e) => setBulkForm((current) => ({ ...current, notes: e.target.value }))}
-                          disabled={!bulkEditFields.notes}
-                          rows={3}
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 disabled:bg-slate-50 disabled:text-slate-400"
-                        />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={closeBulkEdit}
-                className="px-4 py-2 text-xs font-bold border border-slate-200 rounded-xl hover:bg-white cursor-pointer transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleBulkUpdate()}
-                disabled={bulkSubmitting}
-                className="px-4 py-2 text-xs font-bold bg-[#ff791a] hover:bg-[#e4640c] text-white rounded-xl cursor-pointer disabled:opacity-50 shadow-sm transition"
-              >
-                {bulkSubmitting ? "Applying…" : "Apply Bulk Edit"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {!readOnly && bulkEditOpen && (
+        <TenderBulkEditModal
+          count={selectedTenders.length}
+          rows={bulkEditRowsList}
+          changedRowCount={bulkEditChangeStats.rows}
+          changeCount={bulkEditChangeStats.fields}
+          changedIds={bulkEditChangeStats.changedIds}
+          saving={bulkAction === "edit"}
+          error={bulkEditError}
+          onClose={closeBulkEdit}
+          onReset={resetBulkEditRows}
+          onRowChange={handleBulkRowChange}
+          onSave={() => void handleBulkSave()}
+        />
       )}
 
       {modalOpen && (
@@ -3323,5 +2979,425 @@ export default function TendersPanel({
         </div>
       )}
     </section>
+  );
+}
+
+interface TenderBulkEditModalProps {
+  count: number;
+  rows: TenderBulkEditRowDraft[];
+  changedRowCount: number;
+  changeCount: number;
+  changedIds: string[];
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onReset: () => void;
+  onRowChange: (
+    id: string,
+    updates: Partial<Pick<TenderBulkEditRowDraft, TenderBulkEditableField>>,
+  ) => void;
+  onSave: () => void;
+}
+
+function TenderBulkEditModal({
+  count,
+  rows,
+  changedRowCount,
+  changeCount,
+  changedIds,
+  saving,
+  error,
+  onClose,
+  onReset,
+  onRowChange,
+  onSave,
+}: TenderBulkEditModalProps) {
+  const changedIdSet = useMemo(() => new Set(changedIds), [changedIds]);
+  const cellInputClass =
+    "w-full min-w-[100px] rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-[#ff791a] focus:ring-1 focus:ring-[#ff791a]/20";
+
+  const {
+    selectedRowIds,
+    selectedColumnId,
+    activateCell,
+    handleColumnHeaderClick,
+    isCellSelected,
+    clearColumnSelection,
+  } = useBulkColumnSelection(rows);
+
+  const columnLabels: Record<TenderBulkEditableField, string> = {
+    bidNo: "Bid No",
+    tenderType: "Type",
+    quantity: "Qty",
+    category: "Category",
+    ministry: "Ministry",
+    organisation: "Organisation",
+    consigneeOfficer: "Consignee",
+    address: "Address",
+    rate: "Bid Value",
+    status: "Status",
+    endDateTimeLocal: "End Date",
+    startDateIso: "Start Date",
+    filedDateIso: "Filed Date",
+    notes: "Notes",
+  };
+
+  const applyToSelection = (
+    rowId: string,
+    columnId: TenderBulkEditableField,
+    updates: Partial<Pick<TenderBulkEditRowDraft, TenderBulkEditableField>>,
+  ) => {
+    if (selectedColumnId === columnId && selectedRowIds.length > 1 && selectedRowIds.includes(rowId)) {
+      selectedRowIds.forEach((id) => onRowChange(id, updates));
+      return;
+    }
+    onRowChange(rowId, updates);
+  };
+
+  const applyBulkFill = (value: string) => {
+    if (!selectedColumnId || selectedRowIds.length === 0) return;
+    const columnId = selectedColumnId as TenderBulkEditableField;
+    selectedRowIds.forEach((id) => {
+      if (columnId === "tenderType") {
+        applyToSelection(id, columnId, { tenderType: value as TenderType });
+      } else if (columnId === "quantity") {
+        applyToSelection(id, columnId, { quantity: Math.max(0, Number(value) || 0) });
+      } else if (columnId === "status") {
+        applyToSelection(id, columnId, { status: value as TenderStatus });
+      } else {
+        applyToSelection(id, columnId, { [columnId]: value } as Partial<
+          Pick<TenderBulkEditRowDraft, TenderBulkEditableField>
+        >);
+      }
+    });
+  };
+
+  const selectedColumnLabel = selectedColumnId
+    ? columnLabels[selectedColumnId as TenderBulkEditableField] ?? selectedColumnId
+    : "";
+  const selectedColumnFillType =
+    selectedColumnId === "tenderType" || selectedColumnId === "status" ? "select" : "text";
+  const selectedColumnOptions =
+    selectedColumnId === "tenderType"
+      ? ["manpower", "travel"]
+      : selectedColumnId === "status"
+        ? STATUS_ORDER
+        : [];
+
+  const cellClass = (rowId: string, columnId: TenderBulkEditableField) =>
+    `p-2 ${isCellSelected(rowId, columnId) ? "bg-blue-50 ring-1 ring-inset ring-blue-200" : ""}`;
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+      onClick={saving ? undefined : onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-[95vw] max-h-[92vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-orange-100 bg-orange-50 shrink-0">
+          <div className="min-w-0">
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <Pencil size={16} className="text-[#ff791a]" />
+              Bulk Edit Tenders
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Update {count} selected tender{count === 1 ? "" : "s"} in tabular format, then save all changes at once.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-white disabled:opacity-40"
+            >
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={changeCount === 0 || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white text-xs font-bold rounded-lg"
+            >
+              <Pencil size={14} />
+              {saving ? "Saving..." : `Save ${changeCount} change${changeCount === 1 ? "" : "s"}`}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-orange-100 transition disabled:opacity-50"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-slate-600">
+            <span className="font-semibold">{count} selected</span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changedRowCount} row{changedRowCount === 1 ? "" : "s"} changed
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {changeCount} field change{changeCount === 1 ? "" : "s"}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Orange rows have unsaved changes. Click a column header or cell to select rows for bulk fill (Shift+click for range).
+          </p>
+        </div>
+
+        <BulkColumnFillBar
+          selectedRowCount={selectedRowIds.length}
+          columnLabel={selectedColumnLabel}
+          inputType={selectedColumnFillType}
+          selectOptions={selectedColumnOptions}
+          onApply={applyBulkFill}
+          onClear={clearColumnSelection}
+        />
+
+        {error && (
+          <div className="mx-5 mt-3 px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-xs text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto bg-slate-50/60 p-4">
+          <div className="overflow-auto rounded-lg border border-slate-200 bg-white">
+            <table className="w-full min-w-[1400px] text-left text-xs border-collapse">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-slate-200 bg-slate-100 text-slate-600 uppercase tracking-wide">
+                  <th className="px-3 py-2 font-bold">#</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("bidNo")}>Bid No</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("tenderType")}>Type</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("quantity")}>Qty</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("category")}>Category</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("ministry")}>Ministry</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("organisation")}>Organisation</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("consigneeOfficer")}>Consignee</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("rate")}>Bid Value</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("status")}>Status</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("endDateTimeLocal")}>End Date</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("startDateIso")}>Start</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("filedDateIso")}>Filed</th>
+                  <th className="px-3 py-2 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleColumnHeaderClick("notes")}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => {
+                  const rowChanged = changedIdSet.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-slate-100 align-top ${
+                        rowChanged ? "bg-orange-50/35 hover:bg-orange-50/55" : "hover:bg-slate-50/80"
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-bold text-slate-500">{index + 1}</td>
+                      <td
+                        className={cellClass(row.id, "bidNo")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "bidNo", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.bidNo}
+                          onChange={(e) => applyToSelection(row.id, "bidNo", { bidNo: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "tenderType")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "tenderType", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={row.tenderType}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "tenderType", {
+                              tenderType: e.target.value as TenderType,
+                            })
+                          }
+                          className={cellInputClass}
+                        >
+                          <option value="manpower">Manpower</option>
+                          <option value="travel">Car tenders</option>
+                        </select>
+                      </td>
+                      <td
+                        className={cellClass(row.id, "quantity")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "quantity", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.quantity}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "quantity", {
+                              quantity: Math.max(0, Number(e.target.value) || 0),
+                            })
+                          }
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "category")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "category", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.category}
+                          onChange={(e) => {
+                            const category = e.target.value;
+                            applyToSelection(row.id, "category", {
+                              category,
+                              tenderType: inferTenderTypeFromCategory(category),
+                            });
+                          }}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "ministry")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "ministry", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.ministry}
+                          onChange={(e) => applyToSelection(row.id, "ministry", { ministry: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "organisation")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "organisation", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.organisation}
+                          onChange={(e) => applyToSelection(row.id, "organisation", { organisation: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "consigneeOfficer")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "consigneeOfficer", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.consigneeOfficer}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "consigneeOfficer", { consigneeOfficer: e.target.value })
+                          }
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "rate")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "rate", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={row.rate}
+                          onChange={(e) => applyToSelection(row.id, "rate", { rate: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "status")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "status", e.shiftKey);
+                        }}
+                      >
+                        <select
+                          value={isFiledBucket(row.status) ? "filed" : row.status}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "status", { status: e.target.value as TenderStatus })
+                          }
+                          className={cellInputClass}
+                        >
+                          {STATUS_ORDER.map((status) => (
+                            <option key={status} value={status}>
+                              {STATUS_LABELS[status]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td
+                        className={cellClass(row.id, "endDateTimeLocal")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "endDateTimeLocal", e.shiftKey);
+                        }}
+                      >
+                        <DateTimeInput
+                          value={row.endDateTimeLocal}
+                          onChange={(e) =>
+                            applyToSelection(row.id, "endDateTimeLocal", { endDateTimeLocal: e.target.value })
+                          }
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "startDateIso")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "startDateIso", e.shiftKey);
+                        }}
+                      >
+                        <DateInput
+                          value={row.startDateIso}
+                          onChange={(e) => applyToSelection(row.id, "startDateIso", { startDateIso: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "filedDateIso")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "filedDateIso", e.shiftKey);
+                        }}
+                      >
+                        <DateInput
+                          value={row.filedDateIso}
+                          onChange={(e) => applyToSelection(row.id, "filedDateIso", { filedDateIso: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                      <td
+                        className={cellClass(row.id, "notes")}
+                        onMouseDown={(e) => {
+                          if (e.button === 0) activateCell(row.id, "notes", e.shiftKey);
+                        }}
+                      >
+                        <input
+                          value={row.notes}
+                          onChange={(e) => applyToSelection(row.id, "notes", { notes: e.target.value })}
+                          className={cellInputClass}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
