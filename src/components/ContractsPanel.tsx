@@ -55,6 +55,11 @@ import { inferContractCompanyName } from "../utils/inferContractCompanyName";
 import { inferTenderTypeFromCategory } from "../utils/inferTenderType";
 import { useBulkColumnSelection } from "../hooks/useBulkColumnSelection";
 import BulkColumnFillBar from "./BulkColumnFillBar";
+import BulkContractEditTable from "./BulkContractEditTable";
+import {
+  applyContractBulkDraftUpdate,
+  buildContractSubmissionPayload,
+} from "../lib/contract-bulk-edit-fields";
 
 const STATUS_LABELS: Record<ContractStatus, string> = {
   active: "Active",
@@ -714,6 +719,11 @@ export default function ContractsPanel({
   const [expandedColumnKey, setExpandedColumnKey] = useState<ContractColumnKey | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [locationToAdd, setLocationToAdd] = useState("");
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false);
+  const [contractBulkDrafts, setContractBulkDrafts] = useState<
+    Record<string, Partial<CreateContractInput>>
+  >({});
+  const [isSubmittingContractBulkEdit, setIsSubmittingContractBulkEdit] = useState(false);
 
   const sortedLocations = useMemo(
     () => [...availableLocations].filter(Boolean).sort((a, b) => a.localeCompare(b)),
@@ -986,6 +996,102 @@ export default function ContractsPanel({
   };
 
   const clearSelectedContracts = () => setSelectedIds([]);
+
+  const handleContractBulkDraftChange = (
+    contractId: string,
+    field: keyof CreateContractInput,
+    value: string,
+  ) => {
+    setContractBulkDrafts((prev) =>
+      applyContractBulkDraftUpdate(prev, contracts, contractId, field, value),
+    );
+  };
+
+  const handleContractBulkDraftChangeMany = (
+    updates: Array<{ contractId: string; field: keyof CreateContractInput; value: string }>,
+  ) => {
+    if (updates.length === 0) return;
+    if (updates.length === 1) {
+      handleContractBulkDraftChange(updates[0].contractId, updates[0].field, updates[0].value);
+      return;
+    }
+    setContractBulkDrafts((prev) => {
+      let next = prev;
+      for (const update of updates) {
+        next = applyContractBulkDraftUpdate(
+          next,
+          contracts,
+          update.contractId,
+          update.field,
+          update.value,
+        );
+      }
+      return next;
+    });
+  };
+
+  const handleDiscardContractBulkDrafts = () => {
+    setContractBulkDrafts({});
+  };
+
+  const handleApplyContractBulkChanges = async () => {
+    const updates = buildContractSubmissionPayload(contracts, contractBulkDrafts);
+    if (updates.length === 0) {
+      throw new Error("No changes to save.");
+    }
+
+    for (const update of updates) {
+      const contract = contracts.find((c) => c.id === update.id);
+      const label = update.payload.contractNo || contract?.contractNo || "Contract";
+      const merged = contract ? { ...contract, ...update.payload } : null;
+      if (update.payload.contractNo !== undefined && !String(update.payload.contractNo).trim()) {
+        throw new Error(`Contract number is required for ${label}.`);
+      }
+      if (merged?.hasExtension && !String(merged.extensionEndDate || "").trim()) {
+        throw new Error(`Extension end date is required for ${label}.`);
+      }
+    }
+
+    setIsSubmittingContractBulkEdit(true);
+    try {
+      const results = await Promise.allSettled(
+        updates.map(({ id, payload }) => onUpdate(id, payload)),
+      );
+      const failed = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failed.length;
+      await onRefresh();
+
+      if (failed.length === 0) {
+        setContractBulkDrafts({});
+        setToast(`Updated ${succeeded} contract${succeeded === 1 ? "" : "s"}.`);
+        return;
+      }
+
+      const firstError =
+        failed[0]?.reason instanceof Error
+          ? failed[0].reason.message
+          : "Failed to update some contracts.";
+      throw new Error(
+        succeeded > 0
+          ? `Updated ${succeeded} contract${succeeded === 1 ? "" : "s"}. ${failed.length} failed: ${firstError}`
+          : firstError,
+      );
+    } finally {
+      setIsSubmittingContractBulkEdit(false);
+    }
+  };
+
+  const toggleBulkEditMode = () => {
+    if (isBulkEditMode && Object.keys(contractBulkDrafts).length > 0) {
+      const ok = window.confirm(
+        "Exit contract bulk edit? Unsaved local changes will be kept until you discard them.",
+      );
+      if (!ok) return;
+    }
+    setIsBulkEditMode(!isBulkEditMode);
+  };
 
   const openBulkEdit = () => {
     if (selectedContracts.length === 0) {
@@ -1544,6 +1650,19 @@ export default function ContractsPanel({
           </div>
           {!readOnly && (
             <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={toggleBulkEditMode}
+                className={`px-3 py-2 font-bold text-xs rounded-lg border transition cursor-pointer ${
+                  isBulkEditMode
+                    ? "bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200"
+                    : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                }`}
+              >
+                {isBulkEditMode ? "Exit Contract Bulk Edit" : "Contract Bulk Edit"}
+              </button>
+              {!isBulkEditMode && (
+                <>
               <input
                 id="contracts-import-file"
                 name="contracts-import-file"
@@ -1582,11 +1701,28 @@ export default function ContractsPanel({
                 <Plus size={14} />
                 Add Contract
               </button>
+                </>
+              )}
             </div>
           )}
         </div>
       </div>
 
+      {isBulkEditMode && !readOnly ? (
+        <div className="px-5 pt-4 pb-4">
+          <BulkContractEditTable
+            contracts={contracts}
+            draftChanges={contractBulkDrafts}
+            availableLocations={sortedLocations}
+            onDraftChange={handleContractBulkDraftChange}
+            onDraftChangeMany={handleContractBulkDraftChangeMany}
+            onDiscard={handleDiscardContractBulkDrafts}
+            onApply={handleApplyContractBulkChanges}
+            isApplying={isSubmittingContractBulkEdit}
+          />
+        </div>
+      ) : (
+      <>
       <div className="px-5 pt-4 pb-2">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
           {[
@@ -2018,6 +2154,8 @@ export default function ContractsPanel({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2">
