@@ -12,12 +12,16 @@ import {
   Building2,
   Navigation,
   RefreshCw,
+  Lock,
+  Unlock,
+  MapPinned,
 } from "lucide-react";
 import type { Employee, SchoolSupervisor, SchoolVisit } from "../types";
 import {
   buildSupervisorLiveLocations,
   buildSupervisorPaths,
   formatDistanceKm,
+  SUPERVISOR_PATH_COLORS,
   type SupervisorLiveLocation,
   type SupervisorPath,
   type SupervisorPathPeriod,
@@ -41,6 +45,10 @@ import {
   isTouchMapDevice,
   MAP_DEFAULT_CENTER,
   MAP_DEFAULT_ZOOM,
+  MAP_TILE_ATTRIBUTION,
+  MAP_TILE_ATTRIBUTION_DETAILED,
+  MAP_TILE_URL,
+  MAP_TILE_URL_DETAILED,
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../lib/leaflet-map-setup";
@@ -236,18 +244,65 @@ function drawRoutePolyline(
   }).addTo(pathsLayer);
 }
 
-function buildEmployeeDayRoutes(pins: EmployeePunchPin[]): L.LatLngExpression[][] {
+type EmployeeDayRoute = {
+  employeeId: string;
+  employeeName: string;
+  color: string;
+  latLngs: L.LatLngExpression[];
+};
+
+const LOCATION_TOOLTIP_OPTIONS: L.TooltipOptions = {
+  permanent: true,
+  direction: "top",
+  offset: [0, -14],
+  className: "field-map-location-label",
+};
+
+function resolvePlaceLabel(
+  locationName?: string,
+  address?: string,
+  lat?: number,
+  lng?: number,
+): string {
+  const addr = address?.trim();
+  if (addr) return addr;
+  const name = locationName?.trim();
+  if (name && name !== "—") return name;
+  if (lat != null && lng != null) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  return "";
+}
+
+function bindLocationTooltip(
+  marker: L.Marker | L.Circle,
+  label: string,
+  show: boolean,
+): void {
+  if (!show || !label) return;
+  marker.bindTooltip(label, {
+    ...LOCATION_TOOLTIP_OPTIONS,
+    opacity: 0.95,
+  });
+}
+
+function buildEmployeeDayRoutes(pins: EmployeePunchPin[]): EmployeeDayRoute[] {
   const byEmployee = new Map<string, EmployeePunchPin[]>();
   for (const pin of pins) {
     const bucket = byEmployee.get(pin.employeeId) || [];
     bucket.push(pin);
     byEmployee.set(pin.employeeId, bucket);
   }
-  const routes: L.LatLngExpression[][] = [];
-  for (const employeePins of byEmployee.values()) {
+  const routes: EmployeeDayRoute[] = [];
+  let colorIndex = 0;
+  for (const [employeeId, employeePins] of byEmployee.entries()) {
     const sorted = [...employeePins].sort((a, b) => a.punchedAt.localeCompare(b.punchedAt));
     if (sorted.length < 2) continue;
-    routes.push(sorted.map((pin) => [pin.lat, pin.lng] as L.LatLngExpression));
+    routes.push({
+      employeeId,
+      employeeName: sorted[0].employeeName,
+      color: SUPERVISOR_PATH_COLORS[colorIndex % SUPERVISOR_PATH_COLORS.length],
+      latLngs: sorted.map((pin) => [pin.lat, pin.lng] as L.LatLngExpression),
+    });
+    colorIndex += 1;
   }
   return routes;
 }
@@ -267,6 +322,7 @@ export default function FieldTrackingMap({
   const embedded = variant === "embedded";
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
   const geofenceLayerRef = useRef<L.LayerGroup | null>(null);
   const pathsLayerRef = useRef<L.LayerGroup | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
@@ -274,9 +330,21 @@ export default function FieldTrackingMap({
   const userInteractedRef = useRef(false);
   const touchDevice = useMemo(() => isTouchMapDevice(), []);
 
+  const useInternalFullscreen = !onToggleFullscreen;
+  const [internalFullscreen, setInternalFullscreen] = useState(false);
+  const activeFullscreen = useInternalFullscreen ? internalFullscreen : isFullscreen;
+  const handleToggleFullscreen = () => {
+    if (onToggleFullscreen) onToggleFullscreen();
+    else setInternalFullscreen((value) => !value);
+  };
+
   const [layer, setLayer] = useState<FieldTrackingLayer>("supervisors");
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("all");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
+  const [lockView, setLockView] = useState(false);
+  const [showLocationLabels, setShowLocationLabels] = useState(true);
+  const [showDetailedMapLabels, setShowDetailedMapLabels] = useState(true);
   const [period, setPeriod] = useState<TrailPeriod>("day");
   const [trailFromDate, setTrailFromDate] = useState(todayIsoInKolkata());
   const [trailToDate, setTrailToDate] = useState(todayIsoInKolkata());
@@ -321,6 +389,42 @@ export default function FieldTrackingMap({
         ? liveLocations
         : liveLocations.filter((loc) => loc.supervisorId === selectedSupervisorId),
     [liveLocations, selectedSupervisorId],
+  );
+
+  const employeeSummaries = useMemo(() => {
+    const byEmployee = new Map<
+      string,
+      { employeeId: string; employeeName: string; lat: number; lng: number; color: string }
+    >();
+    let colorIndex = 0;
+    const sortedPins = [...punchPins].sort((a, b) => a.punchedAt.localeCompare(b.punchedAt));
+    for (const pin of sortedPins) {
+      const color =
+        byEmployee.get(pin.employeeId)?.color ??
+        SUPERVISOR_PATH_COLORS[colorIndex % SUPERVISOR_PATH_COLORS.length];
+      if (!byEmployee.has(pin.employeeId)) colorIndex += 1;
+      byEmployee.set(pin.employeeId, {
+        employeeId: pin.employeeId,
+        employeeName: pin.employeeName,
+        lat: pin.lat,
+        lng: pin.lng,
+        color,
+      });
+    }
+    return Array.from(byEmployee.values());
+  }, [punchPins]);
+
+  const visiblePunchPins = useMemo(
+    () =>
+      selectedEmployeeId === "all"
+        ? punchPins
+        : punchPins.filter((pin) => pin.employeeId === selectedEmployeeId),
+    [punchPins, selectedEmployeeId],
+  );
+
+  const employeeRouteCount = useMemo(
+    () => buildEmployeeDayRoutes(visiblePunchPins).length,
+    [visiblePunchPins],
   );
 
   const activeSupervisorCount = useMemo(
@@ -387,6 +491,13 @@ export default function FieldTrackingMap({
   }, [liveLocations, selectedSupervisorId]);
 
   useEffect(() => {
+    if (selectedEmployeeId === "all") return;
+    if (!employeeSummaries.some((emp) => emp.employeeId === selectedEmployeeId)) {
+      setSelectedEmployeeId("all");
+    }
+  }, [employeeSummaries, selectedEmployeeId]);
+
+  useEffect(() => {
     const containerEl = mapContainerRef.current;
     if (!containerEl || mapRef.current) return;
 
@@ -400,7 +511,9 @@ export default function FieldTrackingMap({
       if (cancelled || mapRef.current) return;
 
       const map = createFieldMap(containerEl);
-      createMapTileLayer().addTo(map);
+      const tileLayer = createMapTileLayer(showDetailedMapLabels);
+      tileLayer.addTo(map);
+      tileLayerRef.current = tileLayer;
       L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
 
       geofenceLayerRef.current = L.layerGroup().addTo(map);
@@ -440,10 +553,21 @@ export default function FieldTrackingMap({
   }, []);
 
   useEffect(() => {
+    const tileLayer = tileLayerRef.current;
+    if (!tileLayer) return;
+    tileLayer.setUrl(showDetailedMapLabels ? MAP_TILE_URL_DETAILED : MAP_TILE_URL);
+    tileLayer.options.attribution = showDetailedMapLabels
+      ? MAP_TILE_ATTRIBUTION_DETAILED
+      : MAP_TILE_ATTRIBUTION;
+    const map = mapRef.current;
+    if (map) scheduleMapInvalidate(map, 80);
+  }, [showDetailedMapLabels]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     scheduleMapInvalidate(map, 120);
-  }, [visiblePaths.length, showPaths, layoutRevision, isFullscreen, layer, punchPins.length]);
+  }, [visiblePaths.length, showPaths, layoutRevision, activeFullscreen, layer, visiblePunchPins.length]);
 
   const flyTo = useCallback((lat: number, lng: number) => {
     const map = mapRef.current;
@@ -455,17 +579,28 @@ export default function FieldTrackingMap({
 
   const autoFitKey = useMemo(
     () =>
-      `${layer}:${period}:${trackingDate}:${selectedSupervisorId}:${visiblePaths.length}:${punchPins.length}:${visibleLiveLocations.length}`,
+      `${layer}:${period}:${trackingDate}:${selectedSupervisorId}:${selectedEmployeeId}:${visiblePaths.length}:${visiblePunchPins.length}:${visibleLiveLocations.length}`,
     [
       layer,
       period,
       trackingDate,
       selectedSupervisorId,
+      selectedEmployeeId,
       visiblePaths.length,
-      punchPins.length,
+      visiblePunchPins.length,
       visibleLiveLocations.length,
     ],
   );
+
+  const viewAllStaffRoutes = useCallback(() => {
+    setLayer("employees");
+    setSelectedEmployeeId("all");
+    setShowPaths(true);
+    if (!lockView) {
+      userInteractedRef.current = false;
+      lastFitKeyRef.current = "";
+    }
+  }, [lockView]);
 
   useEffect(() => {
     const geofenceLayer = geofenceLayerRef.current;
@@ -490,32 +625,38 @@ export default function FieldTrackingMap({
         circle.bindPopup(
           `<strong>${escapeHtml(fence.name)}</strong><br/>${escapeHtml(fence.location || "")}<br/>Radius: ${fence.radiusMeters}m`,
         );
+        bindLocationTooltip(circle, fence.location || fence.name, showLocationLabels);
         circle.addTo(geofenceLayer);
 
-        L.marker([fence.lat, fence.lng], {
+        const fenceMarker = L.marker([fence.lat, fence.lng], {
           icon: L.divIcon({
             className: "",
             iconSize: [28, 28],
             iconAnchor: [14, 14],
             html: `<div style="width:28px;height:28px;border-radius:8px;background:#0C1E4A;border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,0.2);display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 21h18M5 21V7l8-4 8 4v14M9 21v-6h6v6"/></svg></div>`,
           }),
-        })
-          .bindPopup(`<strong>${escapeHtml(fence.name)}</strong>`)
-          .addTo(markersLayer);
+        }).bindPopup(`<strong>${escapeHtml(fence.name)}</strong>`);
+        bindLocationTooltip(fenceMarker, fence.name, showLocationLabels);
+        fenceMarker.addTo(markersLayer);
       }
 
-      for (const pin of punchPins) {
+      for (const pin of visiblePunchPins) {
         const marker = L.marker([pin.lat, pin.lng], {
           icon: createEmployeeIcon(pin.punchType),
           zIndexOffset: 800,
         });
         marker.bindPopup(buildEmployeePopupHtml(pin));
+        bindLocationTooltip(
+          marker,
+          resolvePlaceLabel(pin.locationName, pin.address, pin.lat, pin.lng),
+          showLocationLabels,
+        );
         marker.addTo(markersLayer);
       }
 
       if (showPaths) {
-        for (const route of buildEmployeeDayRoutes(punchPins)) {
-          drawRoutePolyline(route, "#ff791a", pathsLayer);
+        for (const route of buildEmployeeDayRoutes(visiblePunchPins)) {
+          drawRoutePolyline(route.latLngs, route.color, pathsLayer);
         }
       }
     }
@@ -541,6 +682,11 @@ export default function FieldTrackingMap({
             zIndexOffset: 500,
           });
           stepMarker.bindPopup(buildPointPopupHtml(path, point));
+          bindLocationTooltip(
+            stepMarker,
+            resolvePlaceLabel(point.locationLabel, undefined, point.lat, point.lng),
+            showLocationLabels,
+          );
           stepMarker.addTo(markersLayer);
         });
       });
@@ -551,6 +697,11 @@ export default function FieldTrackingMap({
           zIndexOffset: 1000,
         });
         marker.bindPopup(buildSupervisorPopupHtml(location));
+        bindLocationTooltip(
+          marker,
+          resolvePlaceLabel(location.locationLabel, undefined, location.lat, location.lng),
+          showLocationLabels,
+        );
         marker.addTo(markersLayer);
       });
     }
@@ -561,19 +712,20 @@ export default function FieldTrackingMap({
     showSupervisors,
     showEmployees,
     geofences,
-    punchPins,
+    visiblePunchPins,
+    showLocationLabels,
   ]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (userInteractedRef.current) return;
+    if (lockView || userInteractedRef.current) return;
     if (lastFitKeyRef.current === autoFitKey) return;
 
     const bounds = L.latLngBounds([]);
     if (showEmployees) {
       for (const fence of geofences) bounds.extend([fence.lat, fence.lng]);
-      for (const pin of punchPins) bounds.extend([pin.lat, pin.lng]);
+      for (const pin of visiblePunchPins) bounds.extend([pin.lat, pin.lng]);
     }
     if (showSupervisors) {
       for (const path of visiblePaths) {
@@ -591,42 +743,50 @@ export default function FieldTrackingMap({
     scheduleMapInvalidate(map, 150);
   }, [
     autoFitKey,
+    lockView,
     showEmployees,
     showSupervisors,
     geofences,
-    punchPins,
+    visiblePunchPins,
     visiblePaths,
     visibleLiveLocations,
   ]);
 
   useEffect(() => {
+    if (lockView) return;
     userInteractedRef.current = false;
     lastFitKeyRef.current = "";
-  }, [layer, period, trailFromDate, trailToDate, selectedSupervisorId]);
+  }, [lockView, layer, period, trailFromDate, trailToDate, selectedSupervisorId, selectedEmployeeId]);
 
   useEffect(() => {
-    if (!isFullscreen) return;
+    if (!activeFullscreen) return;
     const map = mapRef.current;
     if (!map) return;
     scheduleMapInvalidate(map, 200);
     scheduleMapInvalidate(map, 500);
-  }, [isFullscreen]);
+  }, [activeFullscreen]);
 
   const resolvedMapHeight =
-    mapHeightClass || (embedded ? "h-[calc(100dvh-11rem)]" : "h-80 md:h-[32rem]");
+    mapHeightClass ||
+    (activeFullscreen && useInternalFullscreen
+      ? "h-[calc(100dvh-12rem)]"
+      : embedded
+        ? "h-[calc(100dvh-11rem)]"
+        : "h-80 md:h-[32rem]");
 
   const layerOptions = showEmployeeTracking
     ? LAYER_OPTIONS
     : LAYER_OPTIONS.filter((option) => option.key === "supervisors");
 
+  const rootClassName =
+    useInternalFullscreen && activeFullscreen
+      ? "fixed inset-0 z-50 bg-[#f4f6f9] overflow-y-auto p-4 text-left"
+      : embedded
+        ? "text-left"
+        : "bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left";
+
   return (
-    <div
-      className={
-        embedded
-          ? "text-left"
-          : "bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left"
-      }
-    >
+    <div className={rootClassName}>
       <style>{`
         @keyframes field-map-pulse {
           0% { transform: scale(0.85); opacity: 0.45; }
@@ -663,6 +823,23 @@ export default function FieldTrackingMap({
           background: transparent;
           border: none;
         }
+        .field-tracking-map-container .field-map-location-label {
+          background: rgba(255, 255, 255, 0.96);
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          padding: 2px 7px;
+          font-size: 10px;
+          font-weight: 700;
+          color: #334155;
+          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+          white-space: nowrap;
+          max-width: 200px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .field-tracking-map-container .field-map-location-label::before {
+          border-top-color: rgba(255, 255, 255, 0.96);
+        }
       `}</style>
 
       <div className={`flex flex-col lg:flex-row lg:items-start justify-between gap-3 ${embedded ? "px-3 pt-2" : "mb-4"}`}>
@@ -685,16 +862,51 @@ export default function FieldTrackingMap({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {onToggleFullscreen && (
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
-            >
-              {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-              {isFullscreen ? "Exit" : "Full screen"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleToggleFullscreen}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
+          >
+            {activeFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+            {activeFullscreen ? "Exit full screen" : "Full screen"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLockView((value) => {
+                const next = !value;
+                if (next) userInteractedRef.current = true;
+                return next;
+              });
+            }}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+              lockView
+                ? "border-amber-300 bg-amber-50 text-amber-900"
+                : "border-slate-200 bg-white text-slate-700"
+            }`}
+            title="Keep the current zoom and position when data refreshes"
+          >
+            {lockView ? <Lock size={12} /> : <Unlock size={12} />}
+            {lockView ? "Map locked" : "Stable map"}
+          </button>
+          <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showLocationLabels}
+              onChange={(event) => setShowLocationLabels(event.target.checked)}
+              className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
+            />
+            Location names
+          </label>
+          <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showDetailedMapLabels}
+              onChange={(event) => setShowDetailedMapLabels(event.target.checked)}
+              className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
+            />
+            Village & road labels
+          </label>
           {showEmployeeTracking && (
             <button
               type="button"
@@ -817,6 +1029,23 @@ export default function FieldTrackingMap({
               className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-700"
             />
           </label>
+          <label className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showPaths}
+              onChange={(event) => setShowPaths(event.target.checked)}
+              className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
+            />
+            Show staff routes
+          </label>
+          <button
+            type="button"
+            onClick={viewAllStaffRoutes}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#ff791a]/30 bg-[#fff7ed] text-[10px] font-bold text-[#c2410c] cursor-pointer hover:border-[#ff791a]/50"
+          >
+            <MapPinned size={12} />
+            View all staff routes
+          </button>
         </div>
       )}
 
@@ -839,12 +1068,41 @@ export default function FieldTrackingMap({
           <>
             <span className="inline-flex items-center gap-1.5">
               <Users size={12} className="text-[#ff791a]" />
-              {punchPins.length} GPS punches
+              {visiblePunchPins.length} GPS punches
             </span>
+            <span>{employeeRouteCount} staff routes</span>
             <span>{geofences.length} geofences</span>
           </>
         )}
       </div>
+
+      {showEmployees && employeeSummaries.length > 0 && (
+        <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto ${embedded ? "px-3 mb-2" : "mb-3"}`}>
+          {employeeSummaries.map((emp) => (
+            <button
+              key={emp.employeeId}
+              type="button"
+              onClick={() => {
+                setSelectedEmployeeId((current) =>
+                  current === emp.employeeId ? "all" : emp.employeeId,
+                );
+                flyTo(emp.lat, emp.lng);
+              }}
+              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-bold transition cursor-pointer ${
+                selectedEmployeeId === emp.employeeId
+                  ? "border-slate-800 bg-slate-900 text-white"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
+              }`}
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-full border border-white shadow-sm shrink-0"
+                style={{ backgroundColor: emp.color }}
+              />
+              {emp.employeeName}
+            </button>
+          ))}
+        </div>
+      )}
 
       {showSupervisors && liveLocations.length > 0 && (
         <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto ${embedded ? "px-3 mb-2" : "mb-3"}`}>
@@ -898,10 +1156,10 @@ export default function FieldTrackingMap({
         )}
       </div>
 
-      {showEmployees && punchPins.length > 0 && (
+      {showEmployees && visiblePunchPins.length > 0 && (
         <div className={`mt-3 space-y-1.5 max-h-36 overflow-y-auto ${embedded ? "px-3" : ""}`}>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Staff punches · {trackingDate}</p>
-          {punchPins.slice(0, 12).map((pin) => (
+          {visiblePunchPins.slice(0, 12).map((pin) => (
             <button
               key={pin.id}
               type="button"
@@ -941,7 +1199,8 @@ export default function FieldTrackingMap({
       {!embedded && (
         <p className="text-[10px] text-slate-400 mt-3">
           Supervisors: person icon = last known visit GPS · numbered stops = trail checkpoints · Staff: IN/OUT badges =
-          attendance punch locations · dashed circles = office geofences
+          attendance punch locations · colored lines = staff day routes · dashed circles = office geofences · use
+          Stable map to lock zoom while exploring
         </p>
       )}
     </div>

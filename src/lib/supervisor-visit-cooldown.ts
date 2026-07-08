@@ -1,5 +1,13 @@
 export const MIN_DAYS_BETWEEN_SCHOOL_VISITS = 5;
 
+export interface SchoolVisitCooldownInfo {
+  schoolWorkId: string;
+  lastVisitDate: string | null;
+  lastVisitBySupervisorId?: string | null;
+  lastVisitBySupervisorName?: string | null;
+  blockSharedCooldown: boolean;
+}
+
 export function daysSinceIsoDate(isoDate: string, from = new Date()): number {
   const past = new Date(`${isoDate}T12:00:00`);
   const now = new Date(from);
@@ -29,4 +37,44 @@ export function latestVisitDateBySchool(
     }
   }
   return map;
+}
+
+export function cooldownInfoBySchool(
+  entries: SchoolVisitCooldownInfo[],
+): Map<string, SchoolVisitCooldownInfo> {
+  const map = new Map<string, SchoolVisitCooldownInfo>();
+  for (const entry of entries) {
+    const schoolId = String(entry.schoolWorkId || "").trim();
+    if (!schoolId) continue;
+    map.set(schoolId, entry);
+  }
+  return map;
+}
+
+export function formatVisitCooldownHint(
+  t: (key: string) => string,
+  options: {
+    days: number;
+    blockSharedCooldown?: boolean;
+    lastVisitBySupervisorName?: string | null;
+    currentSupervisorName?: string | null;
+  },
+): string {
+  const {
+    days,
+    blockSharedCooldown,
+    lastVisitBySupervisorName,
+    currentSupervisorName,
+  } = options;
+  const peerName = String(lastVisitBySupervisorName || "").trim();
+  const showPeer =
+    blockSharedCooldown &&
+    peerName &&
+    peerName !== String(currentSupervisorName || "").trim();
+  if (showPeer) {
+    return t("visitCooldownHintShared")
+      .replace("{days}", String(days))
+      .replace("{supervisor}", peerName);
+  }
+  return t("visitCooldownHint").replace("{days}", String(days));
 }

@@ -6,6 +6,11 @@ export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyag
 export const MAP_TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
+/** Standard OSM tiles — richer village and locality labels at higher zoom. */
+export const MAP_TILE_URL_DETAILED = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const MAP_TILE_ATTRIBUTION_DETAILED =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
 export const MAP_DEFAULT_CENTER: L.LatLngExpression = [20.5937, 78.9629];
 export const MAP_DEFAULT_ZOOM = 5;
 
@@ -18,11 +23,11 @@ export function isTouchMapDevice(): boolean {
   );
 }
 
-export function createMapTileLayer(): L.TileLayer {
+export function createMapTileLayer(detailedLabels = false): L.TileLayer {
   const touch = isTouchMapDevice();
   const native = isFlexHrmNativeApp();
-  return L.tileLayer(MAP_TILE_URL, {
-    attribution: MAP_TILE_ATTRIBUTION,
+  return L.tileLayer(detailedLabels ? MAP_TILE_URL_DETAILED : MAP_TILE_URL, {
+    attribution: detailedLabels ? MAP_TILE_ATTRIBUTION_DETAILED : MAP_TILE_ATTRIBUTION,
     maxZoom: 19,
     subdomains: "abcd",
     // Android WebView: load tiles while panning/zooming to avoid blank white map.

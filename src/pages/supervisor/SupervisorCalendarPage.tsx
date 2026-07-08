@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Plus, CalendarRange } from "lucide-react";
-import { SchoolWork, PlannedVisit, CommitmentDiary, SchoolVisit } from "../../types";
+import { SchoolWork, PlannedVisit, CommitmentDiary } from "../../types";
 import { parseApiError } from "../../api";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import {
@@ -13,7 +13,8 @@ import {
 } from "../../lib/supervisor-dates";
 import {
   canVisitSchoolAgain,
-  latestVisitDateBySchool,
+  cooldownInfoBySchool,
+  type SchoolVisitCooldownInfo,
 } from "../../lib/supervisor-visit-cooldown";
 import { fetchSupervisorSchools, normalizeSchoolWorkId } from "../../lib/supervisor-schools-cache";
 import { SupervisorActionButton } from "./SupervisorUI";
@@ -34,8 +35,8 @@ export default function SupervisorCalendarPage() {
   const [rangeEnd, setRangeEnd] = useState<string | null>(null);
   const [planned, setPlanned] = useState<PlannedVisit[]>([]);
   const [commitments, setCommitments] = useState<CommitmentDiary[]>([]);
-  const [recentVisits, setRecentVisits] = useState<SchoolVisit[]>([]);
   const [schools, setSchools] = useState<SchoolWork[]>([]);
+  const [schoolCooldowns, setSchoolCooldowns] = useState<SchoolVisitCooldownInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPlanForm, setShowPlanForm] = useState(false);
   const [planSchoolIds, setPlanSchoolIds] = useState<string[]>([]);
@@ -49,24 +50,21 @@ export default function SupervisorCalendarPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const lookback = new Date();
-      lookback.setDate(lookback.getDate() - 30);
-      const [planRes, schoolList, commitRes, visitsRes] = await Promise.all([
+      const [planRes, schoolList, commitRes, cooldownRes] = await Promise.all([
         supervisorFetch(`/api/planned-visits/supervisor/mine?monthKey=${monthKey}`),
         fetchSupervisorSchools(supervisorFetch),
         supervisorFetch("/api/commitment-diary/supervisor/mine"),
-        supervisorFetch(
-          `/api/school-visits/supervisor/mine?fromDate=${toIsoDate(lookback)}&toDate=${toIsoDate(today)}&lite=1`,
-        ),
+        supervisorFetch("/api/school-visits/supervisor/school-cooldowns"),
       ]);
       if (planRes.ok) setPlanned(await planRes.json());
       setSchools(schoolList);
       if (commitRes.ok) setCommitments(await commitRes.json());
-      if (visitsRes.ok) setRecentVisits(await visitsRes.json());
+      if (cooldownRes.ok) setSchoolCooldowns(await cooldownRes.json());
+      else setSchoolCooldowns([]);
     } catch {
       setPlanned([]);
       setCommitments([]);
-      setRecentVisits([]);
+      setSchoolCooldowns([]);
     } finally {
       setLoading(false);
     }
@@ -184,13 +182,15 @@ export default function SupervisorCalendarPage() {
   );
 
   const cooldownSchoolIds = useMemo(() => {
-    const map = latestVisitDateBySchool(recentVisits);
+    const map = cooldownInfoBySchool(schoolCooldowns);
     const blocked = new Set<string>();
-    for (const [schoolId, lastVisit] of map) {
-      if (!canVisitSchoolAgain(lastVisit)) blocked.add(normalizeSchoolWorkId(schoolId));
+    for (const [schoolId, info] of map) {
+      if (!canVisitSchoolAgain(info.lastVisitDate)) {
+        blocked.add(normalizeSchoolWorkId(schoolId));
+      }
     }
     return blocked;
-  }, [recentVisits]);
+  }, [schoolCooldowns]);
 
   const getCommittedSchoolIds = (date: string) => {
     return new Set(

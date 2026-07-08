@@ -280,6 +280,8 @@ const translations = {
     materialMop: "Mop",
     visitCooldownTitle: "Visit not available yet",
     visitCooldownHint: "This school was visited recently. You can log the next visit in {days} day(s).",
+    visitCooldownHintShared:
+      "A colleague ({supervisor}) visited this school recently. You can log the next visit in {days} day(s).",
     retryGps: "Retry GPS",
     addAnotherPhoto: "Add another photo",
     removePhoto: "Remove photo",
@@ -562,6 +564,8 @@ const translations = {
     materialMop: "पोछा",
     visitCooldownTitle: "अभी विज़िट उपलब्ध नहीं",
     visitCooldownHint: "इस स्कूल की हाल ही में विज़िट हुई है। अगली विज़िट {days} दिन में कर सकते हैं।",
+    visitCooldownHintShared:
+      "एक सहकर्मी ({supervisor}) ने हाल ही में इस स्कूल की विज़िट की है। अगली विज़िट {days} दिन में कर सकते हैं।",
     retryGps: "GPS पुनः प्रयास करें",
     addAnotherPhoto: "एक और फोटो जोड़ें",
     removePhoto: "फोटो हटाएं",

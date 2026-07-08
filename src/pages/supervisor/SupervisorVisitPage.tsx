@@ -20,6 +20,8 @@ import { getMaterialLabel } from "../../lib/supervisor-materials";
 import {
   canVisitSchoolAgain,
   daysUntilSchoolVisitAllowed,
+  formatVisitCooldownHint,
+  type SchoolVisitCooldownInfo,
 } from "../../lib/supervisor-visit-cooldown";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import SupervisorPhotoLightbox from "./SupervisorPhotoLightbox";
@@ -56,8 +58,9 @@ export default function SupervisorVisitPage() {
   const [school, setSchool] = useState<SchoolWork | null>(null);
   const [schoolLoading, setSchoolLoading] = useState(true);
   const [schoolLoadFailed, setSchoolLoadFailed] = useState(false);
-  const [lastVisitDate, setLastVisitDate] = useState<string | null>(null);
+  const [lastVisitInfo, setLastVisitInfo] = useState<SchoolVisitCooldownInfo | null>(null);
   const visitDate = todayIsoInKolkata();
+  const currentSupervisorName = localStorage.getItem("hrms_supervisor_name") || "";
 
   const resolvePlaceName = async (lat: number, lng: number): Promise<string> => {
     try {
@@ -164,8 +167,16 @@ export default function SupervisorVisitPage() {
           }
         }
         if (!cancelled && lastVisitRes.ok) {
-          const data = (await lastVisitRes.json()) as { lastVisitDate?: string | null };
-          setLastVisitDate(data.lastVisitDate ?? null);
+          const data = (await lastVisitRes.json()) as SchoolVisitCooldownInfo & {
+            lastVisitDate?: string | null;
+          };
+          setLastVisitInfo({
+            schoolWorkId: schoolId,
+            lastVisitDate: data.lastVisitDate ?? null,
+            lastVisitBySupervisorId: data.lastVisitBySupervisorId ?? null,
+            lastVisitBySupervisorName: data.lastVisitBySupervisorName ?? null,
+            blockSharedCooldown: !!data.blockSharedCooldown,
+          });
         }
       } catch {
         if (!cancelled) {
@@ -182,11 +193,18 @@ export default function SupervisorVisitPage() {
     };
   }, [schoolId, supervisorFetch]);
 
+  const lastVisitDate = lastVisitInfo?.lastVisitDate ?? null;
   const visitBlocked = useMemo(
     () => !canVisitSchoolAgain(lastVisitDate),
     [lastVisitDate],
   );
   const daysUntilAllowed = lastVisitDate ? daysUntilSchoolVisitAllowed(lastVisitDate) : 0;
+  const cooldownHint = formatVisitCooldownHint(t, {
+    days: daysUntilAllowed,
+    blockSharedCooldown: lastVisitInfo?.blockSharedCooldown,
+    lastVisitBySupervisorName: lastVisitInfo?.lastVisitBySupervisorName,
+    currentSupervisorName,
+  });
 
   const changeMaterial = (item: string) => {
     setMaterials((prev) => {
@@ -452,7 +470,7 @@ export default function SupervisorVisitPage() {
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-bold">{t("visitCooldownTitle")}</p>
           <p className="mt-1 text-xs">
-            {t("visitCooldownHint").replace("{days}", String(daysUntilAllowed))}
+            {cooldownHint}
           </p>
         </div>
       )}
