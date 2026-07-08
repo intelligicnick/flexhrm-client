@@ -80,6 +80,7 @@ public class MainActivity extends AppCompatActivity {
   private boolean securityCheckPassed;
   private long lastSecurityPassAt;
   private boolean pendingNativeCameraAfterPermission;
+  private boolean pendingCameraAfterSettings;
   private File pendingCaptureFile;
   private Uri pendingCaptureUri;
   private enum CaptureTarget {
@@ -182,6 +183,18 @@ public class MainActivity extends AppCompatActivity {
   @Override
   protected void onResume() {
     super.onResume();
+    if (pendingCameraAfterSettings) {
+      pendingCameraAfterSettings = false;
+      if (hasCameraPermission()) {
+        if (pendingCaptureTarget == CaptureTarget.WEB_FILE_INPUT && filePathCallback != null) {
+          openFileChooser();
+        } else {
+          launchNativeCamera();
+        }
+      } else {
+        deliverPhotoErrorToWeb(getString(R.string.camera_permission_denied));
+      }
+    }
     if (securityCheckPassed && locationGatePanel.getVisibility() == View.VISIBLE) {
       ensureLocationReady();
       return;
@@ -661,16 +674,23 @@ public class MainActivity extends AppCompatActivity {
     if (filePathCallback != null && hasCameraPermission()) {
       openFileChooser();
     } else if (filePathCallback != null) {
-      filePathCallback.onReceiveValue(null);
-      filePathCallback = null;
+      if (isCameraPermissionPermanentlyDenied()) {
+        promptCameraPermissionSettings();
+      } else {
+        filePathCallback.onReceiveValue(null);
+        filePathCallback = null;
+        deliverPhotoErrorToWeb(getString(R.string.camera_permission_denied));
+      }
     }
 
     if (pendingNativeCameraAfterPermission) {
       pendingNativeCameraAfterPermission = false;
       if (hasCameraPermission()) {
         startNativeCamera();
+      } else if (isCameraPermissionPermanentlyDenied()) {
+        promptCameraPermissionSettings();
       } else {
-        deliverPhotoErrorToWeb("Camera permission denied.");
+        deliverPhotoErrorToWeb(getString(R.string.camera_permission_denied));
       }
     }
   }
@@ -743,6 +763,34 @@ public class MainActivity extends AppCompatActivity {
       return;
     }
     startNativeCamera();
+  }
+
+  private boolean isCameraPermissionPermanentlyDenied() {
+    if (hasCameraPermission()) {
+      return false;
+    }
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+      return false;
+    }
+    // After a deny, if Android won't show the rationale/dialog again.
+    return !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA);
+  }
+
+  private void promptCameraPermissionSettings() {
+    new AlertDialog.Builder(this)
+        .setTitle(R.string.app_name)
+        .setMessage(R.string.camera_permission_required)
+        .setPositiveButton(
+            R.string.camera_permission_open_settings,
+            (dialog, which) -> {
+              pendingCameraAfterSettings = true;
+              openAppSettings();
+            })
+        .setNegativeButton(
+            android.R.string.cancel,
+            (dialog, which) ->
+                deliverPhotoErrorToWeb(getString(R.string.camera_permission_denied)))
+        .show();
   }
 
   private void startNativeCamera() {

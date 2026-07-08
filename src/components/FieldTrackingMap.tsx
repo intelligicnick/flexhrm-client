@@ -53,6 +53,13 @@ import {
   waitForMapContainerSize,
 } from "../lib/leaflet-map-setup";
 import { getDateRangeForPeriod, todayIsoInKolkata } from "../lib/supervisor-dates";
+import {
+  dedupeMapLabels,
+  resolveEmployeePinMapLabel,
+  resolveMapMarkerLabel,
+  resolveSupervisorLiveMapLabel,
+  resolveSupervisorPointMapLabel,
+} from "../lib/map-location-labels";
 
 type TrailPeriod = SupervisorPathPeriod | "custom";
 
@@ -94,7 +101,12 @@ function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
   const statusLabel = location.isOnline ? "Online" : "Offline";
   const statusColor = location.isOnline ? "#16a34a" : "#64748b";
   const place =
-    location.locationLabel?.trim() || `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+    resolveMapMarkerLabel({
+      schoolName: location.schoolName,
+      locationLabel: location.locationLabel,
+      lat: location.lat,
+      lng: location.lng,
+    }) || `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
   const lastActive = location.lastActiveAt ? formatRelativeTimeAgo(location.lastActiveAt) : "—";
 
   return `
@@ -113,7 +125,14 @@ function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
 function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): string {
   const statusLabel = path.isOnline ? "Online" : "Offline";
   const statusColor = path.isOnline ? "#16a34a" : "#64748b";
-  const location = point.locationLabel?.trim() || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+  const location =
+    resolveMapMarkerLabel({
+      schoolName: point.schoolName,
+      locationLabel: point.locationLabel,
+      lat: point.lat,
+      lng: point.lng,
+      step: point.step,
+    }) || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
   const lastActive = path.lastActiveAt ? formatRelativeTimeAgo(path.lastActiveAt) : "—";
   const stepLabel = point.step === path.points.length ? "Current position" : `Stop ${point.step}`;
   const distanceLabel = path.distanceKm > 0 ? formatDistanceKm(path.distanceKm) : "—";
@@ -146,7 +165,13 @@ function buildEmployeePopupHtml(pin: EmployeePunchPin): string {
     minute: "2-digit",
     timeZone: "Asia/Kolkata",
   });
-  const place = pin.address?.trim() || `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
+  const place =
+    resolveMapMarkerLabel({
+      locationName: pin.locationName,
+      address: pin.address,
+      lat: pin.lat,
+      lng: pin.lng,
+    }) || `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
 
   return `
     <div style="min-width:200px;font-family:Montserrat,system-ui,sans-serif;font-size:12px;line-height:1.45">
@@ -257,20 +282,6 @@ const LOCATION_TOOLTIP_OPTIONS: L.TooltipOptions = {
   offset: [0, -14],
   className: "field-map-location-label",
 };
-
-function resolvePlaceLabel(
-  locationName?: string,
-  address?: string,
-  lat?: number,
-  lng?: number,
-): string {
-  const addr = address?.trim();
-  if (addr) return addr;
-  const name = locationName?.trim();
-  if (name && name !== "—") return name;
-  if (lat != null && lng != null) return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-  return "";
-}
 
 function bindLocationTooltip(
   marker: L.Marker | L.Circle,
@@ -602,6 +613,50 @@ export default function FieldTrackingMap({
     }
   }, [lockView]);
 
+  const employeePinLabels = useMemo(
+    () =>
+      dedupeMapLabels(
+        visiblePunchPins.map((pin) => ({
+          key: pin.id,
+          label: resolveEmployeePinMapLabel(pin),
+          lat: pin.lat,
+          lng: pin.lng,
+        })),
+      ),
+    [visiblePunchPins],
+  );
+
+  const supervisorStepLabels = useMemo(
+    () =>
+      dedupeMapLabels(
+        visiblePaths.flatMap((path) =>
+          path.points
+            .filter((_, index) => index !== path.points.length - 1)
+            .map((point) => ({
+              key: `${path.supervisorId}-${point.visitId}-${point.step}`,
+              label: resolveSupervisorPointMapLabel(point),
+              step: point.step,
+              lat: point.lat,
+              lng: point.lng,
+            })),
+        ),
+      ),
+    [visiblePaths],
+  );
+
+  const supervisorLiveLabels = useMemo(
+    () =>
+      dedupeMapLabels(
+        visibleLiveLocations.map((loc) => ({
+          key: loc.supervisorId,
+          label: resolveSupervisorLiveMapLabel(loc),
+          lat: loc.lat,
+          lng: loc.lng,
+        })),
+      ),
+    [visibleLiveLocations],
+  );
+
   useEffect(() => {
     const geofenceLayer = geofenceLayerRef.current;
     const pathsLayer = pathsLayerRef.current;
@@ -648,7 +703,7 @@ export default function FieldTrackingMap({
         marker.bindPopup(buildEmployeePopupHtml(pin));
         bindLocationTooltip(
           marker,
-          resolvePlaceLabel(pin.locationName, pin.address, pin.lat, pin.lng),
+          employeePinLabels.get(pin.id) || resolveEmployeePinMapLabel(pin),
           showLocationLabels,
         );
         marker.addTo(markersLayer);
@@ -677,6 +732,7 @@ export default function FieldTrackingMap({
           const isStart = index === 0;
           if (isLatest) return;
 
+          const labelKey = `${path.supervisorId}-${point.visitId}-${point.step}`;
           const stepMarker = L.marker([point.lat, point.lng], {
             icon: createStepIcon(path.color, point.step, isStart),
             zIndexOffset: 500,
@@ -684,7 +740,7 @@ export default function FieldTrackingMap({
           stepMarker.bindPopup(buildPointPopupHtml(path, point));
           bindLocationTooltip(
             stepMarker,
-            resolvePlaceLabel(point.locationLabel, undefined, point.lat, point.lng),
+            supervisorStepLabels.get(labelKey) || resolveSupervisorPointMapLabel(point),
             showLocationLabels,
           );
           stepMarker.addTo(markersLayer);
@@ -699,7 +755,7 @@ export default function FieldTrackingMap({
         marker.bindPopup(buildSupervisorPopupHtml(location));
         bindLocationTooltip(
           marker,
-          resolvePlaceLabel(location.locationLabel, undefined, location.lat, location.lng),
+          supervisorLiveLabels.get(location.supervisorId) || resolveSupervisorLiveMapLabel(location),
           showLocationLabels,
         );
         marker.addTo(markersLayer);
@@ -714,6 +770,9 @@ export default function FieldTrackingMap({
     geofences,
     visiblePunchPins,
     showLocationLabels,
+    employeePinLabels,
+    supervisorStepLabels,
+    supervisorLiveLabels,
   ]);
 
   useEffect(() => {
@@ -1169,7 +1228,7 @@ export default function FieldTrackingMap({
               <div className="min-w-0">
                 <p className="text-xs font-bold text-slate-800 truncate">{pin.employeeName}</p>
                 <p className="text-[10px] text-slate-500 truncate">
-                  {pin.punchType === "in" ? "Check in" : "Check out"} · {pin.locationName}
+                  {pin.punchType === "in" ? "Check in" : "Check out"} · {resolveEmployeePinMapLabel(pin)}
                 </p>
               </div>
               <span

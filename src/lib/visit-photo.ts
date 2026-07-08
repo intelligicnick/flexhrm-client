@@ -96,51 +96,117 @@ function isValidCoords(lat: number, lng: number): boolean {
 
 function buildPlaceName(address: Record<string, string> | undefined): string {
   if (!address) return "";
-  const parts = [
-    address.village,
-    address.town,
-    address.city,
-    address.suburb,
-    address.neighbourhood,
-    address.locality,
-    address.county,
-    address.state_district,
-    address.state,
-  ]
-    .map((part) => String(part || "").trim())
+  const fineFields = [
+    "house_number",
+    "road",
+    "hamlet",
+    "village",
+    "isolated_dwelling",
+    "neighbourhood",
+    "locality",
+    "suburb",
+    "town",
+    "city",
+  ] as const;
+  const fineParts = fineFields
+    .map((key) => String(address[key] || "").trim())
     .filter(Boolean);
-  const unique = [...new Set(parts)];
-  return unique.slice(0, 3).join(", ");
+  const uniqueFine = [...new Set(fineParts)];
+  return uniqueFine.slice(0, 3).join(", ");
+}
+
+function buildPlaceNameFromDisplayName(displayName: string): string {
+  const skip = new Set(["india", "भारत", "bihar"]);
+  const parts = displayName
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => {
+      if (!part) return false;
+      if (skip.has(part.toLowerCase())) return false;
+      if (/^\d{6}$/.test(part)) return false;
+      return true;
+    });
+  return parts.slice(0, 3).join(", ");
+}
+
+async function fetchNominatimCandidates(
+  lat: number,
+  lng: number,
+  options?: { layer?: string; language?: string },
+): Promise<string[]> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "json");
+  url.searchParams.set("accept-language", options?.language ?? "en");
+  url.searchParams.set("zoom", "18");
+  if (options?.layer) {
+    url.searchParams.set("layer", options.layer);
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "Accept-Language": options?.language ?? "en",
+      "User-Agent": `FlexHRM-Supervisor/${FIELD_TEAM_APP_VERSION}`,
+    },
+  });
+  if (!res.ok) return [];
+
+  const data = (await res.json()) as {
+    display_name?: string;
+    address?: Record<string, string>;
+  };
+
+  const candidates: string[] = [];
+  const fromAddress = buildPlaceName(data.address);
+  if (fromAddress) candidates.push(fromAddress);
+
+  const displayName = String(data.display_name || "").trim();
+  if (displayName) {
+    const fromDisplay = buildPlaceNameFromDisplayName(displayName);
+    if (fromDisplay) candidates.push(fromDisplay);
+  }
+
+  return candidates;
+}
+
+function scorePlaceCandidate(label: string): number {
+  const trimmed = label.trim();
+  if (!trimmed) return -1;
+
+  let score = 5;
+  if (/road|rd\.|street|st\.|गली|marg|path/i.test(trimmed)) score += 20;
+
+  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) score += 15;
+  if (/village|hamlet|गाँव|गांव|locality|neighbourhood/i.test(trimmed)) score += 10;
+  score += Math.min(parts.length * 3, 12);
+  return score;
+}
+
+function pickBestPlaceName(candidates: string[]): string {
+  let best = "";
+  let bestScore = 0;
+  for (const candidate of candidates) {
+    const score = scorePlaceCandidate(candidate);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate.trim();
+    }
+  }
+  return bestScore > 0 ? best : "";
 }
 
 async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string> {
   try {
-    const url = new URL("https://nominatim.openstreetmap.org/reverse");
-    url.searchParams.set("lat", String(lat));
-    url.searchParams.set("lon", String(lng));
-    url.searchParams.set("format", "json");
-    url.searchParams.set("accept-language", "en");
-    url.searchParams.set("zoom", "16");
-
-    const res = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/json",
-        "Accept-Language": "en",
-        "User-Agent": `FlexHRM-Supervisor/${FIELD_TEAM_APP_VERSION}`,
-      },
-    });
-    if (!res.ok) return "";
-
-    const data = (await res.json()) as {
-      display_name?: string;
-      address?: Record<string, string>;
-    };
-    const fromAddress = buildPlaceName(data.address);
-    if (fromAddress) return fromAddress;
-
-    const display = String(data.display_name || "").trim();
-    if (!display) return "";
-    return display.split(",").slice(0, 3).join(", ").trim();
+    const candidateLists = await Promise.all([
+      fetchNominatimCandidates(lat, lng, { language: "en" }),
+      fetchNominatimCandidates(lat, lng, { language: "hi" }),
+      fetchNominatimCandidates(lat, lng, { layer: "address", language: "en" }),
+      fetchNominatimCandidates(lat, lng, { layer: "address", language: "hi" }),
+    ]);
+    return pickBestPlaceName(candidateLists.flat());
   } catch {
     return "";
   }

@@ -64,8 +64,15 @@ export default function SupervisorVisitPage() {
 
   const resolvePlaceName = async (lat: number, lng: number): Promise<string> => {
     try {
+      const params = new URLSearchParams({
+        lat: String(lat),
+        lng: String(lng),
+      });
+      if (schoolId?.trim()) {
+        params.set("schoolWorkId", schoolId.trim());
+      }
       const res = await supervisorFetch(
-        `/api/school-visits/supervisor/reverse-geocode?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`,
+        `/api/school-visits/supervisor/reverse-geocode?${params.toString()}`,
       );
       if (!res.ok) return "";
       const data = (await res.json()) as { placeName?: string };

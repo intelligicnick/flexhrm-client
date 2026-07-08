@@ -22,4 +22,7 @@
     <string name="tracking_channel_name">Location tracking</string>
     <string name="tracking_channel_description">Shows when Flex HRM is recording GPS for route history.</string>
     <string name="background_location_rationale">Allow location access all the time so Flex HRM can record your travel route even when the screen is off.</string>
+    <string name="camera_permission_required">Camera permission is required to take visit photos. Allow Camera for Flex HRM Field Team, then try again.</string>
+    <string name="camera_permission_denied">Camera permission denied. Open Settings and allow Camera for Flex HRM Field Team.</string>
+    <string name="camera_permission_open_settings">Open settings</string>
 </resources>
