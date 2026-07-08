@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, MapPin, X, ZoomIn } from "lucide-react";
 import { SchoolVisit, SchoolVisitPhoto } from "../types";
 import { resolvePhotoSrc } from "../lib/media-url";
+import { formatLatLngDecimal, isValidGpsCoord } from "../lib/gps-coords";
 
 export function visitPhotoSrc(
   photo: Pick<SchoolVisitPhoto, "photoDataBase64" | "mimeType" | "imagekitUrl">,
@@ -127,9 +128,9 @@ export default function VisitPhotoLightbox({
             <span>{photo.locationLabel}</span>
           </p>
         )}
-        {photo.lat != null && photo.lng != null && (
-          <p className="text-white/70">
-            GPS: {photo.lat.toFixed(5)}, {photo.lng.toFixed(5)}
+        {photo.lat != null && photo.lng != null && isValidGpsCoord(photo.lat, photo.lng) && (
+          <p className="text-white/80 font-mono">
+            Lat/Lng: {formatLatLngDecimal(photo.lat, photo.lng)}
           </p>
         )}
         {photo.caption && <p className="text-white/70">{photo.caption}</p>}
@@ -172,16 +173,25 @@ export function VisitPhotoThumbnail({ photo, size = "md", onView }: VisitPhotoTh
           <ZoomIn size={12} /> View
         </span>
       </span>
-      {(photo.takenAt || photo.locationLabel) && size !== "lg" && (
-        <span className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/70 to-transparent text-[9px] text-white leading-tight text-left truncate">
-          {photo.takenAt &&
-            new Date(photo.takenAt).toLocaleString("en-IN", {
-              timeZone: "Asia/Kolkata",
-              day: "2-digit",
-              month: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+      {(photo.takenAt || photo.locationLabel || isValidGpsCoord(photo.lat, photo.lng)) &&
+        size !== "lg" && (
+        <span className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/70 to-transparent text-[9px] text-white leading-tight text-left">
+          {photo.takenAt && (
+            <span className="block truncate">
+              {new Date(photo.takenAt).toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "2-digit",
+                month: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
+          {isValidGpsCoord(photo.lat, photo.lng) && (
+            <span className="block truncate font-mono">
+              {formatLatLngDecimal(photo.lat, photo.lng)}
+            </span>
+          )}
         </span>
       )}
     </button>

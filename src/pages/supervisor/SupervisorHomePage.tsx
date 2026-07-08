@@ -14,7 +14,10 @@ import { SchoolWork, CommitmentDiary, SchoolVisit } from "../../types";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import { toIsoDate } from "../../lib/supervisor-dates";
 import { computeGamificationStats } from "../../lib/supervisor-gamification";
-import { fetchSupervisorSchools } from "../../lib/supervisor-schools-cache";
+import {
+  fetchSupervisorSchools,
+  invalidateSupervisorSchoolsCache,
+} from "../../lib/supervisor-schools-cache";
 import {
   canVisitSchoolAgain,
   daysUntilSchoolVisitAllowed,
@@ -74,8 +77,9 @@ export default function SupervisorHomePage() {
 
     (async () => {
       setLoading(true);
+      invalidateSupervisorSchoolsCache();
       try {
-        const schoolList = await fetchSupervisorSchools(supervisorFetch);
+        const schoolList = await fetchSupervisorSchools(supervisorFetch, { force: true });
         if (!cancelled) {
           setSchools(schoolList);
           setLoading(false);

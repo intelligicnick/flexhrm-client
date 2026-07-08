@@ -14,6 +14,7 @@ import {
   startGpsWarmup,
 } from "../../lib/visit-photo";
 import { captureLivePhoto } from "../../lib/live-camera";
+import { formatLatLngDecimal } from "../../lib/gps-coords";
 import { formatDisplayDate, todayIsoInKolkata } from "../../lib/supervisor-dates";
 import { pointsForVisit } from "../../lib/supervisor-gamification";
 import { getMaterialLabel } from "../../lib/supervisor-materials";
@@ -101,6 +102,7 @@ export default function SupervisorVisitPage() {
   photosRef.current = photos;
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const refreshGps = async () => {
     setGpsRefreshing(true);
@@ -108,10 +110,12 @@ export default function SupervisorVisitPage() {
       const location = await probeGpsLocation(resolvePlaceName);
       setGpsReady(hasValidVisitGps(location));
       setGpsPlaceName(location.placeName || null);
+      setGpsCoords({ lat: location.lat, lng: location.lng });
       setGpsError(null);
     } catch (err: unknown) {
       setGpsReady(false);
       setGpsPlaceName(null);
+      setGpsCoords(null);
       setGpsError(err instanceof Error ? err.message : t("gpsDenied"));
     } finally {
       setGpsRefreshing(false);
@@ -306,6 +310,7 @@ export default function SupervisorVisitPage() {
       });
       setPhotos((prev) => [...prev, stamped]);
       setGpsPlaceName(location.placeName);
+      setGpsCoords({ lat: location.lat, lng: location.lng });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t("photoCaptureFailed");
       setError(message);
@@ -501,6 +506,11 @@ export default function SupervisorVisitPage() {
           {gpsReady === true && gpsPlaceName && (
             <p className="text-xs mt-1 opacity-90 truncate">{gpsPlaceName}</p>
           )}
+          {gpsReady === true && gpsCoords && (
+            <p className="text-[11px] mt-1 font-mono opacity-90">
+              {formatLatLngDecimal(gpsCoords.lat, gpsCoords.lng)}
+            </p>
+          )}
           {gpsReady === false && (
             <button
               type="button"
@@ -603,7 +613,10 @@ export default function SupervisorVisitPage() {
                       />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8">
                         <p className="text-[10px] font-semibold text-white line-clamp-2">{photo.caption}</p>
-                        <p className="text-[9px] text-orange-200 mt-0.5 line-clamp-1">{photo.locationLabel}</p>
+                        <p className="text-[9px] text-orange-200 mt-0.5 line-clamp-2">{photo.locationLabel}</p>
+                        <p className="text-[8px] text-orange-100/90 font-mono line-clamp-1">
+                          {formatLatLngDecimal(photo.lat, photo.lng)}
+                        </p>
                       </div>
                     </button>
                     <button

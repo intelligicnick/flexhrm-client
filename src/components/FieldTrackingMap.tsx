@@ -36,6 +36,7 @@ import {
   type MapGeofence,
 } from "../lib/field-tracking-helpers";
 import { formatRelativeTimeAgo } from "../lib/date-helpers";
+import { formatLatLngLabeled } from "../lib/gps-coords";
 import {
   attachMapInteractionHandlers,
   attachMapResizeObserver,
@@ -59,6 +60,7 @@ import {
   resolveMapMarkerLabel,
   resolveSupervisorLiveMapLabel,
   resolveSupervisorPointMapLabel,
+  stripCoordsFromLocationLabel,
 } from "../lib/map-location-labels";
 
 type TrailPeriod = SupervisorPathPeriod | "custom";
@@ -100,13 +102,15 @@ function escapeHtml(value: string): string {
 function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
   const statusLabel = location.isOnline ? "Online" : "Offline";
   const statusColor = location.isOnline ? "#16a34a" : "#64748b";
-  const place =
+  const coords = formatLatLngLabeled(location.lat, location.lng);
+  const place = stripCoordsFromLocationLabel(
     resolveMapMarkerLabel({
       schoolName: location.schoolName,
       locationLabel: location.locationLabel,
       lat: location.lat,
       lng: location.lng,
-    }) || `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+    }),
+  );
   const lastActive = location.lastActiveAt ? formatRelativeTimeAgo(location.lastActiveAt) : "—";
 
   return `
@@ -116,7 +120,8 @@ function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
         <div><span style="color:${statusColor};font-weight:700">${statusLabel}</span> · last active ${escapeHtml(lastActive)}</div>
         <div style="margin-top:4px"><strong>Last visit:</strong> ${escapeHtml(location.visitDate)}</div>
         <div><strong>School:</strong> ${escapeHtml(location.schoolName || "—")}</div>
-        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(place)}</div>
+        ${place ? `<div style="margin-top:4px"><strong>Place:</strong> ${escapeHtml(place)}</div>` : ""}
+        <div style="margin-top:4px;font-family:ui-monospace,Menlo,monospace;font-weight:700;color:#0f172a">${escapeHtml(coords)}</div>
       </div>
     </div>
   `;
@@ -125,14 +130,16 @@ function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
 function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): string {
   const statusLabel = path.isOnline ? "Online" : "Offline";
   const statusColor = path.isOnline ? "#16a34a" : "#64748b";
-  const location =
+  const coords = formatLatLngLabeled(point.lat, point.lng);
+  const place = stripCoordsFromLocationLabel(
     resolveMapMarkerLabel({
       schoolName: point.schoolName,
       locationLabel: point.locationLabel,
       lat: point.lat,
       lng: point.lng,
       step: point.step,
-    }) || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    }),
+  );
   const lastActive = path.lastActiveAt ? formatRelativeTimeAgo(path.lastActiveAt) : "—";
   const stepLabel = point.step === path.points.length ? "Current position" : `Stop ${point.step}`;
   const distanceLabel = path.distanceKm > 0 ? formatDistanceKm(path.distanceKm) : "—";
@@ -146,7 +153,8 @@ function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): 
         <div style="margin-top:4px"><strong>Est. distance:</strong> ~${escapeHtml(distanceLabel)}</div>
         <div style="margin-top:4px"><strong>Date:</strong> ${escapeHtml(point.visitDate)}</div>
         <div><strong>School:</strong> ${escapeHtml(point.schoolName || "—")}</div>
-        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(location)}</div>
+        ${place ? `<div style="margin-top:4px"><strong>Place:</strong> ${escapeHtml(place)}</div>` : ""}
+        <div style="margin-top:4px;font-family:ui-monospace,Menlo,monospace;font-weight:700;color:#0f172a">${escapeHtml(coords)}</div>
       </div>
     </div>
   `;
@@ -165,13 +173,15 @@ function buildEmployeePopupHtml(pin: EmployeePunchPin): string {
     minute: "2-digit",
     timeZone: "Asia/Kolkata",
   });
-  const place =
+  const coords = formatLatLngLabeled(pin.lat, pin.lng);
+  const place = stripCoordsFromLocationLabel(
     resolveMapMarkerLabel({
       locationName: pin.locationName,
       address: pin.address,
       lat: pin.lat,
       lng: pin.lng,
-    }) || `${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}`;
+    }),
+  );
 
   return `
     <div style="min-width:200px;font-family:Montserrat,system-ui,sans-serif;font-size:12px;line-height:1.45">
@@ -180,7 +190,8 @@ function buildEmployeePopupHtml(pin: EmployeePunchPin): string {
       <div style="margin-top:6px;color:#475569">
         <div><span style="color:${punchColor};font-weight:700">${punchLabel}</span> · ${escapeHtml(time)}</div>
         <div style="margin-top:4px">${geoStatus}</div>
-        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(place)}</div>
+        ${place ? `<div style="margin-top:4px"><strong>Place:</strong> ${escapeHtml(place)}</div>` : ""}
+        <div style="margin-top:4px;font-family:ui-monospace,Menlo,monospace;font-weight:700;color:#0f172a">${escapeHtml(coords)}</div>
       </div>
     </div>
   `;
@@ -679,9 +690,13 @@ export default function FieldTrackingMap({
           dashArray: "4 6",
         });
         circle.bindPopup(
-          `<strong>${escapeHtml(fence.name)}</strong><br/>${escapeHtml(fence.location || "")}<br/>Radius: ${fence.radiusMeters}m`,
+          `<strong>${escapeHtml(fence.name)}</strong><br/>${escapeHtml(fence.location || "")}<br/>Radius: ${fence.radiusMeters}m<br/><span style="font-family:ui-monospace,Menlo,monospace;font-weight:700">${escapeHtml(formatLatLngLabeled(fence.lat, fence.lng))}</span>`,
         );
-        bindLocationTooltip(circle, fence.location || fence.name, showLocationLabels);
+        bindLocationTooltip(
+          circle,
+          [fence.location || fence.name, formatLatLngLabeled(fence.lat, fence.lng)].filter(Boolean).join(" · "),
+          showLocationLabels,
+        );
         circle.addTo(geofenceLayer);
 
         const fenceMarker = L.marker([fence.lat, fence.lng], {
@@ -691,8 +706,14 @@ export default function FieldTrackingMap({
             iconAnchor: [14, 14],
             html: `<div style="width:28px;height:28px;border-radius:8px;background:#0C1E4A;border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,0.2);display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 21h18M5 21V7l8-4 8 4v14M9 21v-6h6v6"/></svg></div>`,
           }),
-        }).bindPopup(`<strong>${escapeHtml(fence.name)}</strong>`);
-        bindLocationTooltip(fenceMarker, fence.name, showLocationLabels);
+        }).bindPopup(
+          `<strong>${escapeHtml(fence.name)}</strong><br/><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:700">${escapeHtml(formatLatLngLabeled(fence.lat, fence.lng))}</span>`,
+        );
+        bindLocationTooltip(
+          fenceMarker,
+          `${fence.name} · ${formatLatLngLabeled(fence.lat, fence.lng)}`,
+          showLocationLabels,
+        );
         fenceMarker.addTo(markersLayer);
       }
 
@@ -893,7 +914,7 @@ export default function FieldTrackingMap({
           color: #334155;
           box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
           white-space: nowrap;
-          max-width: 200px;
+          max-width: 280px;
           overflow: hidden;
           text-overflow: ellipsis;
         }
@@ -1219,7 +1240,9 @@ export default function FieldTrackingMap({
       {showEmployees && visiblePunchPins.length > 0 && (
         <div className={`mt-3 space-y-1.5 max-h-36 overflow-y-auto ${embedded ? "px-3" : ""}`}>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Staff punches · {trackingDate}</p>
-          {visiblePunchPins.slice(0, 12).map((pin) => (
+          {visiblePunchPins.slice(0, 12).map((pin) => {
+            const placeLabel = stripCoordsFromLocationLabel(resolveEmployeePinMapLabel(pin));
+            return (
             <button
               key={pin.id}
               type="button"
@@ -1229,7 +1252,11 @@ export default function FieldTrackingMap({
               <div className="min-w-0">
                 <p className="text-xs font-bold text-slate-800 truncate">{pin.employeeName}</p>
                 <p className="text-[10px] text-slate-500 truncate">
-                  {pin.punchType === "in" ? "Check in" : "Check out"} · {resolveEmployeePinMapLabel(pin)}
+                  {pin.punchType === "in" ? "Check in" : "Check out"}
+                  {placeLabel ? ` · ${placeLabel}` : ""}
+                </p>
+                <p className="text-[10px] font-mono font-semibold text-slate-600 truncate">
+                  {formatLatLngLabeled(pin.lat, pin.lng)}
                 </p>
               </div>
               <span
@@ -1240,7 +1267,8 @@ export default function FieldTrackingMap({
                 {pin.punchType.toUpperCase()}
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
 

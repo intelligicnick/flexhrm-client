@@ -25,6 +25,7 @@ import {
   persistSupervisorSession,
   restoreSupervisorSessionFromNative,
 } from "../../lib/supervisor-session";
+import { invalidateSupervisorSchoolsCache } from "../../lib/supervisor-schools-cache";
 import { AppNotification } from "../../types";
 import { useNotificationPoller } from "../../hooks/useNotificationPoller";
 import { requestBrowserNotificationPermission } from "../../lib/notification-alerts";
@@ -82,6 +83,8 @@ function SupervisorLayoutInner() {
         return;
       }
       const data = await res.json();
+      invalidateSupervisorSchoolsCache();
+
       if (data.defaultLanguage === "en" || data.defaultLanguage === "hi") {
         setLang(data.defaultLanguage);
       }

@@ -23,6 +23,32 @@ import { SupervisorI18nProvider, useSupervisorI18n } from "./SupervisorI18nConte
 import SupervisorBlockedAppsGate from "./SupervisorBlockedAppsGate";
 import { SupervisorActionButton } from "./SupervisorUI";
 
+function extractErrorCode(errBody: Record<string, unknown>): string | null {
+  const msg = errBody?.message;
+  return (
+    (typeof errBody?.code === "string" ? errBody.code : null) ||
+    (typeof msg === "object" && msg && "code" in msg
+      ? String((msg as { code?: string }).code || "")
+      : null) ||
+    (typeof msg === "string" && msg.includes("DEVICE_MISMATCH") ? "DEVICE_MISMATCH" : null) ||
+    (typeof msg === "string" && msg.includes("DEVICE_ALREADY_REGISTERED")
+      ? "DEVICE_ALREADY_REGISTERED"
+      : null)
+  );
+}
+
+function extractRegisteredToName(errBody: Record<string, unknown>): string {
+  const msg = errBody?.message;
+  if (typeof errBody?.registeredToName === "string" && errBody.registeredToName.trim()) {
+    return errBody.registeredToName.trim();
+  }
+  if (typeof msg === "object" && msg && "registeredToName" in msg) {
+    const name = String((msg as { registeredToName?: string }).registeredToName || "").trim();
+    if (name) return name;
+  }
+  return "";
+}
+
 function LoginForm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -36,6 +62,9 @@ function LoginForm() {
   const [needsDeviceOtp, setNeedsDeviceOtp] = useState(
     () => searchParams.get("reason") === "device_mismatch",
   );
+  const [needsDeviceTransferConfirm, setNeedsDeviceTransferConfirm] = useState(false);
+  const [registeredToName, setRegisteredToName] = useState("");
+  const [confirmDeviceTransfer, setConfirmDeviceTransfer] = useState(false);
 
   const deviceId = getSupervisorDeviceId();
   const deviceName = getSupervisorDeviceName();
@@ -79,55 +108,95 @@ function LoginForm() {
     };
   }, [navigate]);
 
+  const completeLogin = async (opts?: { confirmTransfer?: boolean }) => {
+    const res = await fetch(apiUrl("/api/auth/supervisor/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: phone.trim(),
+        password,
+        deviceId,
+        deviceName,
+        deviceOtp: needsDeviceOtp ? deviceOtp.trim() : undefined,
+        confirmDeviceTransfer: opts?.confirmTransfer || confirmDeviceTransfer || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const errBody = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const code = extractErrorCode(errBody);
+      if (
+        code === "DEVICE_MISMATCH" ||
+        (res.status === 403 && typeof errBody?.message === "object" && (errBody.message as { code?: string })?.code === "DEVICE_MISMATCH")
+      ) {
+        setNeedsDeviceOtp(true);
+        throw new Error(t("deviceMismatch"));
+      }
+      if (code === "DEVICE_ALREADY_REGISTERED") {
+        const name = extractRegisteredToName(errBody);
+        setRegisteredToName(name);
+        setNeedsDeviceTransferConfirm(true);
+        setConfirmDeviceTransfer(false);
+        throw new Error(
+          name
+            ? t("deviceAlreadyRegisteredNamed").replace("{name}", name)
+            : t("deviceAlreadyRegistered"),
+        );
+      }
+      const msg = errBody?.message;
+      throw new Error(
+        typeof msg === "string"
+          ? msg
+          : typeof msg === "object" && msg && "message" in msg
+            ? String((msg as { message?: string }).message || "Login failed.")
+            : "Login failed.",
+      );
+    }
+    const data = await res.json();
+    clearSupervisorImpersonatedFlag();
+    persistSupervisorSession({
+      token: data.token,
+      name: data.name || phone,
+      supervisorId: data.supervisorId || "",
+    });
+    navigate("/supervisor");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl("/api/auth/supervisor/login"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phone: phone.trim(),
-          password,
-          deviceId,
-          deviceName,
-          deviceOtp: needsDeviceOtp ? deviceOtp.trim() : undefined,
-        }),
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        const msg = errBody?.message;
-        const code =
-          errBody?.code ||
-          (typeof msg === "object" && msg?.code) ||
-          (typeof msg === "string" && msg.includes("DEVICE_MISMATCH") ? "DEVICE_MISMATCH" : null);
-        if (code === "DEVICE_MISMATCH" || (res.status === 403 && typeof msg === "object" && msg?.code === "DEVICE_MISMATCH")) {
-          setNeedsDeviceOtp(true);
-          throw new Error(t("deviceMismatch"));
-        }
-        throw new Error(
-          typeof msg === "string"
-            ? msg
-            : typeof msg === "object" && msg?.message
-              ? String(msg.message)
-              : "Login failed.",
-        );
-      }
-      const data = await res.json();
-      clearSupervisorImpersonatedFlag();
-      persistSupervisorSession({
-        token: data.token,
-        name: data.name || phone,
-        supervisorId: data.supervisorId || "",
-      });
-      navigate("/supervisor");
+      await completeLogin();
     } catch (err: unknown) {
       setError(formatNetworkFetchError(err, "Login failed.").message);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleConfirmTransfer = async () => {
+    setLoading(true);
+    setError(null);
+    setConfirmDeviceTransfer(true);
+    try {
+      await completeLogin({ confirmTransfer: true });
+    } catch (err: unknown) {
+      setError(formatNetworkFetchError(err, "Login failed.").message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelTransfer = () => {
+    setNeedsDeviceTransferConfirm(false);
+    setConfirmDeviceTransfer(false);
+    setRegisteredToName("");
+    setError(null);
+  };
+
+  const transferMessage = registeredToName
+    ? t("deviceAlreadyRegisteredNamed").replace("{name}", registeredToName)
+    : t("deviceAlreadyRegistered");
 
   return (
     <div
@@ -168,14 +237,43 @@ function LoginForm() {
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-4" id="supervisor-login-form">
-            {error && (
+            {error && !needsDeviceTransferConfirm && (
               <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-800 text-xs flex gap-2 items-start">
                 <span className="p-1 bg-rose-100 text-rose-800 rounded-full text-[10px] shrink-0">!</span>
                 <span className="font-semibold">{error}</span>
               </div>
             )}
 
-            {needsDeviceOtp && (
+            {needsDeviceTransferConfirm && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs space-y-3">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                  <p className="leading-relaxed font-semibold">{transferMessage}</p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <SupervisorActionButton
+                    type="button"
+                    loading={loading}
+                    loadingText={t("signingIn")}
+                    fullWidth
+                    className="py-3 rounded-xl text-sm font-black"
+                    onClick={() => void handleConfirmTransfer()}
+                  >
+                    {t("confirmRegisterDevice")}
+                  </SupervisorActionButton>
+                  <button
+                    type="button"
+                    onClick={handleCancelTransfer}
+                    disabled={loading}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {t("cancelRegisterDevice")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {needsDeviceOtp && !needsDeviceTransferConfirm && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs">
                 <div className="flex items-center gap-2 font-bold mb-1">
                   <ShieldAlert size={14} />
@@ -201,6 +299,7 @@ function LoginForm() {
                   placeholder="10-digit mobile number"
                   className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base bg-slate-50/50"
                   required
+                  disabled={needsDeviceTransferConfirm}
                 />
               </div>
             </div>
@@ -219,11 +318,12 @@ function LoginForm() {
                   placeholder="••••••••"
                   className="w-full pl-10 pr-4 py-3.5 border border-slate-200 rounded-xl focus:border-[#ff791a] focus:ring-2 focus:ring-orange-100 focus:outline-none text-base font-mono bg-slate-50/50"
                   required
+                  disabled={needsDeviceTransferConfirm}
                 />
               </div>
             </div>
 
-            {needsDeviceOtp && (
+            {needsDeviceOtp && !needsDeviceTransferConfirm && (
               <div>
                 <label htmlFor="supervisor-device-otp" className="text-xs font-bold text-slate-600 block mb-1.5">
                   {t("deviceOtp")}
@@ -241,16 +341,18 @@ function LoginForm() {
               </div>
             )}
 
-            <SupervisorActionButton
-              type="submit"
-              loading={loading}
-              loadingText={t("signingIn")}
-              fullWidth
-              className="py-4 rounded-2xl text-sm font-black"
-              icon={<LogIn size={18} />}
-            >
-              {needsDeviceOtp ? t("verifyDevice") : t("signIn")}
-            </SupervisorActionButton>
+            {!needsDeviceTransferConfirm && (
+              <SupervisorActionButton
+                type="submit"
+                loading={loading}
+                loadingText={t("signingIn")}
+                fullWidth
+                className="py-4 rounded-2xl text-sm font-black"
+                icon={<LogIn size={18} />}
+              >
+                {needsDeviceOtp ? t("verifyDevice") : t("signIn")}
+              </SupervisorActionButton>
+            )}
           </form>
         </div>
 

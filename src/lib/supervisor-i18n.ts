@@ -150,6 +150,12 @@ const translations = {
     deviceOtpHint: "Contact your admin for a device change OTP and enter it below.",
     deviceOtp: "Device Change OTP",
     verifyDevice: "Verify & Sign In",
+    deviceAlreadyRegistered:
+      "A user is already registered from this device. Are you sure you want to register?",
+    deviceAlreadyRegisteredNamed:
+      "{name} is already registered on this device. Are you sure you want to register?",
+    confirmRegisterDevice: "Yes, register my account",
+    cancelRegisterDevice: "Cancel",
     adminLoginHint: "Use the login phone and password set by your admin.",
     appsCheckScanning: "Scanning installed apps...",
     appsCheckDialogTitle: "Restricted app found",
@@ -434,6 +440,12 @@ const translations = {
     deviceOtpHint: "डिवाइस बदलने के लिए एडमिन से OTP लें और नीचे दर्ज करें।",
     deviceOtp: "डिवाइस बदलाव OTP",
     verifyDevice: "सत्यापित करें और साइन इन",
+    deviceAlreadyRegistered:
+      "इस डिवाइस से एक यूज़र पहले से पंजीकृत है। क्या आप वाकई पंजीकृत करना चाहते हैं?",
+    deviceAlreadyRegisteredNamed:
+      "{name} पहले से इस डिवाइस पर पंजीकृत हैं। क्या आप वाकई पंजीकृत करना चाहते हैं?",
+    confirmRegisterDevice: "हाँ, मेरा खाता पंजीकृत करें",
+    cancelRegisterDevice: "रद्द करें",
     adminLoginHint: "एडमिन द्वारा सेट किया गया फोन और पासवर्ड उपयोग करें।",
     appsCheckScanning: "इंस्टॉल किए गए ऐप्स स्कैन हो रहे हैं...",
     appsCheckDialogTitle: "प्रतिबंधित ऐप मिला",

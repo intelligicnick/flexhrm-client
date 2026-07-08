@@ -22,6 +22,7 @@ import {
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../../lib/leaflet-map-setup";
+import { formatLatLngLabeled } from "../../lib/gps-coords";
 import {
   SupervisorEmptyState,
   SupervisorPageHeader,
@@ -82,6 +83,27 @@ function sampleRoutePoints(points: RoutePoint[]): RoutePoint[] {
   return sampled;
 }
 
+function pointPopupHtml(label: string, point: RoutePoint): string {
+  const coords = formatLatLngLabeled(point.lat, point.lng);
+  const recorded = point.timestamp
+    ? new Date(point.timestamp).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Kolkata",
+      })
+    : "";
+  return `
+    <div style="min-width:160px;font-family:Montserrat,system-ui,sans-serif;font-size:12px;line-height:1.45">
+      <strong style="color:#0f172a">${label}</strong>
+      ${recorded ? `<div style="margin-top:4px;color:#475569">${recorded}</div>` : ""}
+      <div style="margin-top:4px;font-family:ui-monospace,Menlo,monospace;font-weight:700;color:#0f172a">${coords}</div>
+      ${point.isMock ? `<div style="margin-top:4px;color:#dc2626;font-weight:700">Mock / estimated GPS</div>` : ""}
+    </div>
+  `;
+}
+
 function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
   const valid = filterRoutePointsForMap(points);
   if (valid.length === 0) return;
@@ -101,7 +123,8 @@ function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
       fillOpacity: 1,
       weight: 2,
     })
-      .bindTooltip("Start", { permanent: false })
+      .bindTooltip(`Start · ${formatLatLngLabeled(start.lat, start.lng)}`, { permanent: false })
+      .bindPopup(pointPopupHtml("Start", start))
       .addTo(layerGroup);
     L.circleMarker([end.lat, end.lng], {
       radius: 6,
@@ -110,7 +133,8 @@ function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
       fillOpacity: 1,
       weight: 2,
     })
-      .bindTooltip("Latest", { permanent: false })
+      .bindTooltip(`Latest · ${formatLatLngLabeled(end.lat, end.lng)}`, { permanent: false })
+      .bindPopup(pointPopupHtml("Latest", end))
       .addTo(layerGroup);
 
     return valid;
@@ -120,7 +144,10 @@ function drawRoute(layerGroup: L.LayerGroup, points: RoutePoint[]) {
     radius: 6,
     color: valid[0].isMock ? "#ef4444" : "#ff791a",
     fillOpacity: 0.9,
-  }).addTo(layerGroup);
+  })
+    .bindTooltip(formatLatLngLabeled(valid[0].lat, valid[0].lng), { permanent: false })
+    .bindPopup(pointPopupHtml("GPS point", valid[0]))
+    .addTo(layerGroup);
   return valid;
 }
 

@@ -21,6 +21,7 @@ import { resolveSupervisorLabel } from "../lib/resolve-supervisor-label";
 import { SchoolSupervisor, SchoolVisit } from "../types";
 import { DateInput } from "./ui/DateInput";
 import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
+import { formatLatLngDecimal, isValidGpsCoord } from "../lib/gps-coords";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
@@ -113,14 +114,19 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDet
                   size="md"
                   onView={() => onViewPhoto(visit, photoIndex)}
                 />
-                {(photo.takenAt || photo.locationLabel) && (
+                {(photo.takenAt || photo.locationLabel || isValidGpsCoord(photo.lat, photo.lng)) && (
                   <p className="text-[10px] text-slate-400 max-w-36 leading-tight">
                     {photo.takenAt && (
                       <span className="block">
                         {new Date(photo.takenAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                       </span>
                     )}
-                    {photo.locationLabel && <span className="block truncate">{photo.locationLabel}</span>}
+                    {photo.locationLabel && <span className="block">{photo.locationLabel}</span>}
+                    {isValidGpsCoord(photo.lat, photo.lng) && (
+                      <span className="block font-mono text-slate-500">
+                        {formatLatLngDecimal(photo.lat, photo.lng)}
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
@@ -128,9 +134,9 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDet
           </div>
         </div>
       )}
-      {visit.gpsLocation && (
+      {visit.gpsLocation && isValidGpsCoord(visit.gpsLocation.lat, visit.gpsLocation.lng) && (
         <p className="text-[10px] text-slate-500">
-          Visit GPS: {visit.gpsLocation.lat.toFixed(5)}, {visit.gpsLocation.lng.toFixed(5)}
+          Visit GPS: {formatLatLngDecimal(visit.gpsLocation.lat, visit.gpsLocation.lng)}
           {visit.gpsLocation.locationLabel && (
             <span className="block mt-0.5">{visit.gpsLocation.locationLabel}</span>
           )}

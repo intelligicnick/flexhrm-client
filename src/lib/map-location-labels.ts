@@ -1,13 +1,29 @@
 import type { SupervisorLiveLocation, SupervisorPathPoint } from "./supervisor-map-helpers";
 import type { EmployeePunchPin } from "./field-tracking-helpers";
+import {
+  formatLatLngDecimal,
+  formatLatLngLabeled,
+  isValidGpsCoord,
+} from "./gps-coords";
 
-/** Strip trailing coordinate parenthetical from stored location labels. */
+/** Strip trailing coordinate suffix from stored location labels. */
 export function stripCoordsFromLocationLabel(label: string): string {
-  return label.replace(/\s*\([^)]*\d+\s*°[^)]*\)\s*$/i, "").trim();
+  return label
+    .replace(/\s*\([^)]*\d+\s*°[^)]*\)\s*$/i, "")
+    .replace(/\s*·\s*-?\d+\.\d+,\s*-?\d+\.\d+\s*$/i, "")
+    .replace(/\s*·\s*Lat\s+-?\d+\.\d+\s*·\s*Lng\s+-?\d+\.\d+\s*$/i, "")
+    .trim();
 }
 
-function formatShortCoords(lat: number, lng: number): string {
-  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+function appendGpsCoords(label: string, lat?: number, lng?: number): string {
+  if (lat == null || lng == null || !isValidGpsCoord(lat, lng)) return label.trim();
+  const labeled = formatLatLngLabeled(lat, lng);
+  const compact = formatLatLngDecimal(lat, lng);
+  if (!labeled) return label.trim();
+  const base = stripCoordsFromLocationLabel(label);
+  if (!base) return labeled;
+  if (base.includes(compact) || /Lat\s+-?\d+\.\d+/i.test(base)) return base;
+  return `${base} · ${labeled}`;
 }
 
 function isMeaningfulName(value?: string): boolean {
@@ -147,30 +163,41 @@ export function resolveMapMarkerLabel(options: {
 
   // Prefer a real street / multi-part / village-looking GPS label
   if (gpsShort && !isBlockScaleLabel(gpsShort)) {
-    return gpsShort;
+    return appendGpsCoords(gpsShort, options.lat, options.lng);
   }
 
   const address = options.address?.trim();
   if (address) {
     const shortAddress = shortenFinePlace(address);
-    if (shortAddress && !isBlockScaleLabel(shortAddress)) return shortAddress;
+    if (shortAddress && !isBlockScaleLabel(shortAddress)) {
+      return appendGpsCoords(shortAddress, options.lat, options.lng);
+    }
   }
 
   // School local name beats block-scale GPS (“Alamnagar”)
-  if (schoolVillage && !isBlockScaleLabel(schoolVillage)) return schoolVillage;
-  if (isMeaningfulName(school) && !isBlockScaleLabel(school)) return school!;
+  if (schoolVillage && !isBlockScaleLabel(schoolVillage)) {
+    return appendGpsCoords(schoolVillage, options.lat, options.lng);
+  }
+  if (isMeaningfulName(school) && !isBlockScaleLabel(school)) {
+    return appendGpsCoords(school!, options.lat, options.lng);
+  }
 
   const office = options.locationName?.trim();
-  if (isMeaningfulName(office) && !isBlockScaleLabel(office)) return office!;
+  if (isMeaningfulName(office) && !isBlockScaleLabel(office)) {
+    return appendGpsCoords(office!, options.lat, options.lng);
+  }
 
-  if (schoolVillage) return schoolVillage;
-  if (isMeaningfulName(school)) return school!;
+  if (schoolVillage) return appendGpsCoords(schoolVillage, options.lat, options.lng);
+  if (isMeaningfulName(school)) return appendGpsCoords(school!, options.lat, options.lng);
 
   if (options.lat != null && options.lng != null) {
-    if (options.step != null) {
-      return `Stop ${options.step} · ${formatShortCoords(options.lat, options.lng)}`;
+    const labeled = formatLatLngLabeled(options.lat, options.lng);
+    if (labeled) {
+      if (options.step != null) {
+        return `Stop ${options.step} · ${labeled}`;
+      }
+      return labeled;
     }
-    return formatShortCoords(options.lat, options.lng);
   }
 
   return "";
@@ -226,7 +253,7 @@ export function dedupeMapLabels(
       if (item.step != null) {
         label = `${label} · Stop ${item.step}`;
       } else {
-        label = `${label} · ${formatShortCoords(item.lat, item.lng)}`;
+        label = `${stripCoordsFromLocationLabel(label)} · ${formatLatLngLabeled(item.lat, item.lng)}`;
       }
     }
     result.set(item.key, label);

@@ -3,6 +3,7 @@ import { expiryBand } from "../../lib/renewal-helpers";
 import { MONTH_NAME_LIST, normalizeMonthKey, parseFlexibleDateMs, formatEmployeeBirthDate, parseDateOfBirth } from "../../lib/date-helpers";
 import { resolveGemBidPdfUrl, resolveGemContractPdfUrl, resolveGemContractNoLabel } from "../../lib/gem-helpers";
 import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
+import { formatLatLngDecimal, isValidGpsCoord } from "../../lib/gps-coords";
 import { buildAllExpenseRecords, type ExpenseRecordRow } from "../../lib/school-work-helpers";
 import {
   getMonthLedger,
@@ -192,8 +193,14 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
     {
       label: "GPS Location",
       value: visit.gpsLocation
-        ? visit.gpsLocation.locationLabel ||
-          `${visit.gpsLocation.lat.toFixed(5)}, ${visit.gpsLocation.lng.toFixed(5)}`
+        ? [
+            visit.gpsLocation.locationLabel,
+            isValidGpsCoord(visit.gpsLocation.lat, visit.gpsLocation.lng)
+              ? formatLatLngDecimal(visit.gpsLocation.lat, visit.gpsLocation.lng)
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || "—"
         : "—",
     },
   ];
@@ -205,7 +212,15 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
     if (!thumbSrc && !fullSrc) return;
     fields.push({
       label: photos.length > 1 ? `Stamped Photo ${index + 1}` : "Stamped Photo",
-      value: photo.caption || formatDate(visit.visitDate),
+      value: [
+        photo.caption || formatDate(visit.visitDate),
+        photo.locationLabel,
+        isValidGpsCoord(photo.lat, photo.lng)
+          ? formatLatLngDecimal(photo.lat, photo.lng)
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
       imageThumbSrc: thumbSrc || fullSrc,
       imageSrc: fullSrc || thumbSrc,
     });

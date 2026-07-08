@@ -5,6 +5,11 @@ import {
 } from "./native-android-bridge";
 import { FIELD_TEAM_APP_VERSION } from "./native-app-version";
 import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
+import {
+  formatLatLngDecimal,
+  formatLatLngDegrees,
+  formatPlaceWithCoords,
+} from "./gps-coords";
 
 export interface VisitGpsCoords {
   lat: number;
@@ -85,9 +90,7 @@ function formatVisitTimestamp(date: Date): { dateLine: string; timeLine: string;
 }
 
 function formatCoords(lat: number, lng: number): string {
-  const latDir = lat >= 0 ? "N" : "S";
-  const lngDir = lng >= 0 ? "E" : "W";
-  return `${Math.abs(lat).toFixed(5)}° ${latDir}, ${Math.abs(lng).toFixed(5)}° ${lngDir}`;
+  return formatLatLngDegrees(lat, lng);
 }
 
 function isValidCoords(lat: number, lng: number): boolean {
@@ -238,10 +241,7 @@ async function reverseGeocodePlaceName(lat: number, lng: number): Promise<string
 }
 
 function buildLocationLabel(lat: number, lng: number, placeName: string): string {
-  const coords = formatCoords(lat, lng);
-  const trimmed = placeName.trim();
-  if (!trimmed || trimmed === coords) return coords;
-  return `${trimmed} (${coords})`;
+  return formatPlaceWithCoords(placeName, lat, lng);
 }
 
 function cachePosition(lat: number, lng: number) {
@@ -358,7 +358,7 @@ async function buildMandatoryVisitLocation(
   const { lat, lng } = await resolveCoordsMandatory();
   const resolvedPlaceName = await resolvePlaceNameMandatory(lat, lng, resolvePlaceName);
   const trimmedPlace = resolvedPlaceName.trim();
-  const placeName = trimmedPlace || formatCoords(lat, lng);
+  const placeName = trimmedPlace || formatLatLngDecimal(lat, lng);
   return {
     lat,
     lng,
@@ -485,12 +485,18 @@ export async function stampVisitPhoto(
   ctx.font = `700 ${fontSize}px Montserrat, Arial, sans-serif`;
 
   const coordsLabel = formatCoords(location.lat, location.lng);
+  const decimalCoords = formatLatLngDecimal(location.lat, location.lng);
   const resolvedPlace = location.placeName.trim();
   const lines = [
     `Date: ${dateLine}`,
     `Time: ${timeLine}`,
-    ...(resolvedPlace && resolvedPlace !== coordsLabel ? [`Place: ${resolvedPlace}`] : []),
-    `Location: ${coordsLabel}`,
+    ...(resolvedPlace &&
+    resolvedPlace !== coordsLabel &&
+    resolvedPlace !== decimalCoords
+      ? [`Place: ${resolvedPlace}`]
+      : []),
+    ...(decimalCoords ? [`Lat/Lng: ${decimalCoords}`] : []),
+    ...(coordsLabel ? [`Location: ${coordsLabel}`] : []),
   ];
   if (schoolName) lines.unshift(`School: ${schoolName}`);
 
