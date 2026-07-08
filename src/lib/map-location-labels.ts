@@ -15,7 +15,35 @@ function isMeaningfulName(value?: string): boolean {
   return Boolean(trimmed && trimmed !== "—" && trimmed !== "-");
 }
 
-/** Prefer the most specific place name available for map marker tooltips. */
+/** Drop country / broad district-only tails when a finer part exists. */
+function shortenFinePlace(label: string): string {
+  const skip = new Set([
+    "india",
+    "भारत",
+    "bihar",
+    "jharkhand",
+    "uttar pradesh",
+    "west bengal",
+    "madhya pradesh",
+  ]);
+  const parts = label
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => {
+      if (!part) return false;
+      if (skip.has(part.toLowerCase())) return false;
+      if (/^\d{6}$/.test(part)) return false;
+      return true;
+    });
+  if (parts.length === 0) return label.trim();
+  // Prefer village/street first parts (usually most specific)
+  return parts.slice(0, 2).join(", ");
+}
+
+/**
+ * Prefer GPS village / street names from OpenStreetMap reverse geocode.
+ * If GPS only has a broad area name, fall back to school name for clarity.
+ */
 export function resolveMapMarkerLabel(options: {
   schoolName?: string;
   locationLabel?: string;
@@ -26,25 +54,29 @@ export function resolveMapMarkerLabel(options: {
   step?: number;
 }): string {
   const school = options.schoolName?.trim();
-  if (isMeaningfulName(school)) return school!;
+  const fromGps = stripCoordsFromLocationLabel(options.locationLabel || "");
+  const gpsShort = fromGps ? shortenFinePlace(fromGps) : "";
+
+  // Prefer a multi-part village/street label from OSM over a single block-scale name.
+  const gpsLooksFine =
+    Boolean(gpsShort) &&
+    (gpsShort.includes(",") ||
+      /road|rd\.|street|st\.|gali|गली|marg|village|hamlet|lane|path|chowk/i.test(gpsShort));
+
+  if (gpsLooksFine) return gpsShort;
 
   const address = options.address?.trim();
   if (address) {
-    const shortAddress = address.split(",").slice(0, 2).join(", ").trim();
+    const shortAddress = shortenFinePlace(address);
     if (shortAddress) return shortAddress;
   }
 
+  if (isMeaningfulName(school)) return school!;
+
+  if (gpsShort) return gpsShort;
+
   const office = options.locationName?.trim();
   if (isMeaningfulName(office)) return office!;
-
-  const stripped = stripCoordsFromLocationLabel(options.locationLabel || "");
-  if (stripped) {
-    const parts = stripped.split(",").map((part) => part.trim()).filter(Boolean);
-    if (parts.length > 2) {
-      return parts.slice(0, 2).join(", ");
-    }
-    return stripped;
-  }
 
   if (options.lat != null && options.lng != null) {
     if (options.step != null) {

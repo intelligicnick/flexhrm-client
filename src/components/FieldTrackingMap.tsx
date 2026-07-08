@@ -46,9 +46,9 @@ import {
   MAP_DEFAULT_CENTER,
   MAP_DEFAULT_ZOOM,
   MAP_TILE_ATTRIBUTION,
-  MAP_TILE_ATTRIBUTION_DETAILED,
+  MAP_TILE_ATTRIBUTION_SIMPLE,
   MAP_TILE_URL,
-  MAP_TILE_URL_DETAILED,
+  MAP_TILE_URL_SIMPLE,
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../lib/leaflet-map-setup";
@@ -116,7 +116,7 @@ function buildSupervisorPopupHtml(location: SupervisorLiveLocation): string {
         <div><span style="color:${statusColor};font-weight:700">${statusLabel}</span> · last active ${escapeHtml(lastActive)}</div>
         <div style="margin-top:4px"><strong>Last visit:</strong> ${escapeHtml(location.visitDate)}</div>
         <div><strong>School:</strong> ${escapeHtml(location.schoolName || "—")}</div>
-        <div style="margin-top:4px"><strong>Location:</strong> ${escapeHtml(place)}</div>
+        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(place)}</div>
       </div>
     </div>
   `;
@@ -146,7 +146,7 @@ function buildPointPopupHtml(path: SupervisorPath, point: SupervisorPathPoint): 
         <div style="margin-top:4px"><strong>Est. distance:</strong> ~${escapeHtml(distanceLabel)}</div>
         <div style="margin-top:4px"><strong>Date:</strong> ${escapeHtml(point.visitDate)}</div>
         <div><strong>School:</strong> ${escapeHtml(point.schoolName || "—")}</div>
-        <div style="margin-top:4px"><strong>Location:</strong> ${escapeHtml(location)}</div>
+        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(location)}</div>
       </div>
     </div>
   `;
@@ -180,7 +180,7 @@ function buildEmployeePopupHtml(pin: EmployeePunchPin): string {
       <div style="margin-top:6px;color:#475569">
         <div><span style="color:${punchColor};font-weight:700">${punchLabel}</span> · ${escapeHtml(time)}</div>
         <div style="margin-top:4px">${geoStatus}</div>
-        <div style="margin-top:4px"><strong>Location:</strong> ${escapeHtml(place)}</div>
+        <div style="margin-top:4px"><strong>Village / street:</strong> ${escapeHtml(place)}</div>
       </div>
     </div>
   `;
@@ -566,10 +566,11 @@ export default function FieldTrackingMap({
   useEffect(() => {
     const tileLayer = tileLayerRef.current;
     if (!tileLayer) return;
-    tileLayer.setUrl(showDetailedMapLabels ? MAP_TILE_URL_DETAILED : MAP_TILE_URL);
+    tileLayer.setUrl(showDetailedMapLabels ? MAP_TILE_URL : MAP_TILE_URL_SIMPLE);
     tileLayer.options.attribution = showDetailedMapLabels
-      ? MAP_TILE_ATTRIBUTION_DETAILED
-      : MAP_TILE_ATTRIBUTION;
+      ? MAP_TILE_ATTRIBUTION
+      : MAP_TILE_ATTRIBUTION_SIMPLE;
+    tileLayer.options.subdomains = showDetailedMapLabels ? "abc" : "abcd";
     const map = mapRef.current;
     if (map) scheduleMapInvalidate(map, 80);
   }, [showDetailedMapLabels]);
@@ -910,13 +911,13 @@ export default function FieldTrackingMap({
                 Field Tracking Map
               </h3>
               <p className="text-[11px] text-slate-500 mt-1">
-                OpenStreetMap · supervisor visit trails & staff GPS punches
+                OpenStreetMap (India villages & streets) · supervisor trails & staff GPS
               </p>
             </>
           )}
           {embedded && (
             <p className="text-[11px] text-slate-500">
-              OpenStreetMap · colored lines = route trail · tap markers for details
+              OpenStreetMap · village & street names from OSM · tap markers for details
             </p>
           )}
         </div>
@@ -964,7 +965,7 @@ export default function FieldTrackingMap({
               onChange={(event) => setShowDetailedMapLabels(event.target.checked)}
               className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
             />
-            Village & road labels
+            Village & street map
           </label>
           {showEmployeeTracking && (
             <button

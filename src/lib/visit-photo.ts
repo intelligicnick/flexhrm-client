@@ -137,9 +137,10 @@ async function fetchNominatimCandidates(
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lng));
-  url.searchParams.set("format", "json");
-  url.searchParams.set("accept-language", options?.language ?? "en");
-  url.searchParams.set("zoom", "18");
+    url.searchParams.set("format", "json");
+    url.searchParams.set("addressdetails", "1");
+    url.searchParams.set("accept-language", options?.language ?? "en");
+    url.searchParams.set("zoom", "18");
   if (options?.layer) {
     url.searchParams.set("layer", options.layer);
   }

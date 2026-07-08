@@ -1,15 +1,30 @@
 import L from "leaflet";
 import { isFlexHrmNativeApp } from "./supervisor-installed-apps";
 
-/** OSM-based tiles via CARTO — reliable in Android WebView and desktop browsers. */
-export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+/**
+ * OpenStreetMap Humanitarian tiles — open source, strong India coverage,
+ * and clearer village / street names at street-level zoom than CARTO Voyager.
+ */
+export const MAP_TILE_URL =
+  "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png";
 export const MAP_TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Tiles style by <a href="https://www.hotosm.org/">Humanitarian OSM Team</a> hosted by <a href="https://openstreetmap.fr/">OSM France</a>';
+
+/** Standard OSM raster — alternate label density; still open source. */
+export const MAP_TILE_URL_STANDARD = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const MAP_TILE_ATTRIBUTION_STANDARD =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+/** Cleaner CARTO style — fewer small-place labels (optional “simple” mode). */
+export const MAP_TILE_URL_SIMPLE =
+  "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+export const MAP_TILE_ATTRIBUTION_SIMPLE =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-/** Standard OSM tiles — richer village and locality labels at higher zoom. */
-export const MAP_TILE_URL_DETAILED = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-export const MAP_TILE_ATTRIBUTION_DETAILED =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+/** @deprecated Use MAP_TILE_URL_STANDARD — kept for older call sites. */
+export const MAP_TILE_URL_DETAILED = MAP_TILE_URL_STANDARD;
+/** @deprecated Use MAP_TILE_ATTRIBUTION_STANDARD */
+export const MAP_TILE_ATTRIBUTION_DETAILED = MAP_TILE_ATTRIBUTION_STANDARD;
 
 export const MAP_DEFAULT_CENTER: L.LatLngExpression = [20.5937, 78.9629];
 export const MAP_DEFAULT_ZOOM = 5;
@@ -23,13 +38,18 @@ export function isTouchMapDevice(): boolean {
   );
 }
 
-export function createMapTileLayer(detailedLabels = false): L.TileLayer {
+export function createMapTileLayer(detailedLabels = true): L.TileLayer {
   const touch = isTouchMapDevice();
   const native = isFlexHrmNativeApp();
-  return L.tileLayer(detailedLabels ? MAP_TILE_URL_DETAILED : MAP_TILE_URL, {
-    attribution: detailedLabels ? MAP_TILE_ATTRIBUTION_DETAILED : MAP_TILE_ATTRIBUTION,
-    maxZoom: 19,
-    subdomains: "abcd",
+  // detailedLabels=true (default): HOT OSM with India village/street labels
+  // detailedLabels=false: simpler CARTO Voyager (fewer labels)
+  const url = detailedLabels ? MAP_TILE_URL : MAP_TILE_URL_SIMPLE;
+  const attribution = detailedLabels ? MAP_TILE_ATTRIBUTION : MAP_TILE_ATTRIBUTION_SIMPLE;
+  return L.tileLayer(url, {
+    attribution,
+    maxZoom: 20,
+    // HOT OSM uses a/b/c; CARTO uses a/b/c/d — both tolerate extra subdomain retries
+    subdomains: detailedLabels ? "abc" : "abcd",
     // Android WebView: load tiles while panning/zooming to avoid blank white map.
     updateWhenIdle: !touch,
     updateWhenZooming: touch,
