@@ -15,7 +15,95 @@ function isMeaningfulName(value?: string): boolean {
   return Boolean(trimmed && trimmed !== "—" && trimmed !== "-");
 }
 
-/** Drop country / broad district-only tails when a finer part exists. */
+function normalizeForCompare(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Known Bihar-style block / district scale names that OSM often returns instead of
+ * the actual village (e.g. every GPS in Alamnagar block → "Alamnagar").
+ */
+const KNOWN_BLOCK_SCALE_NAMES = new Set(
+  [
+    "alamnagar",
+    "alam nagar",
+    "madhepura",
+    "saharsa",
+    "supaul",
+    "khagaria",
+    "bihar",
+    "india",
+    "भारत",
+  ].map((n) => normalizeForCompare(n)),
+);
+
+/** Extract village / locality from school name: "N.P.S AOURA DIH" → "AOURA DIH". */
+export function localityHintFromSchoolName(schoolName: string): string {
+  const trimmed = schoolName.trim();
+  if (!trimmed) return "";
+
+  const withoutPrefix = trimmed
+    .replace(
+      /^(govt\.?|government|raja|n\.?\s?p\.?\s?s\.?|nps|u\.?\s?p\.?\s?s\.?|ups|u\.?\s?m\.?\s?s\.?|ums|m\.?\s?s\.?|p\.?\s?s\.?|ps|primary|middle|high|senior\s+secondary|secondary|h\.?\s?s\.?|hs|es|ss|kendra|kendriya)\s+/i,
+      "",
+    )
+    .trim();
+
+  let candidate = withoutPrefix !== trimmed ? withoutPrefix : trimmed;
+  candidate = candidate
+    .replace(
+      /\s+(school|vidyalaya|vidyalay|high\s+school|middle\s+school|primary\s+school|hs|ms|ps|nps)\s*$/i,
+      "",
+    )
+    .trim();
+
+  if (candidate.length >= 3 && candidate.length <= 80) return candidate;
+  return "";
+}
+
+function isBlockScaleLabel(label: string): boolean {
+  const parts = stripCoordsFromLocationLabel(label)
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return true;
+
+  const skip = new Set([
+    "india",
+    "भारत",
+    "bihar",
+    "jharkhand",
+    "uttar pradesh",
+    "west bengal",
+    "madhya pradesh",
+  ]);
+  const meaningful = parts.filter((part) => {
+    const n = normalizeForCompare(part);
+    if (skip.has(n)) return false;
+    if (/^\d{6}$/.test(part)) return false;
+    return true;
+  });
+
+  if (meaningful.length === 0) return true;
+  if (meaningful.length === 1) {
+    const only = normalizeForCompare(meaningful[0]);
+    if (KNOWN_BLOCK_SCALE_NAMES.has(only)) return true;
+    if (/block$/i.test(meaningful[0])) return true;
+  }
+  // "Alamnagar, Madhepura" still block-scale
+  if (
+    meaningful.length <= 2 &&
+    meaningful.every((p) => KNOWN_BLOCK_SCALE_NAMES.has(normalizeForCompare(p)))
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function shortenFinePlace(label: string): string {
   const skip = new Set([
     "india",
@@ -36,13 +124,12 @@ function shortenFinePlace(label: string): string {
       return true;
     });
   if (parts.length === 0) return label.trim();
-  // Prefer village/street first parts (usually most specific)
   return parts.slice(0, 2).join(", ");
 }
 
 /**
- * Prefer GPS village / street names from OpenStreetMap reverse geocode.
- * If GPS only has a broad area name, fall back to school name for clarity.
+ * Prefer GPS street/village; if GPS only has a block name like Alamnagar,
+ * use the school-derived village (AOURA DIH) instead.
  */
 export function resolveMapMarkerLabel(options: {
   schoolName?: string;
@@ -54,29 +141,30 @@ export function resolveMapMarkerLabel(options: {
   step?: number;
 }): string {
   const school = options.schoolName?.trim();
+  const schoolVillage = school ? localityHintFromSchoolName(school) : "";
   const fromGps = stripCoordsFromLocationLabel(options.locationLabel || "");
   const gpsShort = fromGps ? shortenFinePlace(fromGps) : "";
 
-  // Prefer a multi-part village/street label from OSM over a single block-scale name.
-  const gpsLooksFine =
-    Boolean(gpsShort) &&
-    (gpsShort.includes(",") ||
-      /road|rd\.|street|st\.|gali|गली|marg|village|hamlet|lane|path|chowk/i.test(gpsShort));
-
-  if (gpsLooksFine) return gpsShort;
+  // Prefer a real street / multi-part / village-looking GPS label
+  if (gpsShort && !isBlockScaleLabel(gpsShort)) {
+    return gpsShort;
+  }
 
   const address = options.address?.trim();
   if (address) {
     const shortAddress = shortenFinePlace(address);
-    if (shortAddress) return shortAddress;
+    if (shortAddress && !isBlockScaleLabel(shortAddress)) return shortAddress;
   }
 
-  if (isMeaningfulName(school)) return school!;
-
-  if (gpsShort) return gpsShort;
+  // School local name beats block-scale GPS (“Alamnagar”)
+  if (schoolVillage && !isBlockScaleLabel(schoolVillage)) return schoolVillage;
+  if (isMeaningfulName(school) && !isBlockScaleLabel(school)) return school!;
 
   const office = options.locationName?.trim();
-  if (isMeaningfulName(office)) return office!;
+  if (isMeaningfulName(office) && !isBlockScaleLabel(office)) return office!;
+
+  if (schoolVillage) return schoolVillage;
+  if (isMeaningfulName(school)) return school!;
 
   if (options.lat != null && options.lng != null) {
     if (options.step != null) {

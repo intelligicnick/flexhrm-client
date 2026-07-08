@@ -96,27 +96,29 @@ function isValidCoords(lat: number, lng: number): boolean {
 
 function buildPlaceName(address: Record<string, string> | undefined): string {
   if (!address) return "";
-  const fineFields = [
-    "house_number",
-    "road",
+  const streetFields = ["house_number", "road", "pedestrian", "footway", "path"] as const;
+  const localityFields = [
     "hamlet",
     "village",
     "isolated_dwelling",
     "neighbourhood",
+    "quarter",
     "locality",
     "suburb",
-    "town",
-    "city",
   ] as const;
-  const fineParts = fineFields
+  const streetParts = streetFields
     .map((key) => String(address[key] || "").trim())
     .filter(Boolean);
-  const uniqueFine = [...new Set(fineParts)];
-  return uniqueFine.slice(0, 3).join(", ");
+  const localityParts = localityFields
+    .map((key) => String(address[key] || "").trim())
+    .filter(Boolean);
+  // Prefer street + fine locality; skip lone block-scale village names later via scoring
+  const unique = [...new Set([...streetParts, ...localityParts])];
+  return unique.slice(0, 3).join(", ");
 }
 
 function buildPlaceNameFromDisplayName(displayName: string): string {
-  const skip = new Set(["india", "भारत", "bihar"]);
+  const skip = new Set(["india", "भारत", "bihar", "madhepura"]);
   const parts = displayName
     .split(",")
     .map((part) => part.trim())
@@ -176,12 +178,34 @@ function scorePlaceCandidate(label: string): number {
   const trimmed = label.trim();
   if (!trimmed) return -1;
 
+  // Reject block-only labels like "Alamnagar" / "Alamnagar, Madhepura"
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "alamnagar" ||
+    lower === "alam nagar" ||
+    /^alamnagar,\s*madhepura/i.test(trimmed) ||
+    /^alamnagar$/i.test(trimmed.split(",")[0]?.trim() || "")
+  ) {
+    // Keep only if there is a finer part besides Alamnagar/Madhepura/Bihar
+    const fineParts = trimmed
+      .split(",")
+      .map((p) => p.trim())
+      .filter(
+        (p) =>
+          p &&
+          !/^(alamnagar|alam nagar|madhepura|bihar|india|भारत)$/i.test(p),
+      );
+    if (fineParts.length === 0) return 0;
+  }
+
   let score = 5;
-  if (/road|rd\.|street|st\.|गली|marg|path/i.test(trimmed)) score += 20;
+  if (/road|rd\.|street|st\.|गली|marg|path|lane|chowk/i.test(trimmed)) score += 25;
 
   const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 2) score += 15;
-  if (/village|hamlet|गाँव|गांव|locality|neighbourhood/i.test(trimmed)) score += 10;
+  if (/village|hamlet|गाँव|गांव|locality|neighbourhood|dih|tola/i.test(trimmed)) {
+    score += 12;
+  }
   score += Math.min(parts.length * 3, 12);
   return score;
 }
