@@ -67,6 +67,43 @@ public class FlexHrmAndroidBridge {
   }
 
   @JavascriptInterface
+  public void sharePdfFromBase64(String base64, String filename, String title) {
+    if (base64 == null || base64.trim().isEmpty()) {
+      PdfNativeHelper.notifyJs(
+          webView, "__flexHrmOnPdfShareDone", false, "Missing PDF data");
+      return;
+    }
+
+    new Thread(
+            () -> {
+              try {
+                java.io.File file = PdfNativeHelper.writeBase64Pdf(activity, base64, filename);
+                activity.runOnUiThread(
+                    () -> {
+                      try {
+                        PdfNativeHelper.sharePdf(activity, file, title);
+                        PdfNativeHelper.notifyJs(
+                            webView, "__flexHrmOnPdfShareDone", true, "");
+                      } catch (Exception ex) {
+                        PdfNativeHelper.notifyJs(
+                            webView,
+                            "__flexHrmOnPdfShareDone",
+                            false,
+                            ex.getMessage() != null ? ex.getMessage() : "Share failed");
+                      }
+                    });
+              } catch (Exception ex) {
+                PdfNativeHelper.notifyJs(
+                    webView,
+                    "__flexHrmOnPdfShareDone",
+                    false,
+                    ex.getMessage() != null ? ex.getMessage() : "Could not save PDF");
+              }
+            })
+        .start();
+  }
+
+  @JavascriptInterface
   public void openPdfFromUrl(String url, String bearerToken, String filename) {
     if (url == null || url.trim().isEmpty()) {
       PdfNativeHelper.notifyJs(

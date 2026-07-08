@@ -15,6 +15,12 @@ import { getDaysInMonthStatic, parseDateOfBirth, parseFlexibleDateMs } from "../
 import { getMonthLedger, getTotalByType } from "../../lib/ledger-helpers";
 import { formatInr, formatMonthLabel } from "./ObserverUI";
 import { matchesSearch, getLastPaidSalaryLabel } from "./observer-details";
+import {
+  tenderConsignee,
+  tenderListSubtitleLines,
+  tenderMinistryLabel,
+  tenderOrganisation,
+} from "../../lib/tender-display-helpers";
 
 export type UniversalSearchResult = {
   id: string;
@@ -349,14 +355,31 @@ export function runUniversalSearch(input: SearchInput): UniversalSearchResult[] 
 
   if (canViewObserverModule("tenders")) {
     for (const t of input.tenders.filter((x) => !x.deletedAt?.trim())) {
-      if (!match(t.bidNo, t.department, t.officerName, t.status, t.category, t.description, t.notes)) {
+      if (
+        !match(
+          t.bidNo,
+          t.ministry,
+          tenderOrganisation(t),
+          tenderMinistryLabel(t),
+          tenderConsignee(t),
+          t.consigneeOfficer,
+          t.officerName,
+          t.status,
+          t.category,
+          t.description,
+          t.notes,
+          t.additionalRequirements,
+        )
+      ) {
         continue;
       }
       pushResult(results, {
         id: `tender-${t.id}`,
         category: "Tenders",
         title: t.bidNo || t.department || "Tender",
-        subtitle: `${t.department || "—"} · ${t.tenderType === "travel" ? "Car" : "Manpower"}`,
+        subtitle:
+          tenderListSubtitleLines(t).join(" · ") ||
+          `${t.department || "—"} · ${t.tenderType === "travel" ? "Car" : "Manpower"}`,
         dateLabel: t.endDate ? `Due ${formatDate(t.endDate)}` : undefined,
         to: "/observer/tenders",
         kind: "tender",

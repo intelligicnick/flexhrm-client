@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ExternalLink, Share2, FileText, Loader2, ZoomIn } from "lucide-react";
 import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import type { DetailField, ObserverDocumentLink } from "./observer-details";
 import { sharePdfUrl, type PdfActionStatus } from "./observer-share";
 import { ObserverPdfViewer } from "./ObserverPdfViewer";
+import VisitPhotoLightbox, { VisitPhotoThumbnail } from "../../components/VisitPhotoLightbox";
+import type { SchoolVisit, SchoolVisitPhoto } from "../../types";
 
 const toneClasses: Record<NonNullable<DetailField["tone"]>, string> = {
   green: "text-emerald-700",
@@ -14,6 +16,54 @@ const toneClasses: Record<NonNullable<DetailField["tone"]>, string> = {
 };
 
 type PdfAction = { url: string; title: string; mode: "view" | "share" } | null;
+
+function VisitPhotoGallery({
+  photos,
+  visit,
+}: {
+  photos: SchoolVisitPhoto[];
+  visit?: Pick<SchoolVisit, "schoolName" | "visitDate" | "supervisorName" | "block"> & {
+    district?: string;
+  };
+}) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (lightboxIndex === null) return undefined;
+    return registerObserverBackHandler(() => {
+      setLightboxIndex(null);
+      return true;
+    });
+  }, [lightboxIndex]);
+
+  if (photos.length === 0) {
+    return <p className="text-sm font-semibold text-slate-500 mt-0.5">No photos</p>;
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {photos.map((photo, index) => (
+          <VisitPhotoThumbnail
+            key={photo.id || `photo-${index}`}
+            photo={photo}
+            size="md"
+            onView={() => setLightboxIndex(index)}
+          />
+        ))}
+      </div>
+      {lightboxIndex !== null && (
+        <VisitPhotoLightbox
+          photos={photos}
+          index={lightboxIndex}
+          visit={visit}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
+      )}
+    </div>
+  );
+}
 
 function LazyImageField({ field }: { field: DetailField }) {
   const thumbSrc = field.imageThumbSrc || field.imageSrc;
@@ -167,17 +217,33 @@ export function ObserverDetailSheet({
   fields,
   documents,
   actions,
+  visitPhotos,
+  visit,
   onClose,
 }: {
   title: string;
   fields: DetailField[];
   documents?: ObserverDocumentLink[];
   actions?: React.ReactNode;
+  visitPhotos?: SchoolVisitPhoto[];
+  visit?: Pick<SchoolVisit, "schoolName" | "visitDate" | "supervisorName" | "block"> & {
+    district?: string;
+  };
   onClose: () => void;
 }) {
   const [pdfViewer, setPdfViewer] = useState<{ url: string; title: string } | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const displayFields = useMemo(() => {
+    if (!visitPhotos?.length) return fields;
+    return fields.filter(
+      (field) =>
+        !field.imageSrc &&
+        !field.imageThumbSrc &&
+        !field.label.startsWith("Stamped Photo"),
+    );
+  }, [fields, visitPhotos]);
 
   useEffect(() => {
     return registerObserverBackHandler(() => {
@@ -256,7 +322,7 @@ export function ObserverDetailSheet({
                 {statusMessage}
               </p>
             )}
-            {fields.map((field) => (
+            {displayFields.map((field) => (
               <div key={field.label} className="border-b border-slate-50 pb-2 last:border-0">
                 {!field.hideLabel && (
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{field.label}</p>
@@ -264,6 +330,15 @@ export function ObserverDetailSheet({
                 <FieldValue field={field} onPdfAction={handlePdfAction} pdfBusy={pdfBusy} />
               </div>
             ))}
+
+            {visitPhotos && visitPhotos.length > 0 && (
+              <div className="border-b border-slate-50 pb-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Visit Photos ({visitPhotos.length})
+                </p>
+                <VisitPhotoGallery photos={visitPhotos} visit={visit} />
+              </div>
+            )}
 
             {documents && documents.length > 0 && (
               <div className="border-t border-slate-100 pt-3 mt-1">

@@ -27,14 +27,14 @@ export default function ObserverMapPage() {
       className={
         isFullscreen
           ? "fixed inset-0 z-40 bg-[#f4f6f9] flex flex-col max-w-lg mx-auto w-full pt-2"
-          : "pb-2 px-1"
+          : "pb-2 px-1 flex flex-col min-h-0"
       }
     >
       <div
         className={
           isFullscreen
-            ? "flex-1 min-h-0 overflow-hidden"
-            : "rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-b from-white to-slate-50 shadow-sm"
+            ? "flex-1 min-h-0 overflow-hidden flex flex-col"
+            : "rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm flex flex-col min-h-[calc(100dvh-10rem)]"
         }
       >
         <FieldTrackingMap

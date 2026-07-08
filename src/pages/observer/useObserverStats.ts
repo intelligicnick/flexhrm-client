@@ -4,10 +4,7 @@ import { countMonthAttendance } from "../../lib/attendance-helpers";
 import { getDaysInMonthStatic, parseDateOfBirth, parseFlexibleDateMs } from "../../lib/date-helpers";
 import { isEmployeeExitedForMonth, isEmployeeExitedOnDayStatic } from "../../lib/employee-helpers";
 import { sumMonthTotals } from "../../lib/ledger-helpers";
-import {
-  filterContractsByWorksite,
-  isObserverModuleAllowed,
-} from "../../lib/observer-access";
+import { isObserverModuleAllowed } from "../../lib/observer-access";
 import { canEditModule, canViewModule } from "../../lib/permissions";
 import { getObserverUiRestrictions } from "../../lib/role-ui-restrictions";
 import { expiryBand } from "../../lib/renewal-helpers";
@@ -63,10 +60,7 @@ export function useObserverStats() {
     [userPermissions, observerRestrictions],
   );
 
-  const observerContracts = useMemo(
-    () => filterContractsByWorksite(rawContracts, sessionUser, sessionLocations),
-    [rawContracts, sessionUser, sessionLocations],
-  );
+  const observerContracts = useMemo(() => rawContracts, [rawContracts]);
 
   const payrollNet = useMemo(
     () =>

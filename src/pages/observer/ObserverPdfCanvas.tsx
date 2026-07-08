@@ -39,6 +39,7 @@ function PdfPage({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(false);
+  const [displaySize, setDisplaySize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const node = wrapRef.current;
@@ -53,11 +54,13 @@ function PdfPage({
   }, []);
 
   useLayoutEffect(() => {
-    if (!visible || rendered) return undefined;
+    if (!visible) return undefined;
 
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
+
+    setRendered(false);
 
     async function renderPage() {
       try {
@@ -70,6 +73,7 @@ function PdfPage({
 
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
+        setDisplaySize({ width: viewport.width, height: viewport.height });
         onHeight(pageNum, viewport.height);
 
         const ctx = canvas.getContext("2d");
@@ -86,18 +90,26 @@ function PdfPage({
     return () => {
       cancelled = true;
     };
-  }, [visible, rendered, pdf, pageNum, zoom, containerWidth, onHeight]);
+  }, [visible, pdf, pageNum, zoom, containerWidth, onHeight]);
 
   return (
-    <div ref={wrapRef} className="bg-white shadow-md rounded-sm overflow-hidden min-h-[120px]">
+    <div ref={wrapRef} className="bg-white shadow-md rounded-sm overflow-hidden min-h-[120px] inline-block max-w-none">
       {!rendered && (
-        <div className="flex items-center justify-center h-[120px] bg-slate-100">
+        <div
+          className="flex items-center justify-center bg-slate-100"
+          style={{ width: Math.max(displaySize.width, containerWidth), height: 120 }}
+        >
           <Loader2 size={18} className="animate-spin text-[#ff791a]" />
         </div>
       )}
       <canvas
         ref={canvasRef}
-        className={`block max-w-none h-auto w-full ${rendered ? "" : "hidden"}`}
+        className={`block max-w-none ${rendered ? "" : "hidden"}`}
+        style={
+          rendered && displaySize.width > 0
+            ? { width: `${displaySize.width}px`, height: `${displaySize.height}px` }
+            : undefined
+        }
       />
       <p className="text-[10px] font-semibold text-slate-400 px-2 py-1 border-t border-slate-100">
         Page {pageNum}
@@ -199,7 +211,7 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
       pinchStart.current = null;
     };
 
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd, { passive: true });
     el.addEventListener("touchcancel", onTouchEnd, { passive: true });
@@ -257,9 +269,9 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
 
       <div
         ref={scrollRef}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain touch-pan-y bg-slate-800"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain touch-pan-x touch-pan-y bg-slate-800"
       >
-        <div ref={wrapRef} className="relative px-2 py-3 min-h-full">
+        <div ref={wrapRef} className="relative px-2 py-3 min-h-full min-w-min">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center z-10">
               <Loader2 size={24} className="animate-spin text-[#ff791a]" />
@@ -272,10 +284,10 @@ export function ObserverPdfCanvas({ data }: { data: ArrayBuffer }) {
           )}
 
           {pdf && pageCount > 0 && (
-            <div className="mx-auto flex flex-col gap-3 w-full max-w-full">
+            <div className="mx-auto flex flex-col gap-3 w-max max-w-none min-w-full">
               {Array.from({ length: pageCount }, (_, index) => (
                 <PdfPage
-                  key={`${index}-${zoom}-${containerWidth}`}
+                  key={`page-${index + 1}`}
                   pdf={pdf}
                   pageNum={index + 1}
                   zoom={zoom}

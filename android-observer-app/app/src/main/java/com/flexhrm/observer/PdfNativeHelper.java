@@ -87,6 +87,25 @@ final class PdfNativeHelper {
         activity, activity.getPackageName() + ".fileprovider", file);
   }
 
+  static File writeBase64Pdf(Context context, String base64, String filename) throws Exception {
+    String payload = base64.trim();
+    if (payload.contains(",")) {
+      payload = payload.substring(payload.indexOf(',') + 1);
+    }
+    byte[] bytes = android.util.Base64.decode(payload, android.util.Base64.DEFAULT);
+    if (bytes.length == 0) {
+      throw new Exception("PDF file is empty");
+    }
+    File cacheDir = new File(context.getCacheDir(), "pdf");
+    //noinspection ResultOfMethodCallIgnored
+    cacheDir.mkdirs();
+    File output = new File(cacheDir, sanitizeFilename(filename));
+    try (FileOutputStream out = new FileOutputStream(output)) {
+      out.write(bytes);
+    }
+    return output;
+  }
+
   static void sharePdf(MainActivity activity, File file, String title) {
     Intent share = new Intent(Intent.ACTION_SEND);
     share.setType("application/pdf");

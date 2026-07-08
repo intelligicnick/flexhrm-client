@@ -15,6 +15,7 @@ import {
   Lock,
   Unlock,
   MapPinned,
+  Filter,
 } from "lucide-react";
 import type { Employee, SchoolSupervisor, SchoolVisit } from "../types";
 import {
@@ -365,8 +366,9 @@ export default function FieldTrackingMap({
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("all");
   const [showPaths, setShowPaths] = useState(true);
   const [lockView, setLockView] = useState(false);
-  const [showLocationLabels, setShowLocationLabels] = useState(true);
+  const [showLocationLabels, setShowLocationLabels] = useState(variant !== "embedded");
   const [showDetailedMapLabels, setShowDetailedMapLabels] = useState(true);
+  const [embeddedFiltersOpen, setEmbeddedFiltersOpen] = useState(false);
   const [period, setPeriod] = useState<TrailPeriod>("day");
   const [trailFromDate, setTrailFromDate] = useState(todayIsoInKolkata());
   const [trailToDate, setTrailToDate] = useState(todayIsoInKolkata());
@@ -859,15 +861,37 @@ export default function FieldTrackingMap({
     ? LAYER_OPTIONS
     : LAYER_OPTIONS.filter((option) => option.key === "supervisors");
 
+  const embeddedActiveFilterCount = useMemo(() => {
+    let count = 0;
+    if (layer !== "supervisors") count += 1;
+    if (period !== "day") count += 1;
+    if (selectedSupervisorId !== "all") count += 1;
+    if (!showPaths) count += 1;
+    if (showLocationLabels) count += 1;
+    if (!showDetailedMapLabels) count += 1;
+    if (lockView) count += 1;
+    if (selectedEmployeeId !== "all") count += 1;
+    return count;
+  }, [
+    layer,
+    period,
+    selectedSupervisorId,
+    showPaths,
+    showLocationLabels,
+    showDetailedMapLabels,
+    lockView,
+    selectedEmployeeId,
+  ]);
+
   const rootClassName =
     useInternalFullscreen && activeFullscreen
       ? "fixed inset-0 z-50 bg-[#f4f6f9] overflow-y-auto p-4 text-left"
       : embedded
-        ? "text-left"
+        ? "flex flex-col min-h-0 text-left"
         : "bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-left";
 
   return (
-    <div className={rootClassName}>
+    <div className={`${rootClassName}${embedded ? " flex flex-col" : ""}`}>
       <style>{`
         @keyframes field-map-pulse {
           0% { transform: scale(0.85); opacity: 0.45; }
@@ -909,12 +933,12 @@ export default function FieldTrackingMap({
           border: 1px solid #e2e8f0;
           border-radius: 6px;
           padding: 2px 7px;
-          font-size: 10px;
+          font-size: ${embedded ? "9px" : "10px"};
           font-weight: 700;
           color: #334155;
           box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
           white-space: nowrap;
-          max-width: 280px;
+          max-width: ${embedded ? "200px" : "280px"};
           overflow: hidden;
           text-overflow: ellipsis;
         }
@@ -923,34 +947,147 @@ export default function FieldTrackingMap({
         }
       `}</style>
 
-      <div className={`flex flex-col lg:flex-row lg:items-start justify-between gap-3 ${embedded ? "px-3 pt-2" : "mb-4"}`}>
-        <div>
-          {!embedded && (
-            <>
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <MapPin size={16} className="text-[#ff791a]" />
-                Field Tracking Map
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-1">
-                OpenStreetMap (India villages & streets) · supervisor trails & staff GPS
-              </p>
-            </>
-          )}
-          {embedded && (
-            <p className="text-[11px] text-slate-500">
-              OpenStreetMap · village & street names from OSM · tap markers for details
-            </p>
-          )}
+      {embedded ? (
+        <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2 order-1 shrink-0">
+          <span className="rounded-full bg-gradient-to-r from-[#0C1E4A] to-[#1a3568] px-3 py-1.5 text-[10px] font-bold text-white shadow-md border border-white/10">
+            Live Field Tracking
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEmbeddedFiltersOpen((v) => !v)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold cursor-pointer ${
+                embeddedFiltersOpen
+                  ? "border-[#0C1E4A] bg-[#0C1E4A] text-white"
+                  : "border-slate-200 bg-white text-slate-700"
+              }`}
+            >
+              <Filter size={12} />
+              Filters
+              {embeddedActiveFilterCount > 0 && (
+                <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[#ff791a] text-white text-[9px] font-black flex items-center justify-center">
+                  {embeddedActiveFilterCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
+            >
+              {activeFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+      ) : (
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+              <MapPin size={16} className="text-[#ff791a]" />
+              Field Tracking Map
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1">
+              OpenStreetMap (India villages & streets) · supervisor trails & staff GPS
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
+            >
+              {activeFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              {activeFullscreen ? "Exit full screen" : "Full screen"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLockView((value) => {
+                  const next = !value;
+                  if (next) userInteractedRef.current = true;
+                  return next;
+                });
+              }}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                lockView
+                  ? "border-amber-300 bg-amber-50 text-amber-900"
+                  : "border-slate-200 bg-white text-slate-700"
+              }`}
+              title="Keep the current zoom and position when data refreshes"
+            >
+              {lockView ? <Lock size={12} /> : <Unlock size={12} />}
+              {lockView ? "Map locked" : "Stable map"}
+            </button>
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showLocationLabels}
+                onChange={(event) => setShowLocationLabels(event.target.checked)}
+                className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
+              />
+              Location names
+            </label>
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-semibold text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showDetailedMapLabels}
+                onChange={(event) => setShowDetailedMapLabels(event.target.checked)}
+                className="rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/30"
+              />
+              Village & street map
+            </label>
+            {showEmployeeTracking && (
+              <button
+                type="button"
+                onClick={() => void loadEmployeeTrackingData()}
+                disabled={loadingEmployeeData}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw size={12} className={loadingEmployeeData ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            )}
+            {onOpenFieldTeam && (
+              <button
+                type="button"
+                onClick={onOpenFieldTeam}
+                className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
+              >
+                Field Team <ChevronRight size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(!embedded || embeddedFiltersOpen) && (
+        <div
+          className={
+            embedded
+              ? "order-2 px-3 pb-2 shrink-0 rounded-2xl border border-slate-200 bg-white shadow-sm mx-2 mb-2 space-y-2.5 max-h-[45vh] overflow-y-auto"
+              : ""
+          }
+        >
+      <div className={`flex flex-wrap gap-2 ${embedded ? "px-1 pt-2" : "mb-3"}`}>
+        {layerOptions.map(({ key, label, icon: Icon }) => (
           <button
+            key={key}
             type="button"
-            onClick={handleToggleFullscreen}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 cursor-pointer"
+            onClick={() => setLayer(key)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-bold transition cursor-pointer ${
+              layer === key
+                ? "border-[#0C1E4A] bg-[#0C1E4A] text-white shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            }`}
           >
-            {activeFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-            {activeFullscreen ? "Exit full screen" : "Full screen"}
+            <Icon size={12} />
+            {label}
           </button>
+        ))}
+      </div>
+
+      {embedded && (
+        <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
           <button
             type="button"
             onClick={() => {
@@ -965,7 +1102,6 @@ export default function FieldTrackingMap({
                 ? "border-amber-300 bg-amber-50 text-amber-900"
                 : "border-slate-200 bg-white text-slate-700"
             }`}
-            title="Keep the current zoom and position when data refreshes"
           >
             {lockView ? <Lock size={12} /> : <Unlock size={12} />}
             {lockView ? "Map locked" : "Stable map"}
@@ -999,35 +1135,8 @@ export default function FieldTrackingMap({
               Refresh
             </button>
           )}
-          {onOpenFieldTeam && (
-            <button
-              type="button"
-              onClick={onOpenFieldTeam}
-              className="text-[10px] font-bold text-[#ff791a] flex items-center gap-0.5 hover:gap-1 transition-all cursor-pointer"
-            >
-              Field Team <ChevronRight size={12} />
-            </button>
-          )}
         </div>
-      </div>
-
-      <div className={`flex flex-wrap gap-2 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
-        {layerOptions.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setLayer(key)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-bold transition cursor-pointer ${
-              layer === key
-                ? "border-[#0C1E4A] bg-[#0C1E4A] text-white shadow-sm"
-                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-            }`}
-          >
-            <Icon size={12} />
-            {label}
-          </button>
-        ))}
-      </div>
+      )}
 
       {showSupervisors && (
         <div className={`flex flex-wrap items-center gap-2 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
@@ -1130,7 +1239,10 @@ export default function FieldTrackingMap({
         </div>
       )}
 
-      <div className={`flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500 ${embedded ? "px-3 mb-2" : "mb-3"}`}>
+        </div>
+      )}
+
+      <div className={`flex flex-wrap items-center gap-3 text-[10px] font-semibold text-slate-500 ${embedded ? "order-4 px-3 py-2 border-t border-slate-100 shrink-0" : "mb-3"}`}>
         {showSupervisors && (
           <>
             <span className="inline-flex items-center gap-1.5">
@@ -1158,7 +1270,7 @@ export default function FieldTrackingMap({
       </div>
 
       {showEmployees && employeeSummaries.length > 0 && (
-        <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto ${embedded ? "px-3 mb-2" : "mb-3"}`}>
+        <div className={`flex gap-2 ${embedded ? "order-5 px-3 pb-2 overflow-x-auto shrink-0 flex-nowrap" : "flex-wrap max-h-24 overflow-y-auto mb-3"}`}>
           {employeeSummaries.map((emp) => (
             <button
               key={emp.employeeId}
@@ -1169,7 +1281,7 @@ export default function FieldTrackingMap({
                 );
                 flyTo(emp.lat, emp.lng);
               }}
-              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-bold transition cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-bold transition cursor-pointer shrink-0 ${
                 selectedEmployeeId === emp.employeeId
                   ? "border-slate-800 bg-slate-900 text-white"
                   : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
@@ -1186,7 +1298,7 @@ export default function FieldTrackingMap({
       )}
 
       {showSupervisors && liveLocations.length > 0 && (
-        <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto ${embedded ? "px-3 mb-2" : "mb-3"}`}>
+        <div className={`flex gap-2 ${embedded ? "order-5 px-3 pb-2 overflow-x-auto shrink-0 flex-nowrap" : "flex-wrap max-h-24 overflow-y-auto mb-3"}`}>
           {liveLocations.map((loc) => (
             <button
               key={loc.supervisorId}
@@ -1197,7 +1309,7 @@ export default function FieldTrackingMap({
                 );
                 flyTo(loc.lat, loc.lng);
               }}
-              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-bold transition cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-bold transition cursor-pointer shrink-0 ${
                 selectedSupervisorId === loc.supervisorId
                   ? "border-slate-800 bg-slate-900 text-white"
                   : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300"
@@ -1216,14 +1328,7 @@ export default function FieldTrackingMap({
         </div>
       )}
 
-      <div className={`relative field-tracking-map-container rounded-xl border border-slate-200 shadow-sm overflow-hidden ${embedded ? "mx-1" : ""}`}>
-        {embedded && (
-          <div className="pointer-events-none absolute inset-x-2 top-2 z-[401] flex justify-center">
-            <span className="rounded-full bg-gradient-to-r from-[#0C1E4A] to-[#1a3568] px-3 py-1 text-[10px] font-bold text-white shadow-lg border border-white/10">
-              Live Field Tracking
-            </span>
-          </div>
-        )}
+      <div className={`relative field-tracking-map-container rounded-xl border border-slate-200 shadow-sm overflow-hidden ${embedded ? "order-3 mx-2 flex-1 min-h-[280px]" : ""}`}>
         <div
           ref={mapContainerRef}
           className={`${resolvedMapHeight} w-full z-0`}

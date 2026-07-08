@@ -89,6 +89,7 @@ export function ObserverSection({
 export function ObserverListRow({
   title,
   subtitle,
+  subtitleLines,
   dateLabel,
   value,
   valueHref,
@@ -99,6 +100,7 @@ export function ObserverListRow({
 }: {
   title: string;
   subtitle?: string;
+  subtitleLines?: string[];
   dateLabel?: string;
   value?: string;
   valueHref?: string;
@@ -126,7 +128,22 @@ export function ObserverListRow({
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-slate-800 truncate">{title}</p>
-        {subtitle && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{subtitle}</p>}
+        {subtitleLines && subtitleLines.length > 0 ? (
+          <div className="mt-0.5 space-y-0.5">
+            {subtitleLines.map((line, index) => (
+              <p
+                key={`${line}-${index}`}
+                className={`text-xs text-slate-500 whitespace-normal break-words ${
+                  index === 0 ? "font-semibold text-slate-700" : ""
+                }`}
+              >
+                {line}
+              </p>
+            ))}
+          </div>
+        ) : (
+          subtitle && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{subtitle}</p>
+        )}
         {dateLabel && (
           <p className="text-[11px] font-bold text-[#0C1E4A] mt-1 inline-flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-lg">
             <Calendar size={11} className="text-[#ff791a] shrink-0" />

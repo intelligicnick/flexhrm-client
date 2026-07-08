@@ -1,7 +1,17 @@
 import { getSalaryColumnValue } from "../../lib/salary-columns";
 import { expiryBand } from "../../lib/renewal-helpers";
 import { MONTH_NAME_LIST, normalizeMonthKey, parseFlexibleDateMs, formatEmployeeBirthDate, parseDateOfBirth } from "../../lib/date-helpers";
-import { resolveGemBidPdfUrl, resolveGemContractPdfUrl, resolveGemContractNoLabel } from "../../lib/gem-helpers";
+import {
+  resolveGemBidPdfSourceUrl,
+  resolveGemContractPdfSourceUrl,
+  resolveGemContractNoLabel,
+} from "../../lib/gem-helpers";
+import {
+  tenderConsignee,
+  tenderDepartment,
+  tenderMinistryLabel,
+  tenderOrganisation,
+} from "../../lib/tender-display-helpers";
 import { resolvePhotoSrc, resolvePhotoThumbnailSrc } from "../../lib/media-url";
 import { formatLatLngDecimal, isValidGpsCoord } from "../../lib/gps-coords";
 import { buildAllExpenseRecords, type ExpenseRecordRow } from "../../lib/school-work-helpers";
@@ -174,7 +184,7 @@ export function buildSupervisorDetails(supervisor: SchoolSupervisor): DetailFiel
   ];
 }
 
-export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
+export function buildVisitDetails(visit: SchoolVisit & { district?: string }): DetailField[] {
   const materials =
     visit.materialsGiven?.length > 0
       ? visit.materialsGiven.map((m) => `${m.item} × ${m.qty}`).join(", ")
@@ -185,6 +195,7 @@ export function buildVisitDetails(visit: SchoolVisit): DetailField[] {
     { label: "Supervisor", value: visit.supervisorName || "—" },
     { label: "Visit Date", value: formatDate(visit.visitDate) },
     { label: "Status", value: visit.status || "—" },
+    { label: "District", value: visit.district || "—" },
     { label: "Block", value: visit.block || "—" },
     { label: "UDISE", value: visit.udise || "—" },
     { label: "Visit Type", value: visit.visitType || "—" },
@@ -249,25 +260,37 @@ export function buildCommitmentDetails(commitment: CommitmentDiary): DetailField
 }
 
 export function buildTenderDetails(tender: Tender): DetailField[] {
-  const pdfUrl = resolveGemBidPdfUrl(tender);
+  const pdfUrl = resolveGemBidPdfSourceUrl(tender);
   const typeLabel = tender.tenderType === "travel" ? "Car" : "Manpower";
+  const ministry = tenderMinistryLabel(tender);
+  const organisation = tenderOrganisation(tender);
+  const department = tenderDepartment(tender);
+  const consignee = tenderConsignee(tender);
 
   const fields: DetailField[] = [
     { label: "Bid No", value: tender.bidNo || "—" },
     { label: "Type", value: typeLabel, tone: tender.tenderType === "travel" ? "amber" : "green" },
+    { label: "Ministry / State", value: ministry || "—" },
+    { label: "Organisation", value: organisation || "—" },
+    ...(department && department !== organisation
+      ? [{ label: "Department", value: department }]
+      : []),
+    { label: "Consignee / Reporting Officer", value: consignee || tender.consigneeOfficer || tender.officerName || "—" },
+    { label: "Category", value: tender.category || "—" },
     { label: "End Date", value: formatDate(tender.endDate) },
     { label: "Pre-Bid Date & Time", value: formatDateTime(tender.preBidAt) },
     { label: "Pre-Bid Venue", value: tender.preBidVenue || "—" },
     { label: "Quantity", value: String(tender.quantity ?? "—"), tone: "green", hideLabel: false },
-    { label: "Department", value: tender.department || "—" },
-    { label: "Officer", value: tender.officerName || "—" },
     { label: "Status", value: tender.status || "—" },
     { label: "Filed Date", value: formatDate(tender.filedDate) },
+    { label: "Start Date", value: formatDate(tender.startDate || "") },
     { label: "Rate", value: tender.rate || "—" },
     { label: "Outcome", value: tender.outcome || "—" },
     { label: "Description", value: tender.description || "—" },
+    { label: "Additional Requirements", value: tender.additionalRequirements || "—" },
     { label: "Notes", value: tender.notes || "—" },
     { label: "Address", value: tender.address || "—" },
+    { label: "GeM Stage", value: tender.gemCurrentStage || "—" },
   ];
 
   if (pdfUrl) {
@@ -284,7 +307,7 @@ export function buildTenderDetails(tender: Tender): DetailField[] {
 }
 
 export function buildContractDetails(contract: Contract): DetailField[] {
-  const pdfUrl = resolveGemContractPdfUrl(contract);
+  const pdfUrl = resolveGemContractPdfSourceUrl(contract);
   const contractLabel = resolveGemContractNoLabel(contract);
 
   const fields: DetailField[] = [

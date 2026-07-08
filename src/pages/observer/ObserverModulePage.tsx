@@ -19,6 +19,8 @@ import {
   Cake,
   Activity,
   Camera,
+  Share2,
+  Loader2,
 } from "lucide-react";
 import { useHRMS } from "../../context/HRMSContext";
 import { useObserverStats } from "./useObserverStats";
@@ -48,11 +50,26 @@ import { getDateRangeForPeriod } from "../../lib/supervisor-dates";
 import { buildAllExpenseRecords, formatExpenseDate } from "../../lib/school-work-helpers";
 import { resolveGemContractNoLabel } from "../../lib/gem-helpers";
 import { fetchRenewalDocuments, getRenewalDocumentUrl } from "../../lib/renewals";
-import type { Employee, Renewal, SchoolPartner } from "../../types";
+import type { Employee, Renewal, SchoolPartner, SchoolVisit, SchoolVisitPhoto } from "../../types";
 import ObserverSearchInput from "./ObserverSearchInput";
 import { ObserverDetailSheet } from "./ObserverDetailSheet";
 import { ObserverPeriodTabs, type ObserverPeriod } from "./ObserverPeriodTabs";
-import { ObserverSupervisorSelect } from "./ObserverPeriodTabs";
+import {
+  ObserverSupervisorSelect,
+  ObserverDistrictSelect,
+  ObserverBlockSelect,
+  ObserverVisitViewModeTabs,
+  type VisitViewMode,
+} from "./ObserverPeriodTabs";
+import { ObserverVisitGroupList } from "./ObserverVisitGroupList";
+import { tenderListSubtitleLines, tenderMatchesObserverSearch } from "../../lib/tender-display-helpers";
+import {
+  buildVisitPhotosReportFile,
+  countVisitPhotos,
+  formatVisitPhotosPeriodLabel,
+} from "../../lib/visit-photos-report-pdf";
+import { shareGeneratedPdfFile } from "./observer-share";
+import { enrichVisits, groupVisits, type EnrichedSchoolVisit } from "../../lib/visit-enrichment";
 import {
   ObserverCommitmentActions,
   ObserverContractStatusActions,
@@ -167,6 +184,10 @@ type DetailState = {
   documents?: ObserverDocumentLink[];
   actions?: React.ReactNode;
   employeeId?: string;
+  visitPhotos?: SchoolVisitPhoto[];
+  visit?: Pick<SchoolVisit, "schoolName" | "visitDate" | "supervisorName" | "block"> & {
+    district?: string;
+  };
 };
 
 function salaryPaymentStatus(emp: Employee, month: string): "Paid" | "Unpaid" | "Hold" {
@@ -235,6 +256,11 @@ export default function ObserverModulePage() {
   const [detail, setDetail] = useState<DetailState | null>(null);
   const [visitPeriod, setVisitPeriod] = useState<ObserverPeriod>("month");
   const [visitSupervisorId, setVisitSupervisorId] = useState("all");
+  const [visitDistrict, setVisitDistrict] = useState("all");
+  const [visitBlock, setVisitBlock] = useState("all");
+  const [visitViewMode, setVisitViewMode] = useState<VisitViewMode>("list");
+  const [visitPdfBusy, setVisitPdfBusy] = useState(false);
+  const [visitPdfMessage, setVisitPdfMessage] = useState<string | null>(null);
   const [commitmentPeriod, setCommitmentPeriod] = useState<ObserverPeriod>("month");
   const [commitmentSupervisorId, setCommitmentSupervisorId] = useState("all");
   const [directorySubTab, setDirectorySubTab] = useState<"employees" | "contacts">("employees");
@@ -486,17 +512,66 @@ export default function ObserverModulePage() {
       });
   }, [rawSchoolPartners, selectedMonth, moduleSearch]);
 
-  const filteredVisits = useMemo(() => {
-    let items = filterByPeriod(rawSchoolVisits, visitPeriod, "visitDate");
+  const enrichedVisits = useMemo(
+    () => enrichVisits(rawSchoolVisits, rawSchoolWorks),
+    [rawSchoolVisits, rawSchoolWorks],
+  );
+
+  const visitDistrictOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(enrichedVisits.map((v) => v.district).filter((d): d is string => Boolean(d))),
+      ).sort(),
+    [enrichedVisits],
+  );
+
+  const visitBlockOptions = useMemo(() => {
+    const source =
+      visitDistrict === "all"
+        ? enrichedVisits
+        : enrichedVisits.filter((v) => v.district === visitDistrict);
+    return Array.from(
+      new Set(source.map((v) => v.block).filter((b): b is string => Boolean(b))),
+    ).sort();
+  }, [enrichedVisits, visitDistrict]);
+
+  const filteredVisits = useMemo((): EnrichedSchoolVisit[] => {
+    let items = filterByPeriod(enrichedVisits, visitPeriod, "visitDate");
     if (visitSupervisorId !== "all") {
       items = items.filter((v) => v.supervisorId === visitSupervisorId);
     }
+    if (visitDistrict !== "all") {
+      items = items.filter((v) => v.district === visitDistrict);
+    }
+    if (visitBlock !== "all") {
+      items = items.filter((v) => v.block === visitBlock);
+    }
     return items
       .filter((v) =>
-        matchesSearch(moduleSearch, v.schoolName, v.supervisorName, v.block, v.udise, v.status),
+        matchesSearch(
+          moduleSearch,
+          v.schoolName,
+          v.supervisorName,
+          v.block,
+          v.district,
+          v.udise,
+          v.status,
+        ),
       )
       .sort((a, b) => (b.visitDate || "").localeCompare(a.visitDate || ""));
-  }, [rawSchoolVisits, visitPeriod, visitSupervisorId, moduleSearch]);
+  }, [
+    enrichedVisits,
+    visitPeriod,
+    visitSupervisorId,
+    visitDistrict,
+    visitBlock,
+    moduleSearch,
+  ]);
+
+  const visitGroups = useMemo(
+    () => groupVisits(filteredVisits, visitViewMode),
+    [filteredVisits, visitViewMode],
+  );
 
   const filteredCommitments = useMemo(() => {
     let items = filterByPeriod(rawCommitmentDiary, commitmentPeriod, "fromDate");
@@ -514,14 +589,27 @@ export default function ObserverModulePage() {
     () =>
       rawTenders
         .filter((t) => !t.deletedAt?.trim())
-        .filter((t) => matchesSearch(moduleSearch, t.bidNo, t.department, t.officerName, t.status, t.category)),
+        .filter((t) => tenderMatchesObserverSearch(t, moduleSearch))
+        .sort((a, b) => (b.endDate || "").localeCompare(a.endDate || "")),
     [rawTenders, moduleSearch],
   );
 
   const filteredContracts = useMemo(
     () =>
       observerContracts.filter((c) =>
-        matchesSearch(moduleSearch, c.contractNo, c.companyName, c.officeName, c.officerName, c.status),
+        matchesSearch(
+          moduleSearch,
+          c.contractNo,
+          resolveGemContractNoLabel(c),
+          c.companyName,
+          c.officeName,
+          c.officerName,
+          c.status,
+          c.tenderBidNo,
+          c.gemContractId,
+          c.correspondingOffice,
+          ...(c.linkedLocations || []),
+        ),
       ),
     [observerContracts, moduleSearch],
   );
@@ -679,7 +767,64 @@ export default function ObserverModulePage() {
     documents?: ObserverDocumentLink[],
     actions?: React.ReactNode,
     employeeId?: string,
-  ) => setDetail({ title, fields, documents, actions, employeeId });
+    visitPhotos?: SchoolVisitPhoto[],
+    visit?: DetailState["visit"],
+  ) => setDetail({ title, fields, documents, actions, employeeId, visitPhotos, visit });
+
+  const visitPhotoCount = useMemo(() => countVisitPhotos(filteredVisits), [filteredVisits]);
+
+  const handleShareVisitPhotosPdf = async () => {
+    if (visitPhotoCount === 0) {
+      setVisitPdfMessage("No visit photos found for the selected filters.");
+      return;
+    }
+
+    setVisitPdfBusy(true);
+    setVisitPdfMessage("Building visit photos PDF…");
+
+    try {
+      const supervisorName =
+        visitSupervisorId === "all"
+          ? undefined
+          : rawSchoolSupervisors.find((s) => s.id === visitSupervisorId)?.name;
+      const file = await buildVisitPhotosReportFile(
+        filteredVisits,
+        {
+          period: visitPeriod,
+          supervisorName,
+          district: visitDistrict === "all" ? undefined : visitDistrict,
+          block: visitBlock === "all" ? undefined : visitBlock,
+        },
+        (message) => setVisitPdfMessage(message),
+      );
+
+      await shareGeneratedPdfFile(file, "Visit Photos Report", (status, message) => {
+        if (message) setVisitPdfMessage(message);
+        if (status !== "loading") setVisitPdfBusy(false);
+      });
+    } catch (err) {
+      setVisitPdfMessage(err instanceof Error ? err.message : "Could not create visit photos PDF.");
+      setVisitPdfBusy(false);
+    }
+  };
+
+  const openVisitDetail = (visit: EnrichedSchoolVisit) =>
+    openDetail(
+      visit.schoolName,
+      buildVisitDetails(visit),
+      undefined,
+      canEdit("Field Team") ? (
+        <ObserverVisitActions
+          visitId={visit.id}
+          status={visit.status}
+          onUpdate={handleUpdateVisitStatus}
+          onComplete={closeDetail}
+        />
+      ) : undefined,
+      undefined,
+      visit.photos,
+      visit,
+    );
 
   const closeDetail = () => setDetail(null);
 
@@ -951,7 +1096,29 @@ export default function ObserverModulePage() {
           <ObserverStatCard icon={ClipboardList} label="Pending" value={visitStats.pending} accent="amber" alert={visitStats.pending > 0} />
           <ObserverStatCard icon={ClipboardList} label="Approved" value={visitStats.approved} accent="emerald" />
         </ObserverStatGrid>
-        <ObserverSection title="Visits">
+        <ObserverSection
+          title="Visits"
+          action={
+            <button
+              type="button"
+              disabled={visitPdfBusy || visitPhotoCount === 0}
+              onClick={() => void handleShareVisitPhotosPdf()}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#0C1E4A] text-white text-[10px] font-bold cursor-pointer disabled:opacity-50"
+            >
+              {visitPdfBusy ? <Loader2 size={12} className="animate-spin" /> : <Share2 size={12} />}
+              Share photos PDF
+            </button>
+          }
+        >
+          {visitPdfMessage && (
+            <p className="text-xs font-semibold text-[#ff791a] bg-orange-50 border border-orange-100 rounded-xl px-3 py-2 mb-3">
+              {visitPdfMessage}
+            </p>
+          )}
+          <p className="text-[10px] font-semibold text-slate-500 mb-3">
+            {formatVisitPhotosPeriodLabel(visitPeriod)} · {visitPhotoCount} photo
+            {visitPhotoCount === 1 ? "" : "s"} in current filter
+          </p>
           <div className="space-y-2 mb-3">
             <ObserverPeriodTabs period={visitPeriod} onPeriodChange={setVisitPeriod} />
             <ObserverSupervisorSelect
@@ -959,35 +1126,40 @@ export default function ObserverModulePage() {
               value={visitSupervisorId}
               onChange={setVisitSupervisorId}
             />
+            <ObserverDistrictSelect
+              districts={visitDistrictOptions}
+              value={visitDistrict}
+              onChange={(value) => {
+                setVisitDistrict(value);
+                setVisitBlock("all");
+              }}
+            />
+            <ObserverBlockSelect
+              blocks={visitBlockOptions}
+              value={visitBlock}
+              onChange={setVisitBlock}
+            />
+            <ObserverVisitViewModeTabs mode={visitViewMode} onModeChange={setVisitViewMode} />
           </div>
-          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor…" />
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor, district, block…" />
           {filteredVisits.length === 0 ? (
             <ObserverEmptyState icon={ClipboardList} title="No visits found" />
-          ) : (
+          ) : visitViewMode === "list" ? (
             filteredVisits.map((v) => (
               <ObserverListRow
                 key={v.id}
                 title={v.schoolName}
-                subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)}`}
+                subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)} · ${v.district}`}
                 badge={v.status}
                 badgeTone={v.status === "pending" ? "amber" : v.status === "approved" ? "green" : "slate"}
-                onClick={() =>
-                  openDetail(
-                    v.schoolName,
-                    buildVisitDetails(v),
-                    undefined,
-                    canEdit("Field Team") ? (
-                      <ObserverVisitActions
-                        visitId={v.id}
-                        status={v.status}
-                        onUpdate={handleUpdateVisitStatus}
-                        onComplete={closeDetail}
-                      />
-                    ) : undefined,
-                  )
-                }
+                onClick={() => openVisitDetail(v)}
               />
             ))
+          ) : (
+            <ObserverVisitGroupList
+              groups={visitGroups}
+              onVisitClick={openVisitDetail}
+            />
           )}
         </ObserverSection>
         {detail && (
@@ -996,6 +1168,8 @@ export default function ObserverModulePage() {
             fields={detail.fields}
             documents={detail.documents}
             actions={detail.actions}
+            visitPhotos={detail.visitPhotos}
+            visit={detail.visit}
             onClose={closeDetail}
           />
         )}
@@ -1086,7 +1260,7 @@ export default function ObserverModulePage() {
                 <ObserverListRow
                   key={t.id}
                   title={t.bidNo || "Tender"}
-                  subtitle={[t.department, t.officerName].filter(Boolean).join(" · ") || undefined}
+                  subtitleLines={tenderListSubtitleLines(t)}
                   dateLabel={`Pre-bid ${formatDateTime(t.preBidAt)} · End ${formatDate(t.endDate || "")}`}
                   value={t.quantity ? String(t.quantity) : undefined}
                   valueTone="green"

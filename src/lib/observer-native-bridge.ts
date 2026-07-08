@@ -4,6 +4,7 @@ type ObserverNativeBridge = {
   isNativeApp?: () => boolean;
   getApiBase?: () => string;
   sharePdfFromUrl?: (url: string, bearerToken: string, filename: string, title: string) => void;
+  sharePdfFromBase64?: (base64: string, filename: string, title: string) => void;
   openPdfFromUrl?: (url: string, bearerToken: string, filename: string) => void;
   printPdfFromUrl?: (url: string, bearerToken: string, filename: string) => void;
 };
@@ -23,7 +24,18 @@ function getBridge(): ObserverNativeBridge | undefined {
 
 export function canUseObserverNativePdf(): boolean {
   const bridge = getBridge();
-  return Boolean(bridge?.sharePdfFromUrl && bridge?.openPdfFromUrl && bridge?.isNativeApp?.());
+  return Boolean(
+    bridge?.sharePdfFromUrl &&
+      bridge?.openPdfFromUrl &&
+      bridge?.isNativeApp?.(),
+  );
+}
+
+export function canUseObserverNativePdfShare(): boolean {
+  const bridge = getBridge();
+  return Boolean(
+    (bridge?.sharePdfFromBase64 || bridge?.sharePdfFromUrl) && bridge?.isNativeApp?.(),
+  );
 }
 
 export function canUseObserverNativePrint(): boolean {
@@ -67,6 +79,21 @@ export async function sharePdfViaNative(
   const pending = waitForNativeCallback("__flexHrmOnPdfShareDone");
   const token = getObserverToken() || "";
   bridge.sharePdfFromUrl(url, token, filename, title);
+  await pending;
+}
+
+export async function sharePdfFromBase64ViaNative(
+  base64: string,
+  title: string,
+  filename: string,
+): Promise<void> {
+  const bridge = getBridge();
+  if (!bridge?.sharePdfFromBase64) {
+    throw new Error("Native PDF share is not available.");
+  }
+
+  const pending = waitForNativeCallback("__flexHrmOnPdfShareDone");
+  bridge.sharePdfFromBase64(base64, filename, title);
   await pending;
 }
 

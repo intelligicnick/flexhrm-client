@@ -3,8 +3,10 @@ import { unwrapChromePdfViewerUrl, wrapChromePdfViewerUrl } from "../../lib/gem-
 import { getObserverToken, isObserverNativeClient } from "../../lib/observer-session";
 import {
   canUseObserverNativePdf,
+  canUseObserverNativePdfShare,
   openPdfViaNative,
   sharePdfViaNative,
+  sharePdfFromBase64ViaNative,
 } from "../../lib/observer-native-bridge";
 
 export type PdfActionStatus = "loading" | "ready" | "error";
@@ -107,6 +109,7 @@ export async function viewPdfUrl(
 ): Promise<ArrayBuffer | null> {
   if (!url?.trim()) return null;
   onStatus?.("loading", "Loading PDF…");
+
   try {
     const data = await fetchPdfArrayBuffer(url);
     onStatus?.("ready");
@@ -222,4 +225,48 @@ export async function shareUrl(
     if (status === "error" && message) onCopied?.(message);
     if (status === "ready" && message) onCopied?.(message);
   });
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read PDF file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function shareGeneratedPdfFile(
+  file: File,
+  title: string,
+  onStatus?: (status: PdfActionStatus, message?: string) => void,
+): Promise<void> {
+  onStatus?.("loading", "Preparing PDF…");
+
+  if (canUseObserverNativePdfShare()) {
+    try {
+      const dataUrl = await fileToBase64(file);
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+      await sharePdfFromBase64ViaNative(base64, title, file.name);
+      onStatus?.("ready", "Share sheet opened — choose WhatsApp or another app.");
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not share PDF.";
+      onStatus?.("error", message);
+      return;
+    }
+  }
+
+  const shared = await sharePdfFile(file, title);
+  if (shared) {
+    onStatus?.("ready", "PDF shared.");
+    return;
+  }
+
+  try {
+    await downloadPdfFile(file);
+    onStatus?.("ready", "PDF saved — share from your downloads folder.");
+  } catch {
+    onStatus?.("error", "Could not share PDF on this device.");
+  }
 }
