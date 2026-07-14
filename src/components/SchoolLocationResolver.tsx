@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Loader2, MapPin, RefreshCw } from "lucide-react";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { SchoolWork } from "../types";
@@ -34,6 +34,7 @@ export default function SchoolLocationResolver({
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [googlePlacesReady, setGooglePlacesReady] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<{ total: number; resolved: number; skipped: number; failed: number } | null>(null);
   const [rows, setRows] = useState<ResolveRow[]>([]);
 
@@ -47,6 +48,15 @@ export default function SchoolLocationResolver({
     if (district) list = list.filter((s) => s.district === district);
     return Array.from(new Set(list.map((s) => s.block).filter(Boolean))).sort();
   }, [schools, district]);
+
+  useEffect(() => {
+    void fetch("/api/health")
+      .then((res) => res.json())
+      .then((data: { googlePlacesConfigured?: boolean }) => {
+        setGooglePlacesReady(data.googlePlacesConfigured === true);
+      })
+      .catch(() => setGooglePlacesReady(null));
+  }, []);
 
   const runResolve = async () => {
     if (!block.trim()) {
@@ -104,6 +114,13 @@ export default function SchoolLocationResolver({
         offset = Number(data.nextOffset) || offset + batchSize;
       }
       setProgress(null);
+      if (total > 0 && resolved === 0 && skipped === 0 && failed === total) {
+        setError(
+          googlePlacesReady === false
+            ? "Google Places API key is missing on the backend. Add GOOGLE_PLACES_API_KEY in Hostinger hPanel, enable Places API (New) + Geocoding API, then redeploy."
+            : "No schools matched. Check that GOOGLE_PLACES_API_KEY is valid and billing is enabled in Google Cloud, then redeploy the backend and try again.",
+        );
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Location resolve failed.");
     } finally {
@@ -187,6 +204,13 @@ export default function SchoolLocationResolver({
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-2">
           <Loader2 size={14} className="animate-spin text-[#ff791a]" />
           {progress}
+        </p>
+      )}
+
+      {googlePlacesReady === false && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Google Places API is not configured on the backend. Add <code>GOOGLE_PLACES_API_KEY</code> in
+          Hostinger hPanel and redeploy before resolving locations.
         </p>
       )}
 
