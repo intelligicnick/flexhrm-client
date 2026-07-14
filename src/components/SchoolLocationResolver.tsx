@@ -31,6 +31,7 @@ export default function SchoolLocationResolver({
   const [block, setBlock] = useState("");
   const [saveVerified, setSaveVerified] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<{ total: number; resolved: number; skipped: number; failed: number } | null>(null);
   const [rows, setRows] = useState<ResolveRow[]>([]);
@@ -54,30 +55,59 @@ export default function SchoolLocationResolver({
     setLoading(true);
     setError(null);
     setSummary(null);
+    setProgress(null);
+    setRows([]);
+
+    const batchSize = 3;
+    let offset = 0;
+    let total = 0;
+    let resolved = 0;
+    let skipped = 0;
+    let failed = 0;
+    const allRows: ResolveRow[] = [];
+
     try {
-      const res = await fetch("/api/school-works/bulk-resolve-locations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          block: block.trim(),
-          district: district.trim() || undefined,
-          saveVerified,
-          skipExisting: true,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.message || "Location resolve failed.");
-      setSummary({
-        total: Number(data.total) || 0,
-        resolved: Number(data.resolved) || 0,
-        skipped: Number(data.skipped) || 0,
-        failed: Number(data.failed) || 0,
-      });
-      setRows(Array.isArray(data.results) ? data.results : []);
+      while (true) {
+        setProgress(
+          total > 0
+            ? `Resolving schools ${Math.min(offset + 1, total)}–${Math.min(offset + batchSize, total)} of ${total}…`
+            : "Starting location lookup…",
+        );
+
+        const res = await fetch("/api/school-works/bulk-resolve-locations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            block: block.trim(),
+            district: district.trim() || undefined,
+            saveVerified,
+            skipExisting: true,
+            limit: batchSize,
+            offset,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || "Location resolve failed.");
+
+        total = Number(data.total) || total;
+        resolved += Number(data.resolved) || 0;
+        skipped += Number(data.skipped) || 0;
+        failed += Number(data.failed) || 0;
+        if (Array.isArray(data.results)) {
+          allRows.push(...data.results);
+          setRows([...allRows]);
+        }
+        setSummary({ total, resolved, skipped, failed });
+
+        if (!data.hasMore) break;
+        offset = Number(data.nextOffset) || offset + batchSize;
+      }
+      setProgress(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Location resolve failed.");
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -150,6 +180,13 @@ export default function SchoolLocationResolver({
           </button>
         )}
       </div>
+
+      {progress && (
+        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin text-[#ff791a]" />
+          {progress}
+        </p>
+      )}
 
       {error && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
