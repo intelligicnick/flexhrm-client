@@ -5,6 +5,7 @@ export type NativeGpsCoordinates = {
   lng: number;
   accuracy?: number;
   at?: number;
+  isMock?: boolean;
 };
 
 type NativeAndroidBridge = {
@@ -38,6 +39,7 @@ function parseGpsJson(raw: string): NativeGpsCoordinates | null {
       lng?: unknown;
       accuracy?: unknown;
       at?: unknown;
+      isMock?: unknown;
     };
     const lat = Number(parsed.lat);
     const lng = Number(parsed.lng);
@@ -48,6 +50,7 @@ function parseGpsJson(raw: string): NativeGpsCoordinates | null {
       lng,
       accuracy: Number.isFinite(Number(parsed.accuracy)) ? Number(parsed.accuracy) : undefined,
       at: Number.isFinite(Number(parsed.at)) ? Number(parsed.at) : undefined,
+      isMock: parsed.isMock === true || parsed.isMock === 'true',
     };
   } catch {
     return null;

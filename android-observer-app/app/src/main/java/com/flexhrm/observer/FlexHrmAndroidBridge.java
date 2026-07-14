@@ -143,6 +143,19 @@ public class FlexHrmAndroidBridge {
   }
 
   @JavascriptInterface
+  public void fetchUrlAsDataUrl(String url, String bearerToken) {
+    if (url == null || url.trim().isEmpty()) {
+      webView.post(
+          () ->
+              webView.evaluateJavascript(
+                  "window.__flexHrmOnUrlFetched && window.__flexHrmOnUrlFetched(false,\"\",\"Missing image URL\")",
+                  null));
+      return;
+    }
+    MediaNativeHelper.fetchUrlAsDataUrl(webView, url.trim(), bearerToken);
+  }
+
+  @JavascriptInterface
   public void printPdfFromUrl(String url, String bearerToken, String filename) {
     if (url == null || url.trim().isEmpty()) {
       PdfNativeHelper.notifyJs(

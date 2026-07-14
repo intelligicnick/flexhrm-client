@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import PasswordInput from "../../components/PasswordInput";
 import { apiUrl, formatNetworkFetchError } from "../../api";
+import { getApiBase } from "../../env";
+import { debugSessionLog, getDebugSessionLogs } from "../../lib/debug-session-log";
 import { getSupervisorDeviceId, getSupervisorDeviceName } from "../../lib/supervisor-device";
 import { supervisorFetch } from "../../lib/supervisor-fetch";
 import { clearSupervisorImpersonatedFlag } from "../../lib/supervisor-login";
@@ -65,9 +67,31 @@ function LoginForm() {
   const [needsDeviceTransferConfirm, setNeedsDeviceTransferConfirm] = useState(false);
   const [registeredToName, setRegisteredToName] = useState("");
   const [confirmDeviceTransfer, setConfirmDeviceTransfer] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
 
   const deviceId = getSupervisorDeviceId();
   const deviceName = getSupervisorDeviceName();
+
+  useEffect(() => {
+    const apiBase = getApiBase();
+    const loginUrl = apiUrl("/api/auth/supervisor/login");
+    // #region agent log
+    debugSessionLog(
+      "SupervisorLoginPage.tsx:mount",
+      "login page ready",
+      {
+        apiBase,
+        loginUrl,
+        origin: window.location.origin,
+        userAgent: navigator.userAgent,
+        hasNativeBridge: Boolean(window.FlexHrmAndroid?.getApiBase),
+        nativeApiBase: window.FlexHrmAndroid?.getApiBase?.() || "",
+      },
+      "B",
+    );
+    // #endregion
+    setDebugInfo(`API: ${apiBase || "(empty)"}`);
+  }, []);
 
   useEffect(() => {
     if (searchParams.get("reason") === "device_mismatch") {
@@ -109,7 +133,20 @@ function LoginForm() {
   }, [navigate]);
 
   const completeLogin = async (opts?: { confirmTransfer?: boolean }) => {
-    const res = await fetch(apiUrl("/api/auth/supervisor/login"), {
+    const loginUrl = apiUrl("/api/auth/supervisor/login");
+    // #region agent log
+    debugSessionLog(
+      "SupervisorLoginPage.tsx:completeLogin",
+      "login attempt start",
+      {
+        loginUrl,
+        apiBase: getApiBase(),
+        deviceIdPresent: Boolean(deviceId),
+      },
+      "D",
+    );
+    // #endregion
+    const res = await fetch(loginUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -168,7 +205,28 @@ function LoginForm() {
     try {
       await completeLogin();
     } catch (err: unknown) {
-      setError(formatNetworkFetchError(err, "Login failed.").message);
+      const formatted = formatNetworkFetchError(err, "Login failed.");
+      const logs = getDebugSessionLogs();
+      const last = logs[logs.length - 1];
+      // #region agent log
+      debugSessionLog(
+        "SupervisorLoginPage.tsx:handleSubmit",
+        "login attempt failed",
+        {
+          errorName: err instanceof Error ? err.name : typeof err,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          formattedMessage: formatted.message,
+          lastFetchLog: last?.data ?? null,
+        },
+        "D",
+      );
+      // #endregion
+      setDebugInfo(
+        `API: ${getApiBase() || "(empty)"} | ${formatted.message}${
+          last?.data?.errorMessage ? ` | raw: ${String(last.data.errorMessage)}` : ""
+        }`,
+      );
+      setError(formatted.message);
     } finally {
       setLoading(false);
     }
@@ -359,6 +417,11 @@ function LoginForm() {
         <p className="text-[11px] text-slate-400 mt-6 text-center max-w-sm mx-auto leading-relaxed">
           {t("adminLoginHint")}
         </p>
+        {debugInfo && (
+          <p className="text-[10px] text-slate-500 mt-3 text-center max-w-sm mx-auto leading-relaxed break-all font-mono">
+            Debug: {debugInfo}
+          </p>
+        )}
       </div>
       )}
     </div>

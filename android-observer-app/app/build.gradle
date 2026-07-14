@@ -10,8 +10,8 @@ android {
         applicationId 'com.flexhrm.observer'
         minSdk 24
         targetSdk 35
-        versionCode 6
-        versionName '1.0.6'
+        versionCode 8
+        versionName '1.0.8'
 
         buildConfigField 'String', 'OBSERVER_URL',
                 '"https://appassets.androidplatform.net/observer/login"'
@@ -21,10 +21,31 @@ android {
                 "\"${project.findProperty('API_ORIGIN') ?: 'https://mediumseagreen-chimpanzee-998149.hostingersite.com'}/api\""
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            if (project.hasProperty('FLEXHRM_RELEASE_STORE_FILE')) {
+                storeFile file(FLEXHRM_RELEASE_STORE_FILE)
+                storePassword FLEXHRM_RELEASE_STORE_PASSWORD
+                keyAlias FLEXHRM_RELEASE_KEY_ALIAS
+                keyPassword FLEXHRM_RELEASE_KEY_PASSWORD
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (project.hasProperty('FLEXHRM_RELEASE_STORE_FILE')) {
+                signingConfig signingConfigs.release
+            } else {
+                // Local sideload builds: sign with the debug keystore so the APK installs.
+                signingConfig signingConfigs.debug
+            }
         }
         debug {
             applicationIdSuffix '.debug'
@@ -34,10 +55,6 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    buildFeatures {
-        buildConfig true
     }
 }
 

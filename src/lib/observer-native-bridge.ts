@@ -7,6 +7,7 @@ type ObserverNativeBridge = {
   sharePdfFromBase64?: (base64: string, filename: string, title: string) => void;
   openPdfFromUrl?: (url: string, bearerToken: string, filename: string) => void;
   printPdfFromUrl?: (url: string, bearerToken: string, filename: string) => void;
+  fetchUrlAsDataUrl?: (url: string, bearerToken: string) => void;
 };
 
 declare global {
@@ -14,6 +15,7 @@ declare global {
     __flexHrmOnPdfShareDone?: (ok: boolean, message?: string) => void;
     __flexHrmOnPdfOpenDone?: (ok: boolean, message?: string) => void;
     __flexHrmOnPdfPrintDone?: (ok: boolean, message?: string) => void;
+    __flexHrmOnUrlFetched?: (ok: boolean, dataUrl?: string, message?: string) => void;
   }
 }
 
@@ -119,4 +121,39 @@ export async function printPdfViaNative(url: string, filename: string): Promise<
   const token = getObserverToken() || "";
   bridge.printPdfFromUrl(url, token, filename);
   await pending;
+}
+
+export function canUseObserverNativeUrlFetch(): boolean {
+  const bridge = getBridge();
+  return Boolean(bridge?.fetchUrlAsDataUrl && bridge?.isNativeApp?.());
+}
+
+export async function fetchUrlAsDataUrlViaNative(url: string): Promise<string> {
+  const bridge = getBridge();
+  if (!bridge?.fetchUrlAsDataUrl) {
+    throw new Error("Native image fetch is not available.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Image download timed out."));
+    }, 90_000);
+
+    const cleanup = () => {
+      window.clearTimeout(timer);
+      delete window.__flexHrmOnUrlFetched;
+    };
+
+    window.__flexHrmOnUrlFetched = (ok: boolean, dataUrl?: string, message?: string) => {
+      cleanup();
+      if (ok && dataUrl?.trim()) {
+        resolve(dataUrl.trim());
+        return;
+      }
+      reject(new Error(message || "Could not load image."));
+    };
+
+    bridge.fetchUrlAsDataUrl!(url, getObserverToken() || "");
+  });
 }

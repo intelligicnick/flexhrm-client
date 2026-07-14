@@ -1,5 +1,6 @@
 import { DEFAULT_PRODUCTION_API_BASE } from "./api-config";
 import { PRODUCTION_ID_CARD_VERIFY_BASE } from "./deploy-urls";
+import { debugSessionLog } from "./lib/debug-session-log";
 
 /** Injected at build time from FLEXHRM_API_BASE / PUBLIC_API_URL / VITE_API_BASE. */
 declare const __FLEXHRM_API_BASE__: string;
@@ -63,14 +64,52 @@ function readNativeApiBase(): string {
 /** API origin. Local/dev uses same-origin /api proxy; remote production uses build-time API base. */
 export function getApiBase(): string {
   const nativeBase = readNativeApiBase();
-  if (nativeBase) return nativeBase;
+  if (nativeBase) {
+    // #region agent log
+    debugSessionLog(
+      "env.ts:getApiBase",
+      "resolved native bridge api base",
+      {
+        source: "nativeBridge",
+        apiBase: nativeBase,
+        host: typeof window !== "undefined" ? window.location.hostname : "",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+      },
+      "C",
+    );
+    // #endregion
+    return nativeBase;
+  }
 
   if (isNativeSupervisorShell() || isNativeObserverShell()) {
-    return DEFAULT_PRODUCTION_API_BASE.replace(/\/$/, "");
+    const fallback = DEFAULT_PRODUCTION_API_BASE.replace(/\/$/, "");
+    // #region agent log
+    debugSessionLog(
+      "env.ts:getApiBase",
+      "resolved native shell fallback api base",
+      {
+        source: "nativeShellFallback",
+        apiBase: fallback,
+        host: typeof window !== "undefined" ? window.location.hostname : "",
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+      },
+      "B",
+    );
+    // #endregion
+    return fallback;
   }
 
   if (import.meta.env.DEV || isLocalUiHost()) return "";
-  return (__FLEXHRM_API_BASE__ || "").replace(/\/$/, "");
+  const built = (__FLEXHRM_API_BASE__ || "").replace(/\/$/, "");
+  // #region agent log
+  debugSessionLog(
+    "env.ts:getApiBase",
+    "resolved build-time api base",
+    { source: "buildDefine", apiBase: built },
+    "B",
+  );
+  // #endregion
+  return built;
 }
 
 /** NestJS origin for the Chrome extension (direct API host, not the UI dev server). */

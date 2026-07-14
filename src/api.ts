@@ -1,5 +1,6 @@
 import { getApiBase } from "./env";
 import { clearCsrfToken, getCsrfToken } from "./lib/csrf";
+import { debugSessionLog } from "./lib/debug-session-log";
 import { getObserverToken, isObserverNativeClient } from "./lib/observer-session";
 
 export function apiUrl(endpoint: string): string {
@@ -156,8 +157,57 @@ export function setupFetchInterceptor(): void {
 
     let response: Response;
     try {
+      // #region agent log
+      if (isApiCall) {
+        debugSessionLog(
+          "api.ts:fetch",
+          "api fetch start",
+          {
+            url: resolveFetchUrl(resolvedInput),
+            method,
+            credentials: resolvedInit.credentials ?? "default",
+            isPublicApi,
+            origin: typeof window !== "undefined" ? window.location.origin : "",
+            apiBase: getApiBase(),
+          },
+          "A",
+        );
+      }
+      // #endregion
       response = await originalFetch(resolvedInput, resolvedInit);
+      // #region agent log
+      if (isApiCall) {
+        debugSessionLog(
+          "api.ts:fetch",
+          "api fetch response",
+          {
+            url: resolveFetchUrl(resolvedInput),
+            status: response.status,
+            ok: response.ok,
+            type: response.type,
+          },
+          "A",
+        );
+      }
+      // #endregion
     } catch (err) {
+      // #region agent log
+      if (isApiCall) {
+        debugSessionLog(
+          "api.ts:fetch",
+          "api fetch failed",
+          {
+            url: resolveFetchUrl(resolvedInput),
+            errorName: err instanceof Error ? err.name : typeof err,
+            errorMessage: err instanceof Error ? err.message : String(err),
+            isNetworkFetchError: isNetworkFetchError(err),
+            credentials: resolvedInit.credentials ?? "default",
+            apiBase: getApiBase(),
+          },
+          "A",
+        );
+      }
+      // #endregion
       if (isApiCall) throw formatNetworkFetchError(err);
       throw err;
     }

@@ -16,6 +16,9 @@ export interface VisitGpsCoords {
   lng: number;
   locationLabel: string;
   placeName: string;
+  accuracyMeters?: number;
+  isMock?: boolean;
+  capturedAt?: string;
 }
 
 export interface StampedVisitPhoto {
@@ -32,6 +35,8 @@ export interface StampedVisitPhoto {
   lat: number;
   lng: number;
   locationLabel: string;
+  accuracyMeters?: number;
+  isMock?: boolean;
 }
 
 function parseDataUrl(dataUrl: string): { mime: string; rawBase64: string } {
@@ -264,7 +269,11 @@ function getCurrentPositionOnce(options: PositionOptions): Promise<GeolocationPo
   });
 }
 
-async function tryWebGeolocation(): Promise<{ lat: number; lng: number } | null> {
+async function tryWebGeolocation(): Promise<{
+  lat: number;
+  lng: number;
+  accuracyMeters?: number;
+} | null> {
   const attempts: PositionOptions[] = [
     { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
     { enableHighAccuracy: true, timeout: 20_000, maximumAge: 15_000 },
@@ -278,7 +287,13 @@ async function tryWebGeolocation(): Promise<{ lat: number; lng: number } | null>
       const lng = pos.coords.longitude;
       if (!isValidCoords(lat, lng)) continue;
       cachePosition(lat, lng);
-      return { lat, lng };
+      return {
+        lat,
+        lng,
+        accuracyMeters: Number.isFinite(pos.coords.accuracy)
+          ? pos.coords.accuracy
+          : undefined,
+      };
     } catch {
       /* try next */
     }
@@ -287,34 +302,63 @@ async function tryWebGeolocation(): Promise<{ lat: number; lng: number } | null>
   return null;
 }
 
-async function readNativeCoordsFresh(): Promise<{ lat: number; lng: number } | null> {
+async function readNativeCoordsFresh(): Promise<{
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  isMock?: boolean;
+} | null> {
   const immediate = readNativeGpsCoordinates();
   if (immediate) {
     cachePosition(immediate.lat, immediate.lng);
-    return { lat: immediate.lat, lng: immediate.lng };
+    return immediate;
   }
 
   const fresh = await requestFreshNativeGpsCoordinates(22_000);
   if (!fresh) return null;
 
   cachePosition(fresh.lat, fresh.lng);
-  return { lat: fresh.lat, lng: fresh.lng };
+  return fresh;
 }
 
-async function resolveCoordsMandatory(): Promise<{ lat: number; lng: number }> {
+async function resolveCoordsMandatory(): Promise<{
+  lat: number;
+  lng: number;
+  accuracyMeters?: number;
+  isMock?: boolean;
+  capturedAt: string;
+}> {
   for (let attempt = 0; attempt < GPS_RETRY_ATTEMPTS; attempt++) {
     warmupNativeGps();
 
     if (isFlexHrmNativeApp()) {
       const nativeCoords = await readNativeCoordsFresh();
-      if (nativeCoords) return nativeCoords;
+      if (nativeCoords) {
+        return {
+          lat: nativeCoords.lat,
+          lng: nativeCoords.lng,
+          accuracyMeters: nativeCoords.accuracy,
+          isMock: nativeCoords.isMock,
+          capturedAt: new Date().toISOString(),
+        };
+      }
     }
 
     const cached = readCachedPosition();
-    if (cached) return cached;
+    if (cached) {
+      return {
+        ...cached,
+        capturedAt: new Date().toISOString(),
+      };
+    }
 
     const webCoords = await tryWebGeolocation();
-    if (webCoords) return webCoords;
+    if (webCoords) {
+      return {
+        ...webCoords,
+        capturedAt: new Date().toISOString(),
+      };
+    }
 
     if (attempt < GPS_RETRY_ATTEMPTS - 1) {
       await sleep(1500);
@@ -355,7 +399,13 @@ async function resolvePlaceNameMandatory(
 async function buildMandatoryVisitLocation(
   resolvePlaceName?: PlaceNameResolver,
 ): Promise<VisitGpsCoords> {
-  const { lat, lng } = await resolveCoordsMandatory();
+  const coords = await resolveCoordsMandatory();
+  const { lat, lng } = coords;
+  if (coords.isMock) {
+    throw new Error(
+      "Mock GPS detected. Disable fake location apps and try again at the school.",
+    );
+  }
   const resolvedPlaceName = await resolvePlaceNameMandatory(lat, lng, resolvePlaceName);
   const trimmedPlace = resolvedPlaceName.trim();
   const placeName = trimmedPlace || formatLatLngDecimal(lat, lng);
@@ -364,6 +414,9 @@ async function buildMandatoryVisitLocation(
     lng,
     placeName,
     locationLabel: buildLocationLabel(lat, lng, placeName),
+    accuracyMeters: coords.accuracyMeters,
+    isMock: coords.isMock,
+    capturedAt: coords.capturedAt,
   };
 }
 
@@ -553,5 +606,7 @@ export async function stampVisitPhoto(
     lat: location.lat,
     lng: location.lng,
     locationLabel: location.locationLabel,
+    accuracyMeters: location.accuracyMeters,
+    isMock: location.isMock,
   };
 }

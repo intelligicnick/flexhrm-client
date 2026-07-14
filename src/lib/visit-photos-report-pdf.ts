@@ -1,5 +1,6 @@
 import { loadPdfExport } from "./lazy-export-deps";
 import { resolvePhotoSrc } from "./media-url";
+import { fetchVisitPhotoDataUrl } from "./visit-photo-fetch";
 import type { EnrichedSchoolVisit } from "./visit-enrichment";
 import { getDateRangeForPeriod } from "./supervisor-dates";
 import type { ObserverPeriod } from "../pages/observer/ObserverPeriodTabs";
@@ -8,9 +9,10 @@ import type { SchoolVisitPhoto } from "../types";
 export type VisitPhotosReportFilters = {
   period: ObserverPeriod;
   supervisorName?: string;
-  district?: string;
   block?: string;
 };
+
+const MAX_PDF_IMAGE_DIM = 1600;
 
 function formatHumanDate(iso: string): string {
   const parts = iso.split("-");
@@ -38,33 +40,41 @@ function formatMaterials(visit: EnrichedSchoolVisit): string {
   return visit.materialsGiven.map((m) => `${m.item} × ${m.qty}`).join(", ");
 }
 
-async function fetchImageDataUrl(src: string): Promise<string> {
-  if (!src.trim()) throw new Error("Missing image URL");
-  if (src.startsWith("data:")) return src;
-  const response = await fetch(src, { credentials: "include", mode: "cors" });
-  if (!response.ok) throw new Error(`Could not load image (${response.status})`);
-  const blob = await response.blob();
+function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Could not read image data"));
-    reader.readAsDataURL(blob);
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not decode image"));
+    image.src = dataUrl;
   });
 }
 
-function imageFormatFromDataUrl(dataUrl: string): "JPEG" | "PNG" | "WEBP" {
-  if (dataUrl.includes("image/png")) return "PNG";
-  if (dataUrl.includes("image/webp")) return "WEBP";
-  return "JPEG";
-}
+async function normalizeImageForPdf(
+  dataUrl: string,
+): Promise<{ dataUrl: string; width: number; height: number }> {
+  const image = await loadImageElement(dataUrl);
+  let width = image.naturalWidth || image.width;
+  let height = image.naturalHeight || image.height;
+  if (!width || !height) {
+    throw new Error("Could not measure image");
+  }
 
-async function measureImage(dataUrl: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.width, height: img.height });
-    img.onerror = () => reject(new Error("Could not measure image"));
-    img.src = dataUrl;
-  });
+  const scale = Math.min(1, MAX_PDF_IMAGE_DIM / Math.max(width, height));
+  const drawWidth = Math.max(1, Math.round(width * scale));
+  const drawHeight = Math.max(1, Math.round(height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = drawWidth;
+  canvas.height = drawHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not prepare image for PDF");
+  ctx.drawImage(image, 0, 0, drawWidth, drawHeight);
+
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+    width: drawWidth,
+    height: drawHeight,
+  };
 }
 
 type DistrictGroup = {
@@ -147,7 +157,6 @@ export async function buildVisitPhotosReportPdf(
 
   const filterLines = [
     filters.supervisorName ? `Supervisor: ${filters.supervisorName}` : "",
-    filters.district ? `District: ${filters.district}` : "",
     filters.block ? `Block: ${filters.block}` : "",
   ].filter(Boolean);
 
@@ -210,10 +219,8 @@ export async function buildVisitPhotosReportPdf(
             onProgress?.(`Adding photo ${photoIndex + 1} of ${photos.length} for ${schoolName}…`);
 
             try {
-              const src = resolvePhotoSrc(photo);
-              const dataUrl = await fetchImageDataUrl(src);
-              const format = imageFormatFromDataUrl(dataUrl);
-              const { width, height } = await measureImage(dataUrl);
+              const rawDataUrl = await fetchVisitPhotoDataUrl(visit.id, photo);
+              const { dataUrl, width, height } = await normalizeImageForPdf(rawDataUrl);
 
               const maxImageHeight = 180;
               const scale = Math.min(contentWidth / width, maxImageHeight / height, 1);
@@ -221,7 +228,7 @@ export async function buildVisitPhotosReportPdf(
               const drawHeight = height * scale;
 
               ensureSpace(drawHeight + 18);
-              doc.addImage(dataUrl, format, margin + 4, y, drawWidth, drawHeight, undefined, "FAST");
+              doc.addImage(dataUrl, "JPEG", margin + 4, y, drawWidth, drawHeight, undefined, "FAST");
               y += drawHeight + 4;
 
               const captionParts = [

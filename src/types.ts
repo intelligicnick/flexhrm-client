@@ -271,6 +271,16 @@ export interface SchoolWork {
   assignedSupervisorId: string;
   materialCost: number;
   remarks: string;
+  lat?: number;
+  lng?: number;
+  locationVerified?: boolean;
+  locationVerifiedAt?: string;
+  locationSource?: string;
+  locationConfidence?: string;
+  geofenceRadiusM?: number;
+  googlePlaceId?: string;
+  googleMapsUrl?: string;
+  matchedPlaceName?: string;
   monthlyExpenseLedger?: Record<string, SchoolMonthlyExpenseEntry>;
   monthlyWorkdaysLedger?: Record<string, SchoolMonthlyWorkdaysEntry>;
 }
@@ -630,10 +640,22 @@ export interface SchoolVisit {
   notes: string;
   photos?: SchoolVisitPhoto[];
   photoCount?: number;
-  gpsLocation?: { lat: number; lng: number; locationLabel?: string };
+  gpsLocation?: {
+    lat: number;
+    lng: number;
+    locationLabel?: string;
+    accuracyMeters?: number;
+    isMock?: boolean;
+    capturedAt?: string;
+  };
   status: "submitted" | "approved" | "rejected" | "pending";
   visitType?: "commitment" | "adhoc";
   commitmentId?: string;
+  distanceToSchoolM?: number;
+  gpsAccuracyM?: number;
+  locationMatchStatus?: string;
+  schoolLat?: number;
+  schoolLng?: number;
 }
 
 export interface SupervisorRequestPhoto {

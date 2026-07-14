@@ -18,14 +18,20 @@ import {
   type SupervisorHistoryFilter,
 } from "../lib/supervisor-dates";
 import { resolveSupervisorLabel } from "../lib/resolve-supervisor-label";
-import { SchoolSupervisor, SchoolVisit } from "../types";
+import { SchoolSupervisor, SchoolVisit, SchoolWork } from "../types";
 import { DateInput } from "./ui/DateInput";
 import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
 import { formatLatLngDecimal, isValidGpsCoord } from "../lib/gps-coords";
+import {
+  buildDualPinGoogleMapsUrl,
+  buildDualPinOsmUrl,
+  extractVisitSupervisorCoords,
+} from "../lib/map-links";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
   supervisors: SchoolSupervisor[];
+  schools?: SchoolWork[];
   onUpdateStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
   onBulkUpdateStatus?: (ids: string[], status: "approved" | "rejected") => Promise<boolean>;
   readOnly?: boolean;
@@ -81,11 +87,70 @@ function VisitTypeBadge({ visitType }: { visitType?: SchoolVisit["visitType"] })
 interface VisitDetailsProps {
   visit: SchoolVisit;
   readOnly: boolean;
+  schools?: SchoolWork[];
   onUpdateStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
   onViewPhoto: (visit: SchoolVisit, photoIndex: number) => void;
 }
 
-function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDetailsProps) {
+function VisitLocationLinks({
+  visit,
+  schools,
+}: {
+  visit: SchoolVisit;
+  schools?: SchoolWork[];
+}) {
+  const supervisor = extractVisitSupervisorCoords(visit);
+  let schoolLat = Number(visit.schoolLat);
+  let schoolLng = Number(visit.schoolLng);
+  if (!isValidGpsCoord(schoolLat, schoolLng) && schools?.length) {
+    const school = schools.find((s) => s.id === visit.schoolWorkId);
+    if (school && school.locationVerified) {
+      schoolLat = Number(school.lat);
+      schoolLng = Number(school.lng);
+    }
+  }
+  if (
+    !supervisor ||
+    !isValidGpsCoord(schoolLat, schoolLng) ||
+    !isValidGpsCoord(supervisor.lat, supervisor.lng)
+  ) {
+    return null;
+  }
+  const googleUrl = buildDualPinGoogleMapsUrl(
+    schoolLat,
+    schoolLng,
+    supervisor.lat,
+    supervisor.lng,
+  );
+  const osmUrl = buildDualPinOsmUrl(schoolLat, schoolLng, supervisor.lat, supervisor.lng);
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      <a
+        href={googleUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-[10px] font-bold text-[#ff791a] hover:underline"
+      >
+        <MapPin size={12} /> View school + supervisor on Google Maps
+      </a>
+      <a
+        href={osmUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 hover:underline"
+      >
+        OpenStreetMap
+      </a>
+      {typeof visit.distanceToSchoolM === "number" && visit.distanceToSchoolM > 0 && (
+        <span className="text-[10px] text-slate-500">
+          Distance: {visit.distanceToSchoolM} m
+        </span>
+      )}
+    </div>
+  );
+}
+
+function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto, schools }: VisitDetailsProps) {
   return (
     <div className="p-3 space-y-3 text-xs">
       {visit.notes && <p className="text-slate-600">{visit.notes}</p>}
@@ -142,6 +207,7 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDet
           )}
         </p>
       )}
+      <VisitLocationLinks visit={visit} schools={schools} />
       {!readOnly && visit.status === "submitted" && (
         <div className="flex gap-2 pt-2">
           <button
@@ -167,6 +233,7 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto }: VisitDet
 export default function SupervisorVisitsPanel({
   visits,
   supervisors,
+  schools,
   onUpdateStatus,
   onBulkUpdateStatus,
   readOnly = false,
@@ -560,6 +627,7 @@ export default function SupervisorVisitsPanel({
                 <VisitDetails
                   visit={visit}
                   readOnly={readOnly}
+                  schools={schools}
                   onUpdateStatus={onUpdateStatus}
                   onViewPhoto={openPhoto}
                 />
@@ -626,6 +694,7 @@ export default function SupervisorVisitsPanel({
                 <VisitDetails
                   visit={visit}
                   readOnly={readOnly}
+                  schools={schools}
                   onUpdateStatus={onUpdateStatus}
                   onViewPhoto={openPhoto}
                 />

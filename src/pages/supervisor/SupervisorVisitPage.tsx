@@ -14,7 +14,7 @@ import {
   startGpsWarmup,
 } from "../../lib/visit-photo";
 import { captureLivePhoto } from "../../lib/live-camera";
-import { formatLatLngDecimal } from "../../lib/gps-coords";
+import { formatLatLngDecimal, distanceMeters, isValidGpsCoord } from "../../lib/gps-coords";
 import { formatDisplayDate, todayIsoInKolkata } from "../../lib/supervisor-dates";
 import { pointsForVisit } from "../../lib/supervisor-gamification";
 import { getMaterialLabel } from "../../lib/supervisor-materials";
@@ -103,6 +103,30 @@ export default function SupervisorVisitPage() {
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  const schoolPinReady = useMemo(
+    () =>
+      !!school?.locationVerified &&
+      isValidGpsCoord(Number(school?.lat), Number(school?.lng)),
+    [school],
+  );
+
+  const distanceToSchoolM = useMemo(() => {
+    if (!schoolPinReady || !gpsCoords || !school) return null;
+    return Math.round(
+      distanceMeters(gpsCoords.lat, gpsCoords.lng, Number(school.lat), Number(school.lng)),
+    );
+  }, [schoolPinReady, gpsCoords, school]);
+
+  const geofenceRadiusM = useMemo(() => {
+    if (!school) return 100;
+    const explicit = Number(school.geofenceRadiusM);
+    if (explicit > 0) return explicit;
+    return school.locationConfidence === "exact" ? 100 : 400;
+  }, [school]);
+
+  const withinSchoolGeofence =
+    distanceToSchoolM != null ? distanceToSchoolM <= geofenceRadiusM : false;
 
   const refreshGps = async () => {
     setGpsRefreshing(true);
@@ -340,7 +364,14 @@ export default function SupervisorVisitPage() {
       materialsGiven: materials,
       photos: photos.map(({ previewUrl: _previewUrl, thumbPreviewUrl: _thumbPreviewUrl, ...photo }) => photo),
       gpsLocation: photos[0]
-        ? { lat: photos[0].lat, lng: photos[0].lng, locationLabel: photos[0].locationLabel }
+        ? {
+            lat: photos[0].lat,
+            lng: photos[0].lng,
+            locationLabel: photos[0].locationLabel,
+            accuracyMeters: photos[0].accuracyMeters,
+            isMock: photos[0].isMock,
+            capturedAt: photos[0].takenAt,
+          }
         : undefined,
     };
     try {
@@ -382,7 +413,14 @@ export default function SupervisorVisitPage() {
   };
 
   const materialsCount = materials.length;
-  const canSubmit = photos.length > 0 && !saving && !capturingPhoto && !visitBlocked && gpsReady === true;
+  const canSubmit =
+    photos.length > 0 &&
+    !saving &&
+    !capturingPhoto &&
+    !visitBlocked &&
+    gpsReady === true &&
+    schoolPinReady &&
+    withinSchoolGeofence;
 
   if (schoolLoading) {
     return <SupervisorLoadingScreen message={t("loading")} />;
@@ -483,6 +521,31 @@ export default function SupervisorVisitPage() {
           <p className="font-bold">{t("visitCooldownTitle")}</p>
           <p className="mt-1 text-xs">
             {cooldownHint}
+          </p>
+        </div>
+      )}
+
+      {!schoolPinReady && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="font-bold">School location not verified</p>
+          <p className="mt-1 text-xs">
+            Admin must verify this school&apos;s Google Maps pin before visits can be submitted.
+          </p>
+        </div>
+      )}
+
+      {schoolPinReady && gpsReady === true && distanceToSchoolM != null && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            withinSchoolGeofence
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-red-50 border-red-200 text-red-800"
+          }`}
+        >
+          <p className="font-semibold">
+            {withinSchoolGeofence
+              ? `At school area (${distanceToSchoolM} m from pin)`
+              : `Too far from school (${distanceToSchoolM} m · need within ${geofenceRadiusM} m)`}
           </p>
         </div>
       )}

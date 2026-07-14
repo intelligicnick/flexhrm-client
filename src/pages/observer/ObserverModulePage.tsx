@@ -54,14 +54,7 @@ import type { Employee, Renewal, SchoolPartner, SchoolVisit, SchoolVisitPhoto } 
 import ObserverSearchInput from "./ObserverSearchInput";
 import { ObserverDetailSheet } from "./ObserverDetailSheet";
 import { ObserverPeriodTabs, type ObserverPeriod } from "./ObserverPeriodTabs";
-import {
-  ObserverSupervisorSelect,
-  ObserverDistrictSelect,
-  ObserverBlockSelect,
-  ObserverVisitViewModeTabs,
-  type VisitViewMode,
-} from "./ObserverPeriodTabs";
-import { ObserverVisitGroupList } from "./ObserverVisitGroupList";
+import { ObserverSupervisorSelect, ObserverBlockSelect } from "./ObserverPeriodTabs";
 import { tenderListSubtitleLines, tenderMatchesObserverSearch } from "../../lib/tender-display-helpers";
 import {
   buildVisitPhotosReportFile,
@@ -69,7 +62,7 @@ import {
   formatVisitPhotosPeriodLabel,
 } from "../../lib/visit-photos-report-pdf";
 import { shareGeneratedPdfFile } from "./observer-share";
-import { enrichVisits, groupVisits, type EnrichedSchoolVisit } from "../../lib/visit-enrichment";
+import { enrichVisits, type EnrichedSchoolVisit } from "../../lib/visit-enrichment";
 import {
   ObserverCommitmentActions,
   ObserverContractStatusActions,
@@ -254,11 +247,9 @@ export default function ObserverModulePage() {
 
   const [moduleSearch, setModuleSearch] = useState("");
   const [detail, setDetail] = useState<DetailState | null>(null);
-  const [visitPeriod, setVisitPeriod] = useState<ObserverPeriod>("month");
+  const [visitPeriod, setVisitPeriod] = useState<ObserverPeriod>("day");
   const [visitSupervisorId, setVisitSupervisorId] = useState("all");
-  const [visitDistrict, setVisitDistrict] = useState("all");
   const [visitBlock, setVisitBlock] = useState("all");
-  const [visitViewMode, setVisitViewMode] = useState<VisitViewMode>("list");
   const [visitPdfBusy, setVisitPdfBusy] = useState(false);
   const [visitPdfMessage, setVisitPdfMessage] = useState<string | null>(null);
   const [commitmentPeriod, setCommitmentPeriod] = useState<ObserverPeriod>("month");
@@ -517,31 +508,20 @@ export default function ObserverModulePage() {
     [rawSchoolVisits, rawSchoolWorks],
   );
 
-  const visitDistrictOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(enrichedVisits.map((v) => v.district).filter((d): d is string => Boolean(d))),
-      ).sort(),
-    [enrichedVisits],
-  );
-
   const visitBlockOptions = useMemo(() => {
     const source =
-      visitDistrict === "all"
+      visitSupervisorId === "all"
         ? enrichedVisits
-        : enrichedVisits.filter((v) => v.district === visitDistrict);
+        : enrichedVisits.filter((v) => v.supervisorId === visitSupervisorId);
     return Array.from(
       new Set(source.map((v) => v.block).filter((b): b is string => Boolean(b))),
     ).sort();
-  }, [enrichedVisits, visitDistrict]);
+  }, [enrichedVisits, visitSupervisorId]);
 
   const filteredVisits = useMemo((): EnrichedSchoolVisit[] => {
     let items = filterByPeriod(enrichedVisits, visitPeriod, "visitDate");
     if (visitSupervisorId !== "all") {
       items = items.filter((v) => v.supervisorId === visitSupervisorId);
-    }
-    if (visitDistrict !== "all") {
-      items = items.filter((v) => v.district === visitDistrict);
     }
     if (visitBlock !== "all") {
       items = items.filter((v) => v.block === visitBlock);
@@ -563,15 +543,9 @@ export default function ObserverModulePage() {
     enrichedVisits,
     visitPeriod,
     visitSupervisorId,
-    visitDistrict,
     visitBlock,
     moduleSearch,
   ]);
-
-  const visitGroups = useMemo(
-    () => groupVisits(filteredVisits, visitViewMode),
-    [filteredVisits, visitViewMode],
-  );
 
   const filteredCommitments = useMemo(() => {
     let items = filterByPeriod(rawCommitmentDiary, commitmentPeriod, "fromDate");
@@ -792,7 +766,6 @@ export default function ObserverModulePage() {
         {
           period: visitPeriod,
           supervisorName,
-          district: visitDistrict === "all" ? undefined : visitDistrict,
           block: visitBlock === "all" ? undefined : visitBlock,
         },
         (message) => setVisitPdfMessage(message),
@@ -1124,13 +1097,8 @@ export default function ObserverModulePage() {
             <ObserverSupervisorSelect
               supervisors={rawSchoolSupervisors}
               value={visitSupervisorId}
-              onChange={setVisitSupervisorId}
-            />
-            <ObserverDistrictSelect
-              districts={visitDistrictOptions}
-              value={visitDistrict}
               onChange={(value) => {
-                setVisitDistrict(value);
+                setVisitSupervisorId(value);
                 setVisitBlock("all");
               }}
             />
@@ -1139,27 +1107,21 @@ export default function ObserverModulePage() {
               value={visitBlock}
               onChange={setVisitBlock}
             />
-            <ObserverVisitViewModeTabs mode={visitViewMode} onModeChange={setVisitViewMode} />
           </div>
-          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor, district, block…" />
+          <ModuleSearch value={moduleSearch} onChange={setModuleSearch} placeholder="Search school, supervisor, block…" />
           {filteredVisits.length === 0 ? (
             <ObserverEmptyState icon={ClipboardList} title="No visits found" />
-          ) : visitViewMode === "list" ? (
+          ) : (
             filteredVisits.map((v) => (
               <ObserverListRow
                 key={v.id}
                 title={v.schoolName}
-                subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)} · ${v.district}`}
+                subtitle={`${v.supervisorName} · ${formatDate(v.visitDate)} · ${v.block || "—"}`}
                 badge={v.status}
                 badgeTone={v.status === "pending" ? "amber" : v.status === "approved" ? "green" : "slate"}
                 onClick={() => openVisitDetail(v)}
               />
             ))
-          ) : (
-            <ObserverVisitGroupList
-              groups={visitGroups}
-              onVisitClick={openVisitDetail}
-            />
           )}
         </ObserverSection>
         {detail && (

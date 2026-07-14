@@ -43,6 +43,11 @@ public class FlexHrmAndroidBridge {
   }
 
   @JavascriptInterface
+  public void logDebug(String payload) {
+    android.util.Log.d("FlexHrmDebug", payload != null ? payload : "");
+  }
+
+  @JavascriptInterface
   public String getInstalledApps() {
     List<BlockedAppsScanner.InstalledApp> apps =
         BlockedAppsScanner.getAllInstalledApps(activity);
