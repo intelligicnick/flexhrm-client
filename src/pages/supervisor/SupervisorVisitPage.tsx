@@ -15,6 +15,7 @@ import {
 } from "../../lib/visit-photo";
 import { captureLivePhoto } from "../../lib/live-camera";
 import { formatLatLngDecimal, distanceMeters, isValidGpsCoord } from "../../lib/gps-coords";
+import { geofenceAreaLabel, schoolGeofenceRadiusM } from "../../lib/school-geofence";
 import { formatDisplayDate, todayIsoInKolkata } from "../../lib/supervisor-dates";
 import { pointsForVisit } from "../../lib/supervisor-gamification";
 import { getMaterialLabel } from "../../lib/supervisor-materials";
@@ -120,10 +121,13 @@ export default function SupervisorVisitPage() {
 
   const geofenceRadiusM = useMemo(() => {
     if (!school) return 100;
-    const explicit = Number(school.geofenceRadiusM);
-    if (explicit > 0) return explicit;
-    return school.locationConfidence === "exact" ? 100 : 400;
+    return schoolGeofenceRadiusM(school);
   }, [school]);
+
+  const geofenceArea = useMemo(
+    () => geofenceAreaLabel(school?.locationConfidence),
+    [school?.locationConfidence],
+  );
 
   const withinSchoolGeofence =
     distanceToSchoolM != null ? distanceToSchoolM <= geofenceRadiusM : false;
@@ -544,8 +548,8 @@ export default function SupervisorVisitPage() {
         >
           <p className="font-semibold">
             {withinSchoolGeofence
-              ? `At school area (${distanceToSchoolM} m from pin)`
-              : `Too far from school (${distanceToSchoolM} m · need within ${geofenceRadiusM} m)`}
+              ? `At ${geofenceArea} (${distanceToSchoolM} m from pin · within ${geofenceRadiusM} m)`
+              : `Too far from ${geofenceArea} (${distanceToSchoolM} m · need within ${geofenceRadiusM} m)`}
           </p>
         </div>
       )}

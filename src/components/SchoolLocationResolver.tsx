@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Loader2, MapPin, RefreshCw } from "lucide-react";
+import { locationConfidenceLabel } from "../lib/school-geofence";
 import { SchoolWork } from "../types";
 
 interface SchoolLocationResolverProps {
@@ -119,7 +120,8 @@ export default function SchoolLocationResolver({
           School Google Maps Pins
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          One-time lookup per school using Google Places. Saves verified pins for visit geofencing.
+          Looks up each school on Google first (100 m geofence). If not found, uses the village name from
+          the school title (400 m geofence) so supervisors can submit visits from the school or village.
         </p>
       </div>
 
@@ -216,12 +218,16 @@ export default function SchoolLocationResolver({
                     <p className="font-semibold text-slate-800">{row.schoolName}</p>
                     <p className="text-slate-400">{row.udise}</p>
                   </td>
-                  <td className="p-2 capitalize">{row.status.replace("_", " ")}</td>
+                  <td className="p-2 capitalize">
+                    {row.status.replace("_", " ")}
+                    {row.locationConfidence && (
+                      <span className="block text-[10px] text-slate-400 normal-case">
+                        {locationConfidenceLabel(row.locationConfidence)}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-2">
                     {row.matchedPlaceName || "—"}
-                    {row.locationConfidence && (
-                      <span className="block text-[10px] text-slate-400">{row.locationConfidence}</span>
-                    )}
                   </td>
                   <td className="p-2">
                     {row.googleMapsUrl ? (
