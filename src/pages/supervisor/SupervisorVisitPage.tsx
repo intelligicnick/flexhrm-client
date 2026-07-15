@@ -16,6 +16,7 @@ import {
 import { captureLivePhoto } from "../../lib/live-camera";
 import { formatLatLngDecimal, distanceMeters, isValidGpsCoord } from "../../lib/gps-coords";
 import { geofenceAreaLabel, schoolGeofenceRadiusM } from "../../lib/school-geofence";
+import { isUnsafeSchoolPin } from "../../lib/school-place-match";
 import { formatDisplayDate, todayIsoInKolkata } from "../../lib/supervisor-dates";
 import { pointsForVisit } from "../../lib/supervisor-gamification";
 import { getMaterialLabel } from "../../lib/supervisor-materials";
@@ -105,10 +106,19 @@ export default function SupervisorVisitPage() {
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
 
+  const schoolPinInvalid = useMemo(
+    () =>
+      !!school?.locationVerified &&
+      isValidGpsCoord(Number(school?.lat), Number(school?.lng)) &&
+      isUnsafeSchoolPin(school),
+    [school],
+  );
+
   const schoolPinReady = useMemo(
     () =>
       !!school?.locationVerified &&
-      isValidGpsCoord(Number(school?.lat), Number(school?.lng)),
+      isValidGpsCoord(Number(school?.lat), Number(school?.lng)) &&
+      !isUnsafeSchoolPin(school),
     [school],
   );
 
@@ -531,9 +541,13 @@ export default function SupervisorVisitPage() {
 
       {!schoolPinReady && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <p className="font-bold">School location not verified</p>
+          <p className="font-bold">
+            {schoolPinInvalid ? "School pin needs correction" : "School location not verified"}
+          </p>
           <p className="mt-1 text-xs">
-            Admin must verify this school&apos;s Google Maps pin before visits can be submitted.
+            {schoolPinInvalid
+              ? "The saved pin looks wrong (e.g. block office or another village). Admin must re-resolve this school or its village before visits can be submitted."
+              : "Admin must verify this school's Google Maps pin (school or village) before visits can be submitted."}
           </p>
         </div>
       )}

@@ -1,7 +1,38 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Loader2, MapPin, RefreshCw } from "lucide-react";
 import { locationConfidenceLabel } from "../lib/school-geofence";
+import { suspiciousPlaceMatchReason } from "../lib/school-place-match";
 import { SchoolWork } from "../types";
+
+function duplicatePinWarnings(
+  rows: Array<{ schoolWorkId: string; lat?: number; lng?: number }>,
+  minCount = 3,
+): Map<string, string> {
+  const buckets = new Map<string, string[]>();
+  for (const row of rows) {
+    const lat = Number(row.lat);
+    const lng = Number(row.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const ids = buckets.get(key) ?? [];
+    ids.push(row.schoolWorkId);
+    buckets.set(key, ids);
+  }
+  const warnings = new Map<string, string>();
+  for (const ids of buckets.values()) {
+    if (ids.length < minCount) continue;
+    const message = `${ids.length} schools share this pin — likely block office or bad batch match`;
+    for (const id of ids) warnings.set(id, message);
+  }
+  return warnings;
+}
+
+function resolutionStepLabel(step?: string): string {
+  if (step === "school") return "Step 1 · School on Google";
+  if (step === "village") return "Step 2 · Village on Google";
+  if (step === "osm_village") return "Step 3 · Village on OpenStreetMap";
+  return "";
+}
 
 interface SchoolLocationResolverProps {
   schools: SchoolWork[];
@@ -12,6 +43,7 @@ type ResolveRow = {
   schoolWorkId: string;
   schoolName: string;
   udise: string;
+  villageHint?: string;
   block: string;
   district: string;
   status: string;
@@ -21,7 +53,10 @@ type ResolveRow = {
   googleMapsUrl?: string;
   locationConfidence?: string;
   geofenceRadiusM?: number;
+  formattedAddress?: string;
   locationVerified?: boolean;
+  matchScore?: number;
+  resolutionStep?: string;
 };
 
 export default function SchoolLocationResolver({
@@ -30,13 +65,16 @@ export default function SchoolLocationResolver({
 }: SchoolLocationResolverProps) {
   const [district, setDistrict] = useState("");
   const [block, setBlock] = useState("");
-  const [saveVerified, setSaveVerified] = useState(true);
+  const [saveVerified, setSaveVerified] = useState(false);
+  const [skipExisting, setSkipExisting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [googlePlacesReady, setGooglePlacesReady] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<{ total: number; resolved: number; skipped: number; failed: number } | null>(null);
   const [rows, setRows] = useState<ResolveRow[]>([]);
+
+  const clusterWarnings = useMemo(() => duplicatePinWarnings(rows), [rows]);
 
   const districts = useMemo(
     () => Array.from(new Set(schools.map((s) => s.district).filter(Boolean))).sort(),
@@ -92,7 +130,7 @@ export default function SchoolLocationResolver({
             block: block.trim(),
             district: district.trim() || undefined,
             saveVerified,
-            skipExisting: true,
+            skipExisting,
             limit: batchSize,
             offset,
           }),
@@ -137,8 +175,24 @@ export default function SchoolLocationResolver({
           School Google Maps Pins
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Looks up each school on Google first (100 m geofence). If not found, uses the village name from
-          the school title (400 m geofence) so supervisors can submit visits from the school or village.
+          <strong>Step 1:</strong> Google Maps lookup for the school itself (100 m).{" "}
+          <strong>Step 2:</strong> If not found, lookup the village from the school name (400 m).
+          Block offices and wrong villages are never used.
+        </p>
+        <ol className="text-[11px] text-slate-500 mt-2 space-y-1 list-decimal list-inside">
+          <li>
+            Example: <span className="font-medium">GUNANAND M S BISHNUPUR</span> → try school on Google;
+            if missing → pin <span className="font-medium">Bishnupur</span> village
+          </li>
+          <li>
+            Example: <span className="font-medium">KANYA U M S BASATPUR</span> → try school; if missing → pin{" "}
+            <span className="font-medium">Basatpur</span> village
+          </li>
+          <li>If Google misses a rural hamlet, OpenStreetMap village lookup is tried (free, no extra API cost)</li>
+        </ol>
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+          Review results on the map before saving. &quot;Save as verified&quot; is off by default — turn it on only after
+          spot-checking pins. Rows with 3+ schools at the same coordinates are flagged automatically.
         </p>
       </div>
 
@@ -186,6 +240,15 @@ export default function SchoolLocationResolver({
             disabled={readOnly || loading}
           />
           Save as verified
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-600 pb-2">
+          <input
+            type="checkbox"
+            checked={skipExisting}
+            onChange={(e) => setSkipExisting(e.target.checked)}
+            disabled={readOnly || loading}
+          />
+          Skip already saved
         </label>
         {!readOnly && (
           <button
@@ -236,22 +299,51 @@ export default function SchoolLocationResolver({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.schoolWorkId} className="border-t border-slate-100">
+              {rows.map((row) => {
+                const suspiciousReason = suspiciousPlaceMatchReason(
+                  row.schoolName,
+                  row.matchedPlaceName,
+                  row.block,
+                  row.district,
+                  row.formattedAddress,
+                );
+                const clusterReason = clusterWarnings.get(row.schoolWorkId);
+                const warnReason = suspiciousReason || clusterReason;
+                return (
+                <tr
+                  key={row.schoolWorkId}
+                  className={`border-t border-slate-100 ${warnReason ? "bg-amber-50" : ""}`}
+                >
                   <td className="p-2">
                     <p className="font-semibold text-slate-800">{row.schoolName}</p>
                     <p className="text-slate-400">{row.udise}</p>
+                    {row.villageHint && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Village fallback: <span className="font-medium text-slate-600">{row.villageHint}</span>
+                      </p>
+                    )}
                   </td>
                   <td className="p-2 capitalize">
                     {row.status.replace("_", " ")}
+                    {row.resolutionStep && (
+                      <span className="block text-[10px] text-slate-500 normal-case">
+                        {resolutionStepLabel(row.resolutionStep)}
+                      </span>
+                    )}
                     {row.locationConfidence && (
                       <span className="block text-[10px] text-slate-400 normal-case">
                         {locationConfidenceLabel(row.locationConfidence)}
+                        {row.matchScore != null ? ` · score ${row.matchScore}` : ""}
                       </span>
                     )}
                   </td>
                   <td className="p-2">
                     {row.matchedPlaceName || "—"}
+                    {warnReason && (
+                      <span className="block text-[10px] text-amber-800 font-semibold mt-0.5">
+                        {warnReason}
+                      </span>
+                    )}
                   </td>
                   <td className="p-2">
                     {row.googleMapsUrl ? (
@@ -268,7 +360,8 @@ export default function SchoolLocationResolver({
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
