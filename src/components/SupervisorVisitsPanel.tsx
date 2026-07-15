@@ -27,6 +27,12 @@ import {
   buildDualPinOsmUrl,
   extractVisitSupervisorCoords,
 } from "../lib/map-links";
+import {
+  visitNeedsReview,
+  visitPingEvidenceSummary,
+  visitPingMatchBadgeClass,
+  visitPingMatchLabel,
+} from "../lib/visit-ping-verification";
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
@@ -150,6 +156,54 @@ function VisitLocationLinks({
   );
 }
 
+function VisitPingVerificationBadge({ visit }: { visit: SchoolVisit }) {
+  const status = visit.locationMatchStatus;
+  if (!status) return null;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded ${visitPingMatchBadgeClass(status)}`}
+      title={visitPingEvidenceSummary(visit) || undefined}
+    >
+      {visitNeedsReview(visit) ? "Review" : "OK"} · {visitPingMatchLabel(status)}
+    </span>
+  );
+}
+
+function VisitPingVerificationPanel({ visit }: { visit: SchoolVisit }) {
+  const summary = visitPingEvidenceSummary(visit);
+  if (!summary && !visit.locationMatchStatus) return null;
+
+  const review = visitNeedsReview(visit);
+
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 space-y-1 ${
+        review ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"
+      }`}
+    >
+      <p className="text-[10px] font-bold uppercase text-slate-600">Field Team APK check</p>
+      <VisitPingVerificationBadge visit={visit} />
+      {summary && <p className="text-[11px] text-slate-700 leading-snug">{summary}</p>}
+      {(visit.pingTrailPointCount ?? 0) > 0 && (
+        <p className="text-[10px] text-slate-500">
+          {visit.pingTrailPointCount} ping(s) in ±{visit.pingTrailWindowMinutes ?? 45} min window
+          {typeof visit.pingTrailNearestSchoolM === "number" && visit.pingTrailNearestSchoolM > 0
+            ? ` · nearest to school ${visit.pingTrailNearestSchoolM} m`
+            : ""}
+          {typeof visit.pingTrailNearestVisitM === "number" && visit.pingTrailNearestVisitM > 0
+            ? ` · nearest to visit photo ${visit.pingTrailNearestVisitM} m`
+            : ""}
+        </p>
+      )}
+      {review && visit.status === "submitted" && (
+        <p className="text-[10px] text-amber-900 font-medium">
+          Visit was submitted but APK evidence is weak — review photos and map before approving.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto, schools }: VisitDetailsProps) {
   return (
     <div className="p-3 space-y-3 text-xs">
@@ -207,6 +261,7 @@ function VisitDetails({ visit, readOnly, onUpdateStatus, onViewPhoto, schools }:
           )}
         </p>
       )}
+      <VisitPingVerificationPanel visit={visit} />
       <VisitLocationLinks visit={visit} schools={schools} />
       {!readOnly && visit.status === "submitted" && (
         <div className="flex gap-2 pt-2">
@@ -242,6 +297,7 @@ export default function SupervisorVisitsPanel({
   const [blockFilter, setBlockFilter] = useState("");
   const [supervisorFilter, setSupervisorFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("submitted");
+  const [reviewFilter, setReviewFilter] = useState<"" | "needs_review" | "verified">("");
   const [visitTypeFilter, setVisitTypeFilter] = useState("");
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [fromDate, setFromDate] = useState("");
@@ -286,6 +342,11 @@ export default function SupervisorVisitsPanel({
     [visits],
   );
 
+  const needsReviewCount = useMemo(
+    () => visits.filter((v) => v.status === "submitted" && visitNeedsReview(v)).length,
+    [visits],
+  );
+
   const dateFilter = useMemo(
     () => buildDateFilter(datePreset, fromDate, toDate),
     [datePreset, fromDate, toDate],
@@ -306,10 +367,12 @@ export default function SupervisorVisitsPanel({
     if (blockFilter) rows = rows.filter((v) => v.block === blockFilter);
     if (supervisorFilter) rows = rows.filter((v) => v.supervisorId === supervisorFilter);
     if (statusFilter) rows = rows.filter((v) => v.status === statusFilter);
+    if (reviewFilter === "needs_review") rows = rows.filter((v) => visitNeedsReview(v));
+    if (reviewFilter === "verified") rows = rows.filter((v) => !visitNeedsReview(v));
     if (visitTypeFilter) rows = rows.filter((v) => (v.visitType || "adhoc") === visitTypeFilter);
     if (dateFilter) rows = rows.filter((v) => visitMatchesFilter(v.visitDate, dateFilter));
     return rows.sort((a, b) => visitText(b.visitDate).localeCompare(visitText(a.visitDate)));
-  }, [enriched, searchTerm, blockFilter, supervisorFilter, statusFilter, visitTypeFilter, dateFilter]);
+  }, [enriched, searchTerm, blockFilter, supervisorFilter, statusFilter, reviewFilter, visitTypeFilter, dateFilter]);
 
   const selectableVisits = useMemo(
     () => filtered.filter((v) => !readOnly && v.status === "submitted"),
@@ -324,6 +387,7 @@ export default function SupervisorVisitsPanel({
     blockFilter !== "" ||
     supervisorFilter !== "" ||
     statusFilter !== "submitted" ||
+    reviewFilter !== "" ||
     visitTypeFilter !== "" ||
     datePreset !== "all" ||
     fromDate !== "" ||
@@ -334,6 +398,7 @@ export default function SupervisorVisitsPanel({
     setBlockFilter("");
     setSupervisorFilter("");
     setStatusFilter("submitted");
+    setReviewFilter("");
     setVisitTypeFilter("");
     setDatePreset("all");
     setFromDate("");
@@ -422,6 +487,11 @@ export default function SupervisorVisitsPanel({
             {submittedCount > 0 && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
                 {submittedCount} pending review
+              </span>
+            )}
+            {needsReviewCount > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-900">
+                {needsReviewCount} APK flag
               </span>
             )}
           </h2>
@@ -555,6 +625,15 @@ export default function SupervisorVisitsPanel({
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
+          <select
+            value={reviewFilter}
+            onChange={(e) => setReviewFilter(e.target.value as "" | "needs_review" | "verified")}
+            className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs cursor-pointer"
+          >
+            <option value="">All APK checks</option>
+            <option value="needs_review">Needs APK review</option>
+            <option value="verified">APK confirmed</option>
+          </select>
           {hasActiveFilters && (
             <button
               type="button"
@@ -602,6 +681,9 @@ export default function SupervisorVisitsPanel({
                       <span className="text-xs text-slate-500 block mt-0.5">
                         <MapPin size={10} className="inline" /> {visit.block} — {visit.supervisorName}
                       </span>
+                      <div className="mt-1">
+                        <VisitPingVerificationBadge visit={visit} />
+                      </div>
                     </div>
                     <span
                       className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded shrink-0 ${statusBadgeClass(visit.status)}`}

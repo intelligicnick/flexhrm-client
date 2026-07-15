@@ -81,6 +81,102 @@ export function localityHintFromSchoolName(schoolName: string): string {
   return "";
 }
 
+function tokenInHaystack(token: string, haystack: string): boolean {
+  if (!token || !haystack) return false;
+  if (haystack.includes(token)) return true;
+  if (token.length < 5) return false;
+  return haystack
+    .split(" ")
+    .some((word) => word.length >= 4 && editDistance(token, word) <= 1);
+}
+
+function editDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const matrix: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
+  for (let i = 0; i < rows; i += 1) matrix[i][0] = i;
+  for (let j = 0; j < cols; j += 1) matrix[0][j] = j;
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+function wrongBlockMentionedInAddress(
+  haystack: string,
+  expectedBlock: string,
+  siblingBlocks: string[],
+): string | null {
+  const expectedNorm = normalizeToken(expectedBlock);
+  for (const sibling of siblingBlocks) {
+    const siblingNorm = normalizeToken(sibling);
+    if (!siblingNorm || siblingNorm.length < 4) continue;
+    if (siblingNorm === expectedNorm) continue;
+    if (tokenInHaystack(siblingNorm, haystack)) {
+      return sibling;
+    }
+  }
+  return null;
+}
+
+export function placeInExpectedAdminArea(
+  formattedAddress: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): boolean {
+  const haystack = normalizeToken(formattedAddress);
+  if (!haystack) return false;
+
+  const districtNorm = normalizeToken(district);
+  if (districtNorm && districtNorm.length >= 3) {
+    if (!tokenInHaystack(districtNorm, haystack)) return false;
+  }
+
+  const blockNorm = normalizeToken(block);
+  if (blockNorm && blockNorm.length >= 3) {
+    if (!tokenInHaystack(blockNorm, haystack)) return false;
+  }
+
+  if (wrongBlockMentionedInAddress(haystack, block, siblingBlocks)) return false;
+
+  return true;
+}
+
+export function adminAreaMismatchReason(
+  formattedAddress: string,
+  block: string,
+  district: string,
+  siblingBlocks: string[] = [],
+): string | null {
+  const haystack = normalizeToken(formattedAddress);
+  if (!haystack) return null;
+
+  const districtNorm = normalizeToken(district);
+  if (districtNorm && districtNorm.length >= 3 && !tokenInHaystack(districtNorm, haystack)) {
+    return `District "${district}" not in Google address — likely wrong area`;
+  }
+
+  const blockNorm = normalizeToken(block);
+  if (blockNorm && blockNorm.length >= 3 && !tokenInHaystack(blockNorm, haystack)) {
+    return `Block "${block}" not in Google address — likely outside this block`;
+  }
+
+  const wrongBlock = wrongBlockMentionedInAddress(haystack, block, siblingBlocks);
+  if (wrongBlock) {
+    return `Address mentions block "${wrongBlock}", not "${block}"`;
+  }
+
+  return null;
+}
+
 function extractSignificantTokens(schoolName: string, block: string, district: string): string[] {
   const village = localityHintFromSchoolName(schoolName);
   const tokens = new Set<string>();
@@ -150,18 +246,28 @@ export function placeMatchesSchoolContext(
 export function isUnsafeSchoolPin(school: {
   schoolName?: string;
   matchedPlaceName?: string;
+  formattedAddress?: string;
   block?: string;
   district?: string;
   locationConfidence?: string;
+  siblingBlocks?: string[];
 }): boolean {
   const matchedPlaceName = String(school.matchedPlaceName || "").trim();
+  const formattedAddress = String(school.formattedAddress || "").trim();
   const schoolName = String(school.schoolName || "").trim();
   const block = String(school.block || "").trim();
   const district = String(school.district || "").trim();
   const confidence = String(school.locationConfidence || "").trim();
+  const siblingBlocks = school.siblingBlocks ?? [];
 
   if (matchedPlaceName && isAdminPlaceName(matchedPlaceName, block)) {
     return true;
+  }
+
+  if (formattedAddress && block && district) {
+    if (!placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+      return true;
+    }
   }
 
   if (!matchedPlaceName || !schoolName) return false;
@@ -188,6 +294,7 @@ export function suspiciousPlaceMatchReason(
   block: string,
   district: string,
   formattedAddress = "",
+  siblingBlocks: string[] = [],
 ): string | null {
   const placeName = String(matchedPlaceName || "").trim();
   if (!placeName) return null;
@@ -195,6 +302,9 @@ export function suspiciousPlaceMatchReason(
   if (isAdminPlaceName(placeName, block)) {
     return "Looks like a block/government office, not the school";
   }
+
+  const adminReason = adminAreaMismatchReason(formattedAddress, block, district, siblingBlocks);
+  if (adminReason) return adminReason;
 
   if (!placeMatchesSchoolContext(schoolName, placeName, formattedAddress, block, district)) {
     const village = localityHintFromSchoolName(schoolName);

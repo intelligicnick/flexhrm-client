@@ -654,6 +654,13 @@ export interface SchoolVisit {
   distanceToSchoolM?: number;
   gpsAccuracyM?: number;
   locationMatchStatus?: string;
+  pingVerificationNotes?: string;
+  pingTrailNearSchoolCount?: number;
+  pingTrailNearestSchoolM?: number;
+  pingTrailNearestVisitM?: number;
+  pingTrailPointCount?: number;
+  pingTrailWindowMinutes?: number;
+  needsReview?: boolean;
   schoolLat?: number;
   schoolLng?: number;
 }

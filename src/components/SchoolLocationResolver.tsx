@@ -87,6 +87,8 @@ export default function SchoolLocationResolver({
     return Array.from(new Set(list.map((s) => s.block).filter(Boolean))).sort();
   }, [schools, district]);
 
+  const siblingBlocks = blocks;
+
   useEffect(() => {
     void fetch("/api/health")
       .then((res) => res.json())
@@ -177,7 +179,7 @@ export default function SchoolLocationResolver({
         <p className="text-xs text-slate-500 mt-1">
           <strong>Step 1:</strong> Google Maps lookup for the school itself (100 m).{" "}
           <strong>Step 2:</strong> If not found, lookup the village from the school name (400 m).
-          Block offices and wrong villages are never used.
+          Block offices and wrong villages are never used. Google address must name this block and district.
         </p>
         <ol className="text-[11px] text-slate-500 mt-2 space-y-1 list-decimal list-inside">
           <li>
@@ -306,6 +308,7 @@ export default function SchoolLocationResolver({
                   row.block,
                   row.district,
                   row.formattedAddress,
+                  siblingBlocks,
                 );
                 const clusterReason = clusterWarnings.get(row.schoolWorkId);
                 const warnReason = suspiciousReason || clusterReason;
