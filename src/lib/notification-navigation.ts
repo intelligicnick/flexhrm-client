@@ -1,6 +1,6 @@
 import { AppNotification } from "../types";
 
-export type FieldTeamView = "visits" | "supervisors" | "requests" | "commitments";
+export type FieldTeamView = "visits" | "supervisors" | "school-locations" | "requests" | "commitments";
 
 export type SupervisorRequestsTab = "raise" | "mine" | "notifications";
 

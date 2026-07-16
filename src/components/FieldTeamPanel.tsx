@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ClipboardList, MessageSquare, Users, BookOpen } from "lucide-react";
+import { ClipboardList, MessageSquare, Users, BookOpen, MapPin } from "lucide-react";
 import { SchoolSupervisor, SchoolVisit, SchoolWork, SupervisorRequest, CommitmentDiary } from "../types";
 import { FieldTeamView } from "../lib/notification-navigation";
 import SupervisorVisitsPanel from "./SupervisorVisitsPanel";
@@ -91,6 +91,16 @@ export default function FieldTeamPanel({
     [visits],
   );
 
+  const schoolsNeedingLocationCount = useMemo(() => {
+    return schools.filter((school) => {
+      const lat = Number(school.lat);
+      const lng = Number(school.lng);
+      const hasPin =
+        Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+      return !hasPin || !school.locationVerified;
+    }).length;
+  }, [schools]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -121,6 +131,22 @@ export default function FieldTeamPanel({
             }`}
           >
             <Users size={14} /> Supervisors
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("school-locations")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition cursor-pointer ${
+              view === "school-locations"
+                ? "bg-white text-slate-800 shadow-xs"
+                : "text-slate-600 hover:bg-white/40"
+            }`}
+          >
+            <MapPin size={14} /> Pin & Resolve
+            {schoolsNeedingLocationCount > 0 && (
+              <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-violet-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {schoolsNeedingLocationCount > 99 ? "99+" : schoolsNeedingLocationCount}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -162,7 +188,9 @@ export default function FieldTeamPanel({
               ? "Supervisor messages and photos requiring admin response"
               : view === "commitments"
                 ? "Daily and date-range visit commitments submitted by supervisors"
-              : "Manage supervisors and their block assignments"}
+                : view === "school-locations"
+                  ? "Auto-pin villages on the map, drag pins to correct, then verify before supervisors can submit visits"
+                  : "Manage supervisors and their block assignments"}
         </span>
       </div>
 
@@ -193,9 +221,10 @@ export default function FieldTeamPanel({
           onUpdate={onUpdateCommitment}
           readOnly={readOnly}
         />
+      ) : view === "school-locations" ? (
+        <SchoolLocationMapPanel schools={schools} readOnly={readOnly} />
       ) : (
         <div className="space-y-4">
-          <SchoolLocationMapPanel schools={schools} readOnly={readOnly} />
           <SchoolSupervisorsTable
             supervisors={supervisors}
             schools={schools}
