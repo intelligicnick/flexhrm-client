@@ -22,6 +22,7 @@ import { SchoolSupervisor, SchoolVisit, SchoolWork } from "../types";
 import { DateInput } from "./ui/DateInput";
 import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
 import { formatLatLngDecimal, isValidGpsCoord } from "../lib/gps-coords";
+import { localityHintFromSchoolName } from "../lib/school-place-match";
 import {
   buildDualPinGoogleMapsUrl,
   buildDualPinOsmUrl,
@@ -679,7 +680,15 @@ export default function SupervisorVisitsPanel({
                       <span className="text-xs text-slate-400 ml-2">{visit.visitDate}</span>
                       <VisitTypeBadge visitType={visit.visitType} />
                       <span className="text-xs text-slate-500 block mt-0.5">
-                        <MapPin size={10} className="inline" /> {visit.block} — {visit.supervisorName}
+                        <MapPin size={10} className="inline" /> {visit.block}
+                        {localityHintFromSchoolName(visit.schoolName || "")
+                          ? ` · ${localityHintFromSchoolName(visit.schoolName || "")}`
+                          : ""}
+                        {" — "}
+                        {visit.supervisorName}
+                        {typeof visit.distanceToSchoolM === "number" && visit.distanceToSchoolM > 0
+                          ? ` · ${visit.distanceToSchoolM} m from pin`
+                          : ""}
                       </span>
                       <div className="mt-1">
                         <VisitPingVerificationBadge visit={visit} />

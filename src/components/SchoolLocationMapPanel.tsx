@@ -187,7 +187,7 @@ export default function SchoolLocationMapPanel({
     setSummary(null);
     setProgress(null);
 
-    let villageOffset = 0;
+    let schoolOffset = 0;
     let total = 0;
     let totalVillages = 0;
     let resolved = 0;
@@ -198,9 +198,9 @@ export default function SchoolLocationMapPanel({
     try {
       while (true) {
         setProgress(
-          totalVillages > 0
-            ? `Auto-pinning villages ${Math.min(villageOffset + 1, totalVillages)}–${Math.min(villageOffset + 2, totalVillages)} of ${totalVillages} (${total} schools)…`
-            : "Starting village lookup (OpenStreetMap)…",
+          total > 0
+            ? `Resolving schools ${Math.min(schoolOffset + 1, total)}–${Math.min(schoolOffset + 2, total)} of ${total} (Google + UDISE + village)…`
+            : "Starting school location resolve (Google Maps)…",
         );
 
         const res = await fetchWithRetry("/api/school-works/bulk-assign-village-locations", {
@@ -211,12 +211,12 @@ export default function SchoolLocationMapPanel({
             district: district.trim() || undefined,
             saveDraft: true,
             skipExisting,
-            villageLimit: 2,
-            villageOffset,
+            schoolLimit: 2,
+            schoolOffset,
           }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data?.message || "Village auto-pin failed.");
+        if (!res.ok) throw new Error(data?.message || "School resolve failed.");
 
         total = Number(data.total) || total;
         totalVillages = Number(data.totalVillages) || totalVillages;
@@ -229,13 +229,13 @@ export default function SchoolLocationMapPanel({
           for (const row of data.results) {
             const schoolId = String(row.schoolWorkId || "");
             if (!schoolId) continue;
-            if (row.status === "draft" || row.status === "resolved") {
+            if (row.status === "verified" || row.status === "draft" || row.status === "resolved") {
               patchOverride(schoolId, {
                 lat: Number(row.lat),
                 lng: Number(row.lng),
                 matchedPlaceName: String(row.matchedPlaceName || ""),
                 locationConfidence: String(row.locationConfidence || "village"),
-                locationVerified: false,
+                locationVerified: row.status === "verified" || !!row.locationVerified,
                 geofenceRadiusM: Number(row.geofenceRadiusM) || 400,
                 googleMapsUrl: String(row.googleMapsUrl || ""),
                 locationSource: String(row.locationSource || ""),
@@ -246,16 +246,16 @@ export default function SchoolLocationMapPanel({
 
         setSummary({ total, totalVillages, resolved, skipped, failed, villagesResolved });
         if (!data.hasMore) break;
-        villageOffset = Number(data.nextVillageOffset ?? data.nextOffset) || villageOffset + 2;
+        schoolOffset = Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) || schoolOffset + 2;
       }
       setProgress(null);
       if (skipExisting && resolved === 0 && skipped > 0 && failed === 0) {
         setError(
-          "All schools were skipped because they already have pins. Uncheck “Skip schools with existing pins” to replace old Google pins with village pins.",
+          "All schools were skipped because they already have verified pins. Uncheck “Skip schools with existing pins” to re-resolve.",
         );
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Village auto-pin failed.");
+      setError(err instanceof Error ? err.message : "School resolve failed.");
     } finally {
       setLoading(false);
       setProgress(null);
@@ -500,8 +500,9 @@ export default function SchoolLocationMapPanel({
           Village-First School Locations
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Auto-pins the <strong>village</strong> from each school name (400 m geofence). Review on the map,
-          drag to correct, then verify. Exact Google school pins (100 m) are optional upgrades.
+          Resolves each school via <strong>Google Maps</strong> using school name, village, block, district, and{" "}
+          <strong>UDISE</strong>. Pins inside Bihar are auto-verified — supervisors can visit immediately. Wrong-state
+          matches (e.g. Rajasthan) are rejected.
         </p>
       </div>
 
@@ -558,7 +559,7 @@ export default function SchoolLocationMapPanel({
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#ff791a] text-white text-xs font-bold disabled:opacity-50"
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Auto-pin villages
+            Resolve & verify schools
           </button>
         )}
       </div>
@@ -576,8 +577,8 @@ export default function SchoolLocationMapPanel({
 
       {summary && (
         <p className="text-xs text-slate-600">
-          Schools {summary.total} · Villages {summary.totalVillages} · Draft pinned {summary.resolved} · Skipped{" "}
-          {summary.skipped} · Not found {summary.failed} · Villages geocoded {summary.villagesResolved}
+          Schools {summary.total} · Villages {summary.totalVillages} · Verified {summary.resolved} · Skipped{" "}
+          {summary.skipped} · Failed {summary.failed}
         </p>
       )}
 
@@ -760,13 +761,11 @@ export default function SchoolLocationMapPanel({
       <details className="text-[11px] text-slate-500 border border-slate-100 rounded-lg px-3 py-2">
         <summary className="font-semibold text-slate-600 cursor-pointer">Admin verify checklist (Amour / any block)</summary>
         <ol className="mt-2 space-y-1 list-decimal list-inside">
-          <li>Select district + block, click <strong>Auto-pin villages</strong> (uncheck skip if re-running).</li>
-          <li>Orange markers = draft village pins. Open a village and spot-check 2–3 schools.</li>
-          <li>Click <strong>Open in Google Maps</strong> — confirm the pin is in the correct village, not block office.</li>
-          <li>Drag the pin on the map if the village centroid is wrong, or use <strong>Search</strong> (village name or lat, lng).</li>
-          <li>Verify one school or <strong>Verify whole village</strong> when the location looks right.</li>
-          <li>Supervisors can submit visits only after a school is <strong>verified</strong> (green).</li>
-          <li>Villages that show &quot;missing&quot; need manual search — OSM often has no tiny hamlets.</li>
+          <li>Select district + block, click <strong>Resolve & verify schools</strong>.</li>
+          <li>Green = auto-verified via Google (school name + village + UDISE + Bihar check).</li>
+          <li>Orange = old draft pin — re-run resolve with skip unchecked.</li>
+          <li>Pink = not found — search village manually on the map and drag pin.</li>
+          <li>Supervisors see village name + distance from required pin when submitting visits.</li>
         </ol>
       </details>
     </section>

@@ -16,7 +16,7 @@ import {
 import { captureLivePhoto } from "../../lib/live-camera";
 import { formatLatLngDecimal, distanceMeters, isValidGpsCoord } from "../../lib/gps-coords";
 import { geofenceAreaLabel, schoolGeofenceRadiusM } from "../../lib/school-geofence";
-import { isUnsafeSchoolPin } from "../../lib/school-place-match";
+import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../../lib/school-place-match";
 import { formatDisplayDate, todayIsoInKolkata } from "../../lib/supervisor-dates";
 import { pointsForVisit } from "../../lib/supervisor-gamification";
 import { getMaterialLabel } from "../../lib/supervisor-materials";
@@ -105,6 +105,11 @@ export default function SupervisorVisitPage() {
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  const villageName = useMemo(
+    () => (school ? localityHintFromSchoolName(school.schoolName || "") : ""),
+    [school],
+  );
 
   const schoolPinInvalid = useMemo(
     () =>
@@ -525,7 +530,9 @@ export default function SupervisorVisitPage() {
         <p className="text-sm text-slate-300 mt-1.5 flex items-start gap-1.5">
           <MapPin size={14} className="shrink-0 mt-0.5" />
           <span>
-            {school.block} · UDISE {school.udise}
+            {villageName && <>{villageName} · </>}
+            {school.block}
+            {school.district ? `, ${school.district}` : ""} · UDISE {school.udise}
           </span>
         </p>
       </div>
@@ -542,12 +549,12 @@ export default function SupervisorVisitPage() {
       {!schoolPinReady && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p className="font-bold">
-            {schoolPinInvalid ? "School pin needs correction" : "School location not verified"}
+            {schoolPinInvalid ? "School pin needs correction" : "School location not set up"}
           </p>
           <p className="mt-1 text-xs">
             {schoolPinInvalid
-              ? "The saved pin looks wrong (e.g. block office or another village). Admin must re-resolve this school or its village before visits can be submitted."
-              : "Admin must verify this school's Google Maps pin (school or village) before visits can be submitted."}
+              ? `${school.schoolName}${villageName ? ` (${villageName})` : ""}: saved pin is outside Bihar or wrong area. Admin must re-run Pin & Resolve for ${school.block}.`
+              : `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}, UDISE ${school.udise}: location not resolved yet. Admin must run Pin & Resolve in Field Team for block ${school.block} before you can submit visits.`}
           </p>
         </div>
       )}
@@ -562,9 +569,15 @@ export default function SupervisorVisitPage() {
         >
           <p className="font-semibold">
             {withinSchoolGeofence
-              ? `At ${geofenceArea} (${distanceToSchoolM} m from pin · within ${geofenceRadiusM} m)`
-              : `Too far from ${geofenceArea} (${distanceToSchoolM} m · need within ${geofenceRadiusM} m)`}
+              ? `At ${villageName || geofenceArea} — ${distanceToSchoolM} m from required pin (within ${geofenceRadiusM} m)`
+              : `Too far from ${villageName || geofenceArea} — ${distanceToSchoolM} m away (need within ${geofenceRadiusM} m)`}
           </p>
+          {gpsPlaceName && (
+            <p className="text-xs mt-1 opacity-90">
+              Your GPS: {gpsPlaceName}
+              {villageName ? ` · Required village: ${villageName}` : ""}
+            </p>
+          )}
         </div>
       )}
 
