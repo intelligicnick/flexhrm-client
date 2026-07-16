@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, MapPin, RefreshCw, Search } from "lucide-react";
 import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
 import { SchoolWork } from "../types";
-import SchoolGoogleMap from "./SchoolGoogleMap";
 import SchoolLeafletMap from "./SchoolLeafletMap";
 
 async function fetchWithRetry(
@@ -92,9 +91,6 @@ export default function SchoolLocationMapPanel({
   const [searching, setSearching] = useState(false);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
-  const [mapsApiKey, setMapsApiKey] = useState<string | null>(null);
-  const [mapsConfigError, setMapsConfigError] = useState<string | null>(null);
-  const [googleMapFailed, setGoogleMapFailed] = useState(false);
 
   const mergedSchools = useMemo(
     () =>
@@ -167,36 +163,6 @@ export default function SchoolLocationMapPanel({
     }));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/school-works/maps-config");
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.message || "Google Maps not configured.");
-        if (!cancelled) {
-          if (data.configured && data.mapsApiKey) {
-            setMapsApiKey(String(data.mapsApiKey));
-            setMapsConfigError(null);
-          } else {
-            setMapsApiKey(null);
-            setMapsConfigError(
-              "Add GOOGLE_PLACES_API_KEY on the backend and enable Maps JavaScript API + Places API + Geocoding API in Google Cloud.",
-            );
-          }
-        }
-      } catch (err: unknown) {
-        if (!cancelled) {
-          setMapsApiKey(null);
-          setMapsConfigError(err instanceof Error ? err.message : "Google Maps not available.");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const runAutoPin = async () => {
     if (!block.trim()) {
       setError("Select a block first.");
@@ -220,7 +186,7 @@ export default function SchoolLocationMapPanel({
         setProgress(
           total > 0
             ? `Resolving schools ${Math.min(schoolOffset + 1, total)}–${Math.min(schoolOffset + 2, total)} of ${total} (Google + UDISE + village)…`
-            : "Starting school location resolve (Google Maps)…",
+            : "Starting school location resolve (Google Places)…",
         );
 
         const res = await fetchWithRetry("/api/school-works/bulk-assign-village-locations", {
@@ -421,8 +387,8 @@ export default function SchoolLocationMapPanel({
           Village-First School Locations
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Resolves each school via <strong>Google Maps</strong> (Places + Geocode) using school name, village, block, district, and{" "}
-          <strong>UDISE</strong>. Map shows <strong>Google Maps</strong> with village/place names on every pin.
+          Resolves each school via <strong>Google Places</strong> (backend only) using school name, village, block, district, and{" "}
+          <strong>UDISE</strong>. Map uses <strong>OSM + Esri satellite</strong> with street/satellite/hybrid layers and village names on every pin.
         </p>
       </div>
 
@@ -658,61 +624,22 @@ export default function SchoolLocationMapPanel({
           )}
         </div>
 
-        {mapsConfigError && (
-          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 lg:col-span-2">
-            {mapsConfigError}
-          </p>
-        )}
-        {googleMapFailed && (
-          <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 lg:col-span-2 space-y-1">
-            <p className="font-semibold">Google Maps could not load — showing OpenStreetMap fallback.</p>
-            <p className="text-xs">
-              In Google Cloud Console for your API key: enable <strong>Maps JavaScript API</strong>, turn on{" "}
-              <strong>billing</strong>, and add your site under HTTP referrers (e.g.{" "}
-              <code className="bg-amber-100 px-1 rounded">https://*.hostingersite.com/*</code>).
-            </p>
-          </div>
-        )}
-        {mapsApiKey && !googleMapFailed ? (
-          <SchoolGoogleMap
-            schools={filteredSchools}
-            mapsApiKey={mapsApiKey}
-            selectedSchoolId={selectedSchoolId}
-            readOnly={readOnly}
-            onLoadError={(message) => {
-              setGoogleMapFailed(true);
-              setMapsConfigError(message);
-            }}
-            onSelectSchool={(schoolId) => {
-              const school = filteredSchools.find((s) => s.id === schoolId);
-              setSelectedSchoolId(schoolId);
-              if (school) {
-                setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
-              }
-            }}
-            onDragPin={(schoolId, lat, lng) => {
-              const school = filteredSchools.find((s) => s.id === schoolId);
-              void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
-            }}
-          />
-        ) : (
-          <SchoolLeafletMap
-            schools={filteredSchools}
-            selectedSchoolId={selectedSchoolId}
-            readOnly={readOnly}
-            onSelectSchool={(schoolId) => {
-              const school = filteredSchools.find((s) => s.id === schoolId);
-              setSelectedSchoolId(schoolId);
-              if (school) {
-                setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
-              }
-            }}
-            onDragPin={(schoolId, lat, lng) => {
-              const school = filteredSchools.find((s) => s.id === schoolId);
-              void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
-            }}
-          />
-        )}
+        <SchoolLeafletMap
+          schools={filteredSchools}
+          selectedSchoolId={selectedSchoolId}
+          readOnly={readOnly}
+          onSelectSchool={(schoolId) => {
+            const school = filteredSchools.find((s) => s.id === schoolId);
+            setSelectedSchoolId(schoolId);
+            if (school) {
+              setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
+            }
+          }}
+          onDragPin={(schoolId, lat, lng) => {
+            const school = filteredSchools.find((s) => s.id === schoolId);
+            void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
+          }}
+        />
       </div>
 
       {selectedSchool && isUnsafeSchoolPin(selectedSchool) && (

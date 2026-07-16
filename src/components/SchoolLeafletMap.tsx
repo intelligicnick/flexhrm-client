@@ -4,10 +4,10 @@ import "leaflet/dist/leaflet.css";
 import { SchoolWork } from "../types";
 import { localityHintFromSchoolName } from "../lib/school-place-match";
 import {
+  attachFieldMapLayerControl,
   attachMapResizeObserver,
   attachMapVisibilityObserver,
   createFieldMap,
-  createMapTileLayer,
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../lib/leaflet-map-setup";
@@ -22,6 +22,40 @@ function markerColor(school: SchoolWork): string {
   if (!hasValidPin(school)) return "#f87171";
   if (school.locationVerified) return "#10b981";
   return "#f59e0b";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function shortPlaceLabel(value: string, max = 18): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1)}…`;
+}
+
+function labeledPinIcon(school: SchoolWork, isSelected: boolean): L.DivIcon {
+  const village = localityHintFromSchoolName(school.schoolName || "");
+  const placeName = String(school.matchedPlaceName || village || school.schoolName || "");
+  const label = shortPlaceLabel(village || placeName, 20);
+  const sublabel = placeName !== label ? shortPlaceLabel(placeName, 24) : "";
+  const color = markerColor(school);
+  const size = isSelected ? 12 : 10;
+
+  return L.divIcon({
+    className: "",
+    html: `<div style="display:flex;flex-direction:column;align-items:center;pointer-events:auto;cursor:pointer;">
+      <div style="max-width:110px;text-align:center;background:rgba(15,23,42,.88);color:#fff;font-size:9px;font-weight:700;line-height:1.2;padding:2px 5px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</div>
+      ${sublabel ? `<div style="max-width:120px;margin-top:1px;text-align:center;background:rgba(255,255,255,.92);color:#334155;font-size:8px;line-height:1.2;padding:1px 4px;border-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(sublabel)}</div>` : ""}
+      <div style="width:${size}px;height:${size}px;margin-top:3px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></div>
+    </div>`,
+    iconSize: [120, sublabel ? 52 : 40],
+    iconAnchor: [60, sublabel ? 52 : 40],
+  });
 }
 
 interface SchoolLeafletMapProps {
@@ -43,6 +77,7 @@ export default function SchoolLeafletMap({
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
   const dragMarkerRef = useRef<L.Marker | null>(null);
+  const mapReadyRef = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -58,8 +93,9 @@ export default function SchoolLeafletMap({
 
       if (!mapRef.current) {
         mapRef.current = createFieldMap(container);
-        createMapTileLayer().addTo(mapRef.current);
+        attachFieldMapLayerControl(mapRef.current, "streets");
         layerRef.current = L.layerGroup().addTo(mapRef.current);
+        mapReadyRef.current = true;
         detachResize = attachMapResizeObserver(mapRef.current, container);
         detachVisibility = attachMapVisibilityObserver(mapRef.current, container);
         scheduleMapInvalidate(mapRef.current, 50);
@@ -76,7 +112,7 @@ export default function SchoolLeafletMap({
   useEffect(() => {
     const map = mapRef.current;
     const layer = layerRef.current;
-    if (!map || !layer) return;
+    if (!map || !layer || !mapReadyRef.current) return;
 
     layer.clearLayers();
     dragMarkerRef.current = null;
@@ -88,16 +124,15 @@ export default function SchoolLeafletMap({
       const village = localityHintFromSchoolName(school.schoolName || "");
       const placeName = String(school.matchedPlaceName || village || school.schoolName || "");
       const isSelected = school.id === selectedSchoolId;
-      const color = markerColor(school);
 
-      const marker = L.circleMarker([lat, lng], {
-        radius: isSelected ? 9 : 6,
-        color,
-        fillColor: color,
-        fillOpacity: 0.9,
-        weight: isSelected ? 3 : 1,
+      const marker = L.marker([lat, lng], {
+        icon: labeledPinIcon(school, isSelected),
+        zIndexOffset: isSelected ? 1000 : 0,
       });
-      marker.bindTooltip(`${village || placeName}<br/><span style="font-size:10px">${placeName}</span>`);
+      marker.bindTooltip(
+        `<strong>${escapeHtml(school.schoolName || "")}</strong><br/>${escapeHtml(placeName)}`,
+        { direction: "top", opacity: 0.95 },
+      );
       marker.on("click", () => onSelectSchool(school.id));
       marker.addTo(layer);
     }
@@ -106,31 +141,41 @@ export default function SchoolLeafletMap({
     if (selected && !readOnly && onDragPin) {
       const lat = Number(selected.lat);
       const lng = Number(selected.lng);
-      const village = localityHintFromSchoolName(selected.schoolName || "");
       const dragMarker = L.marker([lat, lng], {
         draggable: true,
-        zIndexOffset: 1000,
+        zIndexOffset: 2000,
+        icon: L.divIcon({
+          className: "",
+          html: `<div style="width:16px;height:16px;border-radius:50%;background:#ff791a;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.45);"></div>`,
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        }),
       });
-      dragMarker.bindTooltip(selected.schoolName || village || "School pin");
+      dragMarker.bindTooltip("Drag to correct pin", { permanent: true, direction: "right" });
       dragMarker.on("dragend", () => {
         const pos = dragMarker.getLatLng();
         onDragPin(selected.id, pos.lat, pos.lng);
       });
       dragMarker.addTo(layer);
       dragMarkerRef.current = dragMarker;
-      map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 0.5 });
+      map.flyTo([lat, lng], Math.max(map.getZoom(), 15), { duration: 0.5 });
     } else if (pinned.length > 0) {
       const bounds = L.latLngBounds(pinned.map((s) => [Number(s.lat), Number(s.lng)]));
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+      map.fitBounds(bounds, { padding: [48, 48], maxZoom: 14 });
     }
 
     scheduleMapInvalidate(map, 0);
   }, [schools, selectedSchoolId, readOnly, onSelectSchool, onDragPin]);
 
   return (
-    <div
-      ref={containerRef}
-      className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] w-full overflow-hidden bg-slate-100"
-    />
+    <div className="relative w-full">
+      <div
+        ref={containerRef}
+        className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] w-full overflow-hidden bg-slate-100"
+      />
+      <p className="absolute bottom-2 left-2 z-[500] text-[9px] text-slate-600 bg-white/90 px-2 py-1 rounded shadow-xs pointer-events-none">
+        Streets · Satellite · Satellite + labels — top-right
+      </p>
+    </div>
   );
 }

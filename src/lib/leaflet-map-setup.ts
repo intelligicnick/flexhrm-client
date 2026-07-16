@@ -59,6 +59,77 @@ export function createMapTileLayer(detailedLabels = true): L.TileLayer {
   });
 }
 
+/** Esri high-resolution satellite — no API key required. */
+export function createSatelliteTileLayer(): L.TileLayer {
+  const touch = isTouchMapDevice();
+  const native = isFlexHrmNativeApp();
+  return L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      attribution:
+        'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Source: Esri, Maxar, Earthstar Geographics',
+      maxZoom: 19,
+      updateWhenIdle: !touch,
+      updateWhenZooming: touch,
+      keepBuffer: touch ? 8 : 4,
+      ...(native ? {} : { crossOrigin: true }),
+    },
+  );
+}
+
+/** Transparent place-name labels for satellite view. */
+export function createSatelliteLabelLayer(): L.TileLayer {
+  const touch = isTouchMapDevice();
+  const native = isFlexHrmNativeApp();
+  return L.tileLayer(
+    "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
+    {
+      attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: "abcd",
+      maxZoom: 20,
+      pane: "overlayPane",
+      updateWhenIdle: !touch,
+      updateWhenZooming: touch,
+      ...(native ? {} : { crossOrigin: true }),
+    },
+  );
+}
+
+export type FieldMapBaseLayerKey = "streets" | "satellite" | "hybrid";
+
+export function createFieldMapBaseLayers(): Record<
+  FieldMapBaseLayerKey,
+  { layer: L.Layer; label: string }
+> {
+  const streets = createMapTileLayer(true);
+  const satellite = createSatelliteTileLayer();
+  const hybrid = L.layerGroup([createSatelliteTileLayer(), createSatelliteLabelLayer()]);
+  return {
+    streets: { layer: streets, label: "Streets (village names)" },
+    satellite: { layer: satellite, label: "Satellite" },
+    hybrid: { layer: hybrid, label: "Satellite + labels" },
+  };
+}
+
+export function attachFieldMapLayerControl(
+  map: L.Map,
+  defaultLayer: FieldMapBaseLayerKey = "streets",
+): void {
+  const bases = createFieldMapBaseLayers();
+  const overlay: Record<string, L.Layer> = {};
+  const control = L.control.layers(
+    {
+      [bases.streets.label]: bases.streets.layer,
+      [bases.satellite.label]: bases.satellite.layer,
+      [bases.hybrid.label]: bases.hybrid.layer,
+    },
+    overlay,
+    { position: "topright", collapsed: false },
+  );
+  control.addTo(map);
+  bases[defaultLayer].layer.addTo(map);
+}
+
 export function createFieldMap(container: HTMLElement): L.Map {
   const touch = isTouchMapDevice();
   return L.map(container, {
