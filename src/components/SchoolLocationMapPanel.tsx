@@ -1,19 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, MapPin, RefreshCw, Search } from "lucide-react";
-import {
-  attachMapResizeObserver,
-  attachMapVisibilityObserver,
-  createFieldMap,
-  createMapTileLayer,
-  scheduleMapInvalidate,
-  waitForMapContainerSize,
-} from "../lib/leaflet-map-setup";
 import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
 import { SchoolWork } from "../types";
+import SchoolGoogleMap from "./SchoolGoogleMap";
 
 async function fetchWithRetry(
   url: string,
@@ -100,11 +91,8 @@ export default function SchoolLocationMapPanel({
   const [searching, setSearching] = useState(false);
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
-
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
-  const dragMarkerRef = useRef<L.Marker | null>(null);
+  const [mapsApiKey, setMapsApiKey] = useState<string | null>(null);
+  const [mapsConfigError, setMapsConfigError] = useState<string | null>(null);
 
   const mergedSchools = useMemo(
     () =>
@@ -175,6 +163,36 @@ export default function SchoolLocationMapPanel({
       ...prev,
       [schoolId]: { ...prev[schoolId], ...patch },
     }));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/school-works/maps-config");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || "Google Maps not configured.");
+        if (!cancelled) {
+          if (data.configured && data.mapsApiKey) {
+            setMapsApiKey(String(data.mapsApiKey));
+            setMapsConfigError(null);
+          } else {
+            setMapsApiKey(null);
+            setMapsConfigError(
+              "Add GOOGLE_PLACES_API_KEY on the backend and enable Maps JavaScript API + Places API + Geocoding API in Google Cloud.",
+            );
+          }
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setMapsApiKey(null);
+          setMapsConfigError(err instanceof Error ? err.message : "Google Maps not available.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const runAutoPin = async () => {
@@ -396,102 +414,6 @@ export default function SchoolLocationMapPanel({
     }
   };
 
-  useEffect(() => {
-    const container = mapContainerRef.current;
-    if (!container) return;
-
-    let detachResize: (() => void) | undefined;
-    let detachVisibility: (() => void) | undefined;
-    let cancelled = false;
-
-    void (async () => {
-      const sized = await waitForMapContainerSize(container);
-      if (!sized || cancelled) return;
-
-      if (!mapRef.current) {
-        mapRef.current = createFieldMap(container);
-        createMapTileLayer().addTo(mapRef.current);
-        markersLayerRef.current = L.layerGroup().addTo(mapRef.current);
-        detachResize = attachMapResizeObserver(mapRef.current, container);
-        detachVisibility = attachMapVisibilityObserver(mapRef.current, container);
-        scheduleMapInvalidate(mapRef.current, 50);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      detachResize?.();
-      detachVisibility?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const layer = markersLayerRef.current;
-    if (!map || !layer) return;
-
-    layer.clearLayers();
-    dragMarkerRef.current = null;
-
-    for (const group of villageGroups) {
-      if (!Number.isFinite(group.lat) || !Number.isFinite(group.lng)) continue;
-      const isSelectedVillage = selectedVillage === group.village;
-      const marker = L.circleMarker([group.lat!, group.lng!], {
-        radius: isSelectedVillage ? 9 : 6,
-        color: group.verifiedCount === group.schools.length ? "#10b981" : "#f59e0b",
-        fillColor: group.verifiedCount === group.schools.length ? "#10b981" : "#f59e0b",
-        fillOpacity: 0.85,
-        weight: isSelectedVillage ? 3 : 1,
-      });
-      marker.bindTooltip(`${group.village} (${group.schools.length} schools)`);
-      marker.on("click", () => {
-        setSelectedVillage(group.village);
-        setSelectedSchoolId(group.schools[0]?.id ?? null);
-      });
-      marker.addTo(layer);
-    }
-
-    if (selectedSchool && hasValidPin(selectedSchool)) {
-      const lat = Number(selectedSchool.lat);
-      const lng = Number(selectedSchool.lng);
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:18px;height:18px;border-radius:50%;background:${
-          selectedSchool.locationVerified ? "#10b981" : "#f59e0b"
-        };border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
-      });
-      const dragMarker = L.marker([lat, lng], {
-        icon,
-        draggable: !readOnly,
-        zIndexOffset: 1000,
-      });
-      dragMarker.bindTooltip(selectedSchool.schoolName || "School pin");
-      if (!readOnly) {
-        dragMarker.on("dragend", () => {
-          const pos = dragMarker.getLatLng();
-          void saveDraftPin(
-            selectedSchool.id,
-            pos.lat,
-            pos.lng,
-            selectedSchool.matchedPlaceName,
-          );
-        });
-      }
-      dragMarker.addTo(layer);
-      dragMarkerRef.current = dragMarker;
-      map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 0.5 });
-    } else if (selectedVillage) {
-      const group = villageGroups.find((g) => g.village === selectedVillage);
-      if (group?.lat != null && group.lng != null) {
-        map.flyTo([group.lat, group.lng], Math.max(map.getZoom(), 13), { duration: 0.5 });
-      }
-    }
-
-    scheduleMapInvalidate(map, 0);
-  }, [villageGroups, selectedSchool, selectedVillage, readOnly]);
-
   return (
     <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
       <div>
@@ -500,9 +422,8 @@ export default function SchoolLocationMapPanel({
           Village-First School Locations
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Resolves each school via <strong>Google Maps</strong> using school name, village, block, district, and{" "}
-          <strong>UDISE</strong>. Pins inside Bihar are auto-verified — supervisors can visit immediately. Wrong-state
-          matches (e.g. Rajasthan) are rejected.
+          Resolves each school via <strong>Google Maps</strong> (Places + Geocode) using school name, village, block, district, and{" "}
+          <strong>UDISE</strong>. Map shows <strong>Google Maps</strong> with village/place names on every pin.
         </p>
       </div>
 
@@ -667,6 +588,9 @@ export default function SchoolLocationMapPanel({
                     </div>
                     <p className="text-[10px] text-slate-400 mt-0.5 pl-4">
                       {group.verifiedCount} verified · {group.draftCount} draft · {group.missingCount} missing
+                      {group.schools.find((s) => s.matchedPlaceName)?.matchedPlaceName && (
+                        <> · Google: {group.schools.find((s) => s.matchedPlaceName)?.matchedPlaceName}</>
+                      )}
                     </p>
                   </button>
                   {selectedVillage === group.village && (
@@ -701,11 +625,14 @@ export default function SchoolLocationMapPanel({
                               <span className={`w-1.5 h-1.5 rounded-full mt-1.5 ${statusDotClass(status)}`} />
                               <span>
                                 <span className="font-medium text-slate-700 block">{school.schoolName}</span>
-                                <span className="text-[10px] text-slate-400">
+                                <span className="text-[10px] text-slate-400 block">
                                   {hasValidPin(school)
-                                    ? locationConfidenceLabel(school.locationConfidence)
-                                    : "No pin"}
+                                    ? `${school.matchedPlaceName || localityHintFromSchoolName(school.schoolName || "")} · ${locationConfidenceLabel(school.locationConfidence)}`
+                                    : "No pin — run Resolve"}
                                 </span>
+                                {school.udise && (
+                                  <span className="text-[10px] text-slate-400">UDISE {school.udise}</span>
+                                )}
                               </span>
                             </div>
                             {selectedSchoolId === school.id && hasValidPin(school) && !readOnly && !school.locationVerified && (
@@ -732,10 +659,34 @@ export default function SchoolLocationMapPanel({
           )}
         </div>
 
-        <div
-          ref={mapContainerRef}
-          className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] w-full overflow-hidden"
-        />
+        {mapsConfigError && (
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 lg:col-span-2">
+            {mapsConfigError}
+          </p>
+        )}
+        {mapsApiKey ? (
+          <SchoolGoogleMap
+            schools={filteredSchools}
+            mapsApiKey={mapsApiKey}
+            selectedSchoolId={selectedSchoolId}
+            readOnly={readOnly}
+            onSelectSchool={(schoolId) => {
+              const school = filteredSchools.find((s) => s.id === schoolId);
+              setSelectedSchoolId(schoolId);
+              if (school) {
+                setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
+              }
+            }}
+            onDragPin={(schoolId, lat, lng) => {
+              const school = filteredSchools.find((s) => s.id === schoolId);
+              void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
+            }}
+          />
+        ) : (
+          <div className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] flex items-center justify-center text-xs text-slate-400">
+            {mapsConfigError ? "Google Maps unavailable" : "Loading Google Maps…"}
+          </div>
+        )}
       </div>
 
       {selectedSchool && isUnsafeSchoolPin(selectedSchool) && (
@@ -748,11 +699,17 @@ export default function SchoolLocationMapPanel({
       {selectedSchool && (
         <p className="text-[11px] text-slate-500">
           Selected: <span className="font-semibold text-slate-700">{selectedSchool.schoolName}</span>
+          {selectedSchool.matchedPlaceName && (
+            <>
+              {" "}
+              · Google place: <span className="font-semibold">{selectedSchool.matchedPlaceName}</span>
+            </>
+          )}
           {hasValidPin(selectedSchool) && (
             <>
               {" "}
               · {Number(selectedSchool.lat).toFixed(5)}, {Number(selectedSchool.lng).toFixed(5)}
-              {selectedSchool.locationVerified ? " · Verified" : " · Draft — drag pin or search to correct, then verify"}
+              {selectedSchool.locationVerified ? " · Verified" : " · Draft"}
             </>
           )}
         </p>
