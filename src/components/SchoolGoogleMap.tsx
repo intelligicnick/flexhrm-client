@@ -33,6 +33,7 @@ interface SchoolGoogleMapProps {
   readOnly?: boolean;
   onSelectSchool: (schoolId: string) => void;
   onDragPin?: (schoolId: string, lat: number, lng: number) => void;
+  onLoadError?: (message: string) => void;
 }
 
 export default function SchoolGoogleMap({
@@ -42,6 +43,7 @@ export default function SchoolGoogleMap({
   readOnly = false,
   onSelectSchool,
   onDragPin,
+  onLoadError,
 }: SchoolGoogleMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -69,8 +71,8 @@ export default function SchoolGoogleMap({
             fullscreenControl: true,
           });
         }
-      } catch {
-        // Parent shows config error
+      } catch (err: unknown) {
+        onLoadError?.(err instanceof Error ? err.message : "Google Maps failed to load.");
       }
     })();
 

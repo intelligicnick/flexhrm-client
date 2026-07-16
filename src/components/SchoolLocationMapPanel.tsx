@@ -5,6 +5,7 @@ import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
 import { SchoolWork } from "../types";
 import SchoolGoogleMap from "./SchoolGoogleMap";
+import SchoolLeafletMap from "./SchoolLeafletMap";
 
 async function fetchWithRetry(
   url: string,
@@ -93,6 +94,7 @@ export default function SchoolLocationMapPanel({
   const [actionLoading, setActionLoading] = useState(false);
   const [mapsApiKey, setMapsApiKey] = useState<string | null>(null);
   const [mapsConfigError, setMapsConfigError] = useState<string | null>(null);
+  const [googleMapFailed, setGoogleMapFailed] = useState(false);
 
   const mergedSchools = useMemo(
     () =>
@@ -661,10 +663,41 @@ export default function SchoolLocationMapPanel({
             {mapsConfigError}
           </p>
         )}
-        {mapsApiKey ? (
+        {googleMapFailed && (
+          <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 lg:col-span-2 space-y-1">
+            <p className="font-semibold">Google Maps could not load — showing OpenStreetMap fallback.</p>
+            <p className="text-xs">
+              In Google Cloud Console for your API key: enable <strong>Maps JavaScript API</strong>, turn on{" "}
+              <strong>billing</strong>, and add your site under HTTP referrers (e.g.{" "}
+              <code className="bg-amber-100 px-1 rounded">https://*.hostingersite.com/*</code>).
+            </p>
+          </div>
+        )}
+        {mapsApiKey && !googleMapFailed ? (
           <SchoolGoogleMap
             schools={filteredSchools}
             mapsApiKey={mapsApiKey}
+            selectedSchoolId={selectedSchoolId}
+            readOnly={readOnly}
+            onLoadError={(message) => {
+              setGoogleMapFailed(true);
+              setMapsConfigError(message);
+            }}
+            onSelectSchool={(schoolId) => {
+              const school = filteredSchools.find((s) => s.id === schoolId);
+              setSelectedSchoolId(schoolId);
+              if (school) {
+                setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
+              }
+            }}
+            onDragPin={(schoolId, lat, lng) => {
+              const school = filteredSchools.find((s) => s.id === schoolId);
+              void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
+            }}
+          />
+        ) : (
+          <SchoolLeafletMap
+            schools={filteredSchools}
             selectedSchoolId={selectedSchoolId}
             readOnly={readOnly}
             onSelectSchool={(schoolId) => {
@@ -679,10 +712,6 @@ export default function SchoolLocationMapPanel({
               void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
             }}
           />
-        ) : (
-          <div className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] flex items-center justify-center text-xs text-slate-400">
-            {mapsConfigError ? "Google Maps unavailable" : "Loading Google Maps…"}
-          </div>
         )}
       </div>
 

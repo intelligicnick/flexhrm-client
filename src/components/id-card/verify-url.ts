@@ -48,14 +48,20 @@ export function parseVerifyTokenFromParam(raw: string, search?: string): string 
   return value;
 }
 
+/** Origin for tenant-facing links shown in the admin UI (supervisor login, PWA install). */
+function getTenantPublicOrigin(): string {
+  if (typeof window !== "undefined") return window.location.origin;
+  return getIdCardVerifySiteOrigin();
+}
+
 /** Public supervisor mobile login URL (open on phone to log field visits). */
 export function getSupervisorLoginUrl(): string {
-  return `${getIdCardVerifySiteOrigin()}/supervisor/login`;
+  return `${getTenantPublicOrigin()}/supervisor/login`;
 }
 
 /** Web app manifest for the supervisor-only PWA (scope: /supervisor/). */
 export function getSupervisorPwaManifestUrl(): string {
-  return `${getIdCardVerifySiteOrigin()}/manifest.webmanifest`;
+  return `${getTenantPublicOrigin()}/manifest.webmanifest`;
 }
 
 /** Normalize route/query values, including malformed multi-line QR scanner URLs. */

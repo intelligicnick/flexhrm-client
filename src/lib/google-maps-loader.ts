@@ -55,6 +55,7 @@ declare global {
   interface Window {
     google?: GoogleMapsNamespace;
     __flexhrmGoogleMapsPromise?: Promise<GoogleMapsNamespace>;
+    gm_authFailure?: () => void;
   }
 }
 
@@ -63,6 +64,13 @@ export async function loadGoogleMaps(apiKey: string): Promise<GoogleMapsNamespac
   if (window.__flexhrmGoogleMapsPromise) return window.__flexhrmGoogleMapsPromise;
 
   window.__flexhrmGoogleMapsPromise = new Promise((resolve, reject) => {
+    const previousAuthFailure = window.gm_authFailure;
+    window.gm_authFailure = () => {
+      window.__flexhrmGoogleMapsPromise = undefined;
+      reject(new Error("Google Maps API key blocked or Maps JavaScript API not enabled."));
+      if (typeof previousAuthFailure === "function") previousAuthFailure();
+    };
+
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`;
     script.async = true;
@@ -71,7 +79,10 @@ export async function loadGoogleMaps(apiKey: string): Promise<GoogleMapsNamespac
       if (window.google?.maps) resolve(window.google);
       else reject(new Error("Google Maps failed to load."));
     };
-    script.onerror = () => reject(new Error("Google Maps script failed to load."));
+    script.onerror = () => {
+      window.__flexhrmGoogleMapsPromise = undefined;
+      reject(new Error("Google Maps script failed to load."));
+    };
     document.head.appendChild(script);
   });
 
