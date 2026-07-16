@@ -305,9 +305,6 @@ export default function SchoolLocationMapPanel({
   const applySearchHit = (hit: SearchHit) => {
     if (!selectedSchool || readOnly) return;
     void saveDraftPin(selectedSchool.id, hit.lat, hit.lng, hit.displayName);
-    if (mapRef.current) {
-      mapRef.current.flyTo([hit.lat, hit.lng], 15, { duration: 0.6 });
-    }
     setSearchHits([]);
   };
 
