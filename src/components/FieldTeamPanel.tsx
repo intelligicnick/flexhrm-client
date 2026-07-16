@@ -7,7 +7,7 @@ import SchoolSupervisorsTable from "./SchoolSupervisorsTable";
 import SupervisorRequestsPanel from "./SupervisorRequestsPanel";
 import CommitmentDiaryPanel from "./CommitmentDiaryPanel";
 import SupervisorPwaInstallCard from "./SupervisorPwaInstallCard";
-import SchoolLocationResolver from "./SchoolLocationResolver";
+import SchoolLocationMapPanel from "./SchoolLocationMapPanel";
 
 interface FieldTeamPanelProps {
   visits: SchoolVisit[];
@@ -195,7 +195,7 @@ export default function FieldTeamPanel({
         />
       ) : (
         <div className="space-y-4">
-          <SchoolLocationResolver schools={schools} readOnly={readOnly} />
+          <SchoolLocationMapPanel schools={schools} readOnly={readOnly} />
           <SchoolSupervisorsTable
             supervisors={supervisors}
             schools={schools}

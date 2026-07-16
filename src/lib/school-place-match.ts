@@ -243,6 +243,20 @@ export function placeMatchesSchoolContext(
   return tokens.some((token) => token.length >= 4 && haystack.includes(token));
 }
 
+export function placeInExpectedDistrict(
+  formattedAddress: string,
+  district: string,
+): boolean {
+  const haystack = normalizeToken(formattedAddress);
+  if (!haystack) return false;
+  if (haystack.includes("bihar")) return true;
+  const districtNorm = normalizeToken(district);
+  if (districtNorm && districtNorm.length >= 3) {
+    return tokenInHaystack(districtNorm, haystack);
+  }
+  return true;
+}
+
 export function isUnsafeSchoolPin(school: {
   schoolName?: string;
   matchedPlaceName?: string;
@@ -264,8 +278,11 @@ export function isUnsafeSchoolPin(school: {
     return true;
   }
 
-  if (formattedAddress && block && district) {
-    if (!placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+  if (formattedAddress && district) {
+    const confidence = String(school.locationConfidence || "").trim();
+    if (confidence === "village") {
+      if (!placeInExpectedDistrict(formattedAddress, district)) return true;
+    } else if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
       return true;
     }
   }
