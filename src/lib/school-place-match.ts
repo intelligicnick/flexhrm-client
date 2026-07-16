@@ -246,15 +246,31 @@ export function placeMatchesSchoolContext(
 export function placeInExpectedDistrict(
   formattedAddress: string,
   district: string,
+  block = "",
 ): boolean {
   const haystack = normalizeToken(formattedAddress);
   if (!haystack) return false;
-  if (haystack.includes("bihar")) return true;
+  const wrongStates = [
+    "rajasthan",
+    "gujarat",
+    "maharashtra",
+    "uttar pradesh",
+    "west bengal",
+    "odisha",
+    "jharkhand",
+    "madhya pradesh",
+    "delhi",
+  ];
+  if (wrongStates.some((state) => haystack.includes(state))) return false;
+  if (!haystack.includes("bihar")) return false;
   const districtNorm = normalizeToken(district);
-  if (districtNorm && districtNorm.length >= 3) {
-    return tokenInHaystack(districtNorm, haystack);
-  }
-  return true;
+  if (!districtNorm || districtNorm.length < 3) return false;
+  return tokenInHaystack(districtNorm, haystack);
+}
+
+export function coordinatesInBihar(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return lat >= 24.15 && lat <= 27.85 && lng >= 83.25 && lng <= 88.15;
 }
 
 export function isUnsafeSchoolPin(school: {
@@ -265,7 +281,15 @@ export function isUnsafeSchoolPin(school: {
   district?: string;
   locationConfidence?: string;
   siblingBlocks?: string[];
+  lat?: number | string;
+  lng?: number | string;
 }): boolean {
+  const lat = Number(school.lat);
+  const lng = Number(school.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
+    return true;
+  }
+
   const matchedPlaceName = String(school.matchedPlaceName || "").trim();
   const formattedAddress = String(school.formattedAddress || "").trim();
   const schoolName = String(school.schoolName || "").trim();

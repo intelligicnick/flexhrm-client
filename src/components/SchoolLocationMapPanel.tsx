@@ -10,7 +10,7 @@ import {
   scheduleMapInvalidate,
   waitForMapContainerSize,
 } from "../lib/leaflet-map-setup";
-import { localityHintFromSchoolName } from "../lib/school-place-match";
+import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
 import { SchoolWork } from "../types";
@@ -736,6 +736,13 @@ export default function SchoolLocationMapPanel({
           className="rounded-lg border border-slate-200 min-h-[420px] h-[420px] w-full overflow-hidden"
         />
       </div>
+
+      {selectedSchool && isUnsafeSchoolPin(selectedSchool) && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          This pin is outside Bihar or does not match district/block — likely a wrong match (e.g. Rajasthan).
+          Search for the correct village in {selectedSchool.district || "district"} / {selectedSchool.block || "block"}, drag the pin, then verify.
+        </p>
+      )}
 
       {selectedSchool && (
         <p className="text-[11px] text-slate-500">
