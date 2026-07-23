@@ -60,6 +60,20 @@ function pinStatus(school: SchoolWork): "verified" | "draft" | "missing" {
   return "draft";
 }
 
+function resolutionStepLabel(step?: string): string {
+  if (step === "school") return "Step 1 · School on Google";
+  if (step === "village") return "Step 2 · Village on Google";
+  if (step === "osm_village") return "Step 3 · Village on OpenStreetMap";
+  return "";
+}
+
+function resolveStatusClass(status: string): string {
+  if (status === "verified" || status === "resolved") return "text-emerald-700";
+  if (status === "skipped") return "text-slate-500";
+  if (status === "unsafe_pin") return "text-amber-700";
+  return "text-rose-700";
+}
+
 function statusDotClass(status: "verified" | "draft" | "missing"): string {
   if (status === "verified") return "bg-emerald-500";
   if (status === "draft") return "bg-amber-500";
@@ -84,6 +98,7 @@ export default function SchoolLocationMapPanel({
     failed: number;
     villagesResolved: number;
   } | null>(null);
+  const [resolveRows, setResolveRows] = useState<Array<Record<string, unknown>>>([]);
   const [overrides, setOverrides] = useState<Record<string, Partial<SchoolWork>>>({});
   const [selectedVillage, setSelectedVillage] = useState<string | null>(null);
   const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
@@ -171,6 +186,7 @@ export default function SchoolLocationMapPanel({
     setLoading(true);
     setError(null);
     setSummary(null);
+    setResolveRows([]);
     setProgress(null);
 
     let schoolOffset = 0;
@@ -180,6 +196,7 @@ export default function SchoolLocationMapPanel({
     let skipped = 0;
     let failed = 0;
     let villagesResolved = 0;
+    const allRows: Array<Record<string, unknown>> = [];
 
     try {
       while (true) {
@@ -212,10 +229,17 @@ export default function SchoolLocationMapPanel({
         villagesResolved += Number(data.villagesResolved) || 0;
 
         if (Array.isArray(data.results)) {
+          allRows.push(...data.results);
+          setResolveRows([...allRows]);
           for (const row of data.results) {
             const schoolId = String(row.schoolWorkId || "");
             if (!schoolId) continue;
-            if (row.status === "verified" || row.status === "draft" || row.status === "resolved") {
+            if (
+              row.status === "verified" ||
+              row.status === "draft" ||
+              row.status === "resolved" ||
+              row.status === "unsafe_pin"
+            ) {
               patchOverride(schoolId, {
                 lat: Number(row.lat),
                 lng: Number(row.lng),
@@ -237,7 +261,11 @@ export default function SchoolLocationMapPanel({
       setProgress(null);
       if (skipExisting && resolved === 0 && skipped > 0 && failed === 0) {
         setError(
-          "All schools were skipped because they already have verified pins. Uncheck “Skip schools with existing pins” to re-resolve.",
+          "All schools were skipped because they already have verified pins. Uncheck “Skip schools with existing pins” to re-resolve every school.",
+        );
+      } else if (failed > 0 && resolved === 0) {
+        setError(
+          `${failed} school(s) could not be auto-verified — see the resolve log below for each reason.`,
         );
       }
     } catch (err: unknown) {
@@ -435,7 +463,7 @@ export default function SchoolLocationMapPanel({
             onChange={(e) => setSkipExisting(e.target.checked)}
             disabled={readOnly || loading}
           />
-          Skip schools with existing pins (uncheck to replace old pins)
+          Skip schools with existing verified pins (off by default — every school is resolved)
         </label>
         {!readOnly && (
           <button
@@ -466,6 +494,63 @@ export default function SchoolLocationMapPanel({
           Schools {summary.total} · Villages {summary.totalVillages} · Verified {summary.resolved} · Skipped{" "}
           {summary.skipped} · Failed {summary.failed}
         </p>
+      )}
+
+      {resolveRows.length > 0 && (
+        <div className="max-h-72 overflow-auto border border-slate-100 rounded-lg">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 sticky top-0">
+              <tr>
+                <th className="text-left p-2">School</th>
+                <th className="text-left p-2">Result</th>
+                <th className="text-left p-2">Reason</th>
+                <th className="text-left p-2">Match</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resolveRows.map((row) => {
+                const schoolId = String(row.schoolWorkId || "");
+                const status = String(row.status || "");
+                return (
+                  <tr key={schoolId || String(row.schoolName)} className="border-t border-slate-100">
+                    <td className="p-2">
+                      <p className="font-semibold text-slate-800">{String(row.schoolName || "")}</p>
+                      {row.villageHint ? (
+                        <p className="text-[10px] text-slate-400">
+                          Village: <span className="font-medium text-slate-600">{String(row.villageHint)}</span>
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className={`p-2 capitalize font-semibold ${resolveStatusClass(status)}`}>
+                      {status.replace(/_/g, " ")}
+                      {row.resolutionStep ? (
+                        <span className="block text-[10px] font-normal text-slate-500 normal-case">
+                          {resolutionStepLabel(String(row.resolutionStep))}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="p-2 text-slate-600">
+                      {String(row.message || row.failureReason || row.successReason || "—")}
+                    </td>
+                    <td className="p-2">
+                      {row.matchedPlaceName ? String(row.matchedPlaceName) : "—"}
+                      {row.googleMapsUrl ? (
+                        <a
+                          href={String(row.googleMapsUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-[#ff791a] font-semibold hover:underline mt-0.5"
+                        >
+                          Open map
+                        </a>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div className="flex flex-wrap gap-2 items-center">

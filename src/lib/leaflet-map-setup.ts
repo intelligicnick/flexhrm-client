@@ -28,6 +28,12 @@ export const MAP_TILE_ATTRIBUTION_DETAILED = MAP_TILE_ATTRIBUTION_STANDARD;
 
 export const MAP_DEFAULT_CENTER: L.LatLngExpression = [20.5937, 78.9629];
 export const MAP_DEFAULT_ZOOM = 5;
+/** Allow pinch/wheel zoom beyond native tile LOD by upscaling (no blank Esri placeholders). */
+export const MAP_MAX_ZOOM = 22;
+/** Esri World Imagery is sparse above ~17 in rural India — upscale instead of missing tiles. */
+export const MAP_SATELLITE_MAX_NATIVE_ZOOM = 17;
+/** OSM / CARTO street tiles are reliably available through ~19 in India. */
+export const MAP_STREETS_MAX_NATIVE_ZOOM = 19;
 
 export function isTouchMapDevice(): boolean {
   if (typeof window === "undefined") return false;
@@ -47,7 +53,8 @@ export function createMapTileLayer(detailedLabels = true): L.TileLayer {
   const attribution = detailedLabels ? MAP_TILE_ATTRIBUTION : MAP_TILE_ATTRIBUTION_SIMPLE;
   return L.tileLayer(url, {
     attribution,
-    maxZoom: 20,
+    maxNativeZoom: MAP_STREETS_MAX_NATIVE_ZOOM,
+    maxZoom: MAP_MAX_ZOOM,
     // HOT OSM uses a/b/c; CARTO uses a/b/c/d — both tolerate extra subdomain retries
     subdomains: detailedLabels ? "abc" : "abcd",
     // Android WebView: load tiles while panning/zooming to avoid blank white map.
@@ -68,7 +75,8 @@ export function createSatelliteTileLayer(): L.TileLayer {
     {
       attribution:
         'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Source: Esri, Maxar, Earthstar Geographics',
-      maxZoom: 19,
+      maxNativeZoom: MAP_SATELLITE_MAX_NATIVE_ZOOM,
+      maxZoom: MAP_MAX_ZOOM,
       updateWhenIdle: !touch,
       updateWhenZooming: touch,
       keepBuffer: touch ? 8 : 4,
@@ -86,7 +94,8 @@ export function createSatelliteLabelLayer(): L.TileLayer {
     {
       attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: "abcd",
-      maxZoom: 20,
+      maxNativeZoom: MAP_STREETS_MAX_NATIVE_ZOOM,
+      maxZoom: MAP_MAX_ZOOM,
       pane: "overlayPane",
       updateWhenIdle: !touch,
       updateWhenZooming: touch,
@@ -135,6 +144,7 @@ export function createFieldMap(container: HTMLElement): L.Map {
   return L.map(container, {
     center: MAP_DEFAULT_CENTER,
     zoom: MAP_DEFAULT_ZOOM,
+    maxZoom: MAP_MAX_ZOOM,
     zoomControl: true,
     attributionControl: true,
     preferCanvas: false,

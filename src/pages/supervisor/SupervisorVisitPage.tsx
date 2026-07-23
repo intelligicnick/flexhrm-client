@@ -37,6 +37,8 @@ import {
 } from "../../lib/supervisor-visit-outbox";
 import { useSupervisorOverlayBack, useSupervisorUnsavedBackGuard } from "../../lib/supervisor-back-handler";
 import { SupervisorActionButton, SupervisorConfirmDialog, SupervisorLoadingScreen } from "./SupervisorUI";
+import SupervisorSchoolMap from "../../components/supervisor/SupervisorSchoolMap";
+import { supervisorSchoolVillageName, resolveSchoolStampLabels, invalidateSchoolStampLabelCache, type SchoolStampLabels } from "../../lib/supervisor-school-location";
 
 function photoSrc(photo: StampedVisitPhoto) {
   return resolvePhotoSrc(photo);
@@ -105,9 +107,14 @@ export default function SupervisorVisitPage() {
 
   const [gpsPlaceName, setGpsPlaceName] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [mapsApiKey, setMapsApiKey] = useState<string | null>(null);
+  const [mapLoadError, setMapLoadError] = useState<string | null>(null);
+  const [resolvingLocation, setResolvingLocation] = useState(false);
+  const [locationResolveFailed, setLocationResolveFailed] = useState(false);
+  const [stampLabels, setStampLabels] = useState<SchoolStampLabels | null>(null);
 
   const villageName = useMemo(
-    () => (school ? localityHintFromSchoolName(school.schoolName || "") : ""),
+    () => (school ? supervisorSchoolVillageName(school) : ""),
     [school],
   );
 
@@ -147,6 +154,45 @@ export default function SupervisorVisitPage() {
   const withinSchoolGeofence =
     distanceToSchoolM != null ? distanceToSchoolM <= geofenceRadiusM : false;
 
+  const stampPhotoLabels = useMemo(
+    () => ({
+      school: t("stampSchool"),
+      village: t("stampVillage"),
+      required: t("stampRequired"),
+      place: t("stampPlace"),
+      date: t("stampDate"),
+      time: t("stampTime"),
+      latLng: t("stampLatLng"),
+      location: t("stampLocation"),
+    }),
+    [t],
+  );
+
+  useEffect(() => {
+    if (!school?.id) {
+      setStampLabels(null);
+      return;
+    }
+    let cancelled = false;
+    invalidateSchoolStampLabelCache(String(school.id));
+    void resolveSchoolStampLabels(school, supervisorFetch).then((labels) => {
+      if (!cancelled) setStampLabels(labels);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    school?.id,
+    school?.locationVerified,
+    school?.matchedPlaceName,
+    school?.lat,
+    school?.lng,
+    school?.schoolName,
+    school?.block,
+    school?.district,
+    supervisorFetch,
+  ]);
+
   const refreshGps = async () => {
     setGpsRefreshing(true);
     try {
@@ -170,6 +216,60 @@ export default function SupervisorVisitPage() {
     void refreshGps();
     return stopWarmup;
   }, [supervisorFetch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await supervisorFetch("/api/school-visits/supervisor/maps-config");
+        if (!res.ok) return;
+        const data = (await res.json()) as { configured?: boolean; mapsApiKey?: string };
+        if (!cancelled && data.configured && data.mapsApiKey) {
+          setMapsApiKey(String(data.mapsApiKey));
+        }
+      } catch {
+        /* map optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supervisorFetch]);
+
+  useEffect(() => {
+    if (!schoolId || !school || schoolPinReady || schoolPinInvalid) return;
+
+    let cancelled = false;
+    setResolvingLocation(true);
+    setLocationResolveFailed(false);
+
+    void (async () => {
+      try {
+        const res = await supervisorFetch(
+          `/api/school-visits/supervisor/schools/${encodeURIComponent(schoolId)}/ensure-location`,
+          { method: "POST" },
+        );
+        const data = (await res.json()) as {
+          school?: SchoolWork;
+          status?: string;
+        };
+        if (!cancelled && data.school) {
+          setSchool(data.school);
+          if (data.status !== "ready") setLocationResolveFailed(true);
+        } else if (!cancelled) {
+          setLocationResolveFailed(true);
+        }
+      } catch {
+        if (!cancelled) setLocationResolveFailed(true);
+      } finally {
+        if (!cancelled) setResolvingLocation(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [schoolId, school?.id, schoolPinReady, schoolPinInvalid, supervisorFetch]);
 
   useEffect(() => {
     return registerVisitOutboxSync(async (draft: PendingVisitDraft) => {
@@ -349,7 +449,10 @@ export default function SupervisorVisitPage() {
       const file = await captureLivePhoto();
       const stamped = await stampVisitPhoto(file, location, {
         schoolName: school?.schoolName,
+        villageName: stampLabels?.village || villageName,
+        requiredPlaceName: stampLabels?.requiredPlace,
         index: photos.length + 1,
+        labels: stampPhotoLabels,
       });
       setPhotos((prev) => [...prev, stamped]);
       setGpsPlaceName(location.placeName);
@@ -549,14 +652,53 @@ export default function SupervisorVisitPage() {
       {!schoolPinReady && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p className="font-bold">
-            {schoolPinInvalid ? "School pin needs correction" : "School location not set up"}
+            {schoolPinInvalid
+              ? "School pin needs correction"
+              : resolvingLocation
+                ? t("findingSchoolLocation")
+                : "School location not set up"}
           </p>
           <p className="mt-1 text-xs">
             {schoolPinInvalid
               ? `${school.schoolName}${villageName ? ` (${villageName})` : ""}: saved pin is outside Bihar or wrong area. Admin must re-run Pin & Resolve for ${school.block}.`
-              : `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}, UDISE ${school.udise}: location not resolved yet. Admin must run Pin & Resolve in Field Team for block ${school.block} before you can submit visits.`}
+              : resolvingLocation
+                ? `${school.schoolName}${villageName ? ` — ${villageName}` : ""}, UDISE ${school.udise}`
+                : locationResolveFailed
+                  ? `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}: Google could not find this school automatically. Admin may need to fix in Field Team.`
+                  : `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}, UDISE ${school.udise}: waiting for automatic Google location…`}
           </p>
         </div>
+      )}
+
+      {schoolPinReady && mapsApiKey && (
+        <section className="space-y-2">
+          {school.matchedPlaceName && (
+            <p className="text-xs text-slate-600 px-1">
+              {t("googleFoundPlace")}:{" "}
+              <span className="font-semibold text-slate-800">{school.matchedPlaceName}</span>
+              {school.locationConfidence === "exact" ? ` · ${t("geofenceExact")}` : ` · ${t("geofenceVillage")}`}
+            </p>
+          )}
+          <SupervisorSchoolMap
+            mapsApiKey={mapsApiKey}
+            schoolLat={Number(school.lat)}
+            schoolLng={Number(school.lng)}
+            geofenceRadiusM={geofenceRadiusM}
+            schoolLabel={villageName || school.schoolName}
+            matchedPlaceName={String(school.matchedPlaceName || "")}
+            userLat={gpsCoords?.lat}
+            userLng={gpsCoords?.lng}
+            withinGeofence={withinSchoolGeofence}
+            openInMapsLabel={t("openInGoogleMaps")}
+            googleMapsUrl={school.googleMapsUrl}
+            onLoadError={(message) => setMapLoadError(message)}
+          />
+          {mapLoadError && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {t("mapLoadFailed")}
+            </p>
+          )}
+        </section>
       )}
 
       {schoolPinReady && gpsReady === true && distanceToSchoolM != null && (
@@ -569,8 +711,14 @@ export default function SupervisorVisitPage() {
         >
           <p className="font-semibold">
             {withinSchoolGeofence
-              ? `At ${villageName || geofenceArea} — ${distanceToSchoolM} m from required pin (within ${geofenceRadiusM} m)`
-              : `Too far from ${villageName || geofenceArea} — ${distanceToSchoolM} m away (need within ${geofenceRadiusM} m)`}
+              ? t("atSchoolArea")
+                  .replace("{area}", villageName || geofenceArea)
+                  .replace("{distance}", String(distanceToSchoolM))
+                  .replace("{radius}", String(geofenceRadiusM))
+              : t("tooFarFromSchool")
+                  .replace("{area}", villageName || geofenceArea)
+                  .replace("{distance}", String(distanceToSchoolM))
+                  .replace("{radius}", String(geofenceRadiusM))}
           </p>
           {gpsPlaceName && (
             <p className="text-xs mt-1 opacity-90">
@@ -668,6 +816,23 @@ export default function SupervisorVisitPage() {
             </p>
           )}
         </section>
+
+        {stampLabels && (
+          <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600 space-y-1">
+            <p className="font-bold text-slate-700">{t("photoStampPreview")}</p>
+            {stampLabels.village && (
+              <p>
+                {t("stampVillage")}: <span className="font-semibold text-slate-800">{stampLabels.village}</span>
+              </p>
+            )}
+            {stampLabels.requiredPlace && (
+              <p>
+                {t("requiredPlacePreview")}:{" "}
+                <span className="font-semibold text-slate-800">{stampLabels.requiredPlace}</span>
+              </p>
+            )}
+          </div>
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-orange-50 to-white px-4 py-3">

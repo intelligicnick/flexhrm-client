@@ -490,7 +490,22 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 export async function stampVisitPhoto(
   file: File,
   location: VisitGpsCoords,
-  options?: { schoolName?: string; index?: number },
+  options?: {
+    schoolName?: string;
+    villageName?: string;
+    requiredPlaceName?: string;
+    index?: number;
+    labels?: {
+      school?: string;
+      village?: string;
+      required?: string;
+      place?: string;
+      date?: string;
+      time?: string;
+      latLng?: string;
+      location?: string;
+    };
+  },
 ): Promise<StampedVisitPhoto> {
   if (!hasValidVisitGps(location)) {
     throw new Error("Photo must include valid GPS coordinates.");
@@ -499,7 +514,19 @@ export async function stampVisitPhoto(
   const takenAt = new Date();
   const { dateLine, timeLine, iso } = formatVisitTimestamp(takenAt);
   const schoolName = options?.schoolName?.trim() || "";
+  const villageName = options?.villageName?.trim() || "";
+  const requiredPlaceName = options?.requiredPlaceName?.trim() || "";
   const index = options?.index ?? 1;
+  const L = {
+    school: options?.labels?.school ?? "School",
+    village: options?.labels?.village ?? "Village",
+    required: options?.labels?.required ?? "Required",
+    place: options?.labels?.place ?? "Place",
+    date: options?.labels?.date ?? "Date",
+    time: options?.labels?.time ?? "Time",
+    latLng: options?.labels?.latLng ?? "Lat/Lng",
+    location: options?.labels?.location ?? "Location",
+  };
 
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -540,18 +567,26 @@ export async function stampVisitPhoto(
   const coordsLabel = formatCoords(location.lat, location.lng);
   const decimalCoords = formatLatLngDecimal(location.lat, location.lng);
   const resolvedPlace = location.placeName.trim();
+  const requiredDiffersFromVillage =
+    requiredPlaceName &&
+    villageName &&
+    requiredPlaceName.toLowerCase() !== villageName.toLowerCase();
   const lines = [
-    `Date: ${dateLine}`,
-    `Time: ${timeLine}`,
+    `${L.date}: ${dateLine}`,
+    `${L.time}: ${timeLine}`,
+    ...(villageName ? [`${L.village}: ${villageName}`] : []),
+    ...(requiredPlaceName && (requiredDiffersFromVillage || !villageName)
+      ? [`${L.required}: ${requiredPlaceName}`]
+      : []),
     ...(resolvedPlace &&
     resolvedPlace !== coordsLabel &&
     resolvedPlace !== decimalCoords
-      ? [`Place: ${resolvedPlace}`]
+      ? [`${L.place}: ${resolvedPlace}`]
       : []),
-    ...(decimalCoords ? [`Lat/Lng: ${decimalCoords}`] : []),
-    ...(coordsLabel ? [`Location: ${coordsLabel}`] : []),
+    ...(decimalCoords ? [`${L.latLng}: ${decimalCoords}`] : []),
+    ...(coordsLabel ? [`${L.location}: ${coordsLabel}`] : []),
   ];
-  if (schoolName) lines.unshift(`School: ${schoolName}`);
+  if (schoolName) lines.unshift(`${L.school}: ${schoolName}`);
 
   const wrappedLines = lines.flatMap((line) => wrapText(ctx, line, canvas.width - padding * 2));
   const barHeight = padding * 2 + wrappedLines.length * lineHeight;

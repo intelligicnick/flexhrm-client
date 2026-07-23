@@ -25,6 +25,13 @@ import {
 } from "../../lib/supervisor-visit-cooldown";
 import SupervisorGamificationCard from "./SupervisorGamificationCard";
 import {
+  supervisorSchoolVillageName,
+  supervisorSchoolPlaceLabel,
+  supervisorSchoolLocationStatus,
+} from "../../lib/supervisor-school-location";
+import { distanceMeters } from "../../lib/gps-coords";
+import { probeGpsLocation } from "../../lib/visit-photo";
+import {
   SupervisorChip,
   SupervisorEmptyState,
   SupervisorLoadingScreen,
@@ -69,6 +76,9 @@ export default function SupervisorHomePage() {
   const [search, setSearch] = useState("");
   const [blockFilter, setBlockFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [sortNearest, setSortNearest] = useState(false);
+  const [userGps, setUserGps] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationWarmDone, setLocationWarmDone] = useState(false);
 
   const today = toIsoDate(new Date());
 
@@ -144,6 +154,57 @@ export default function SupervisorHomePage() {
     };
   }, [supervisorFetch]);
 
+  useEffect(() => {
+    void probeGpsLocation()
+      .then((loc) => {
+        if (Number.isFinite(loc.lat) && Number.isFinite(loc.lng)) {
+          setUserGps({ lat: loc.lat, lng: loc.lng });
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (loading || locationWarmDone || schools.length === 0) return;
+    const needsPin = schools.some((s) => supervisorSchoolLocationStatus(s) !== "ready");
+    if (!needsPin) {
+      setLocationWarmDone(true);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        let offset = 0;
+        while (!cancelled) {
+          const res = await supervisorFetch("/api/school-visits/supervisor/ensure-locations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ schoolOffset: offset, schoolLimit: 2 }),
+          });
+          if (!res.ok) break;
+          const data = (await res.json()) as {
+            hasMore?: boolean;
+            nextSchoolOffset?: number;
+          };
+          if (!data.hasMore) break;
+          offset = Number(data.nextSchoolOffset) || offset + 2;
+        }
+        invalidateSupervisorSchoolsCache();
+        const refreshed = await fetchSupervisorSchools(supervisorFetch, { force: true });
+        if (!cancelled) setSchools(refreshed);
+      } catch {
+        /* background warm-up optional */
+      } finally {
+        if (!cancelled) setLocationWarmDone(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, locationWarmDone, schools, supervisorFetch]);
+
   const { fromDate: weekFrom, toDate: weekTo } = getWeekBounds();
   const cooldownFromIso = useMemo(() => {
     const d = new Date();
@@ -203,17 +264,37 @@ export default function SupervisorHomePage() {
   );
 
   const filtered = useMemo(() => {
-    return schools
+    const list = schools
       .filter((s) => blockFilter === "all" || s.block === blockFilter)
       .filter(
         (s) =>
           !search.trim() ||
           s.schoolName?.toLowerCase().includes(search.toLowerCase()) ||
           s.udise?.includes(search) ||
-          s.block?.toLowerCase().includes(search.toLowerCase()),
-      )
-      .sort((a, b) => a.schoolName.localeCompare(b.schoolName));
-  }, [schools, search, blockFilter]);
+          s.block?.toLowerCase().includes(search.toLowerCase()) ||
+          supervisorSchoolVillageName(s).toLowerCase().includes(search.toLowerCase()) ||
+          String(s.matchedPlaceName || "").toLowerCase().includes(search.toLowerCase()),
+      );
+
+    return list.sort((a, b) => {
+      if (sortNearest && userGps) {
+        const aReady = supervisorSchoolLocationStatus(a) === "ready";
+        const bReady = supervisorSchoolLocationStatus(b) === "ready";
+        const distA =
+          aReady && Number(a.lat) && Number(a.lng)
+            ? distanceMeters(userGps.lat, userGps.lng, Number(a.lat), Number(a.lng))
+            : null;
+        const distB =
+          bReady && Number(b.lat) && Number(b.lng)
+            ? distanceMeters(userGps.lat, userGps.lng, Number(b.lat), Number(b.lng))
+            : null;
+        if (distA != null && distB != null) return distA - distB;
+        if (distA != null) return -1;
+        if (distB != null) return 1;
+      }
+      return a.schoolName.localeCompare(b.schoolName);
+    });
+  }, [schools, search, blockFilter, sortNearest, userGps]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -365,6 +446,20 @@ export default function SupervisorHomePage() {
               ))}
             </div>
           )}
+
+          {userGps && (
+            <button
+              type="button"
+              onClick={() => setSortNearest((v) => !v)}
+              className={`text-[11px] font-bold px-3 py-1.5 rounded-full border ${
+                sortNearest
+                  ? "bg-[#ff791a] text-white border-[#ff791a]"
+                  : "bg-white text-slate-600 border-slate-200"
+              }`}
+            >
+              {t("sortNearest")}
+            </button>
+          )}
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0 mt-3 -mx-1 px-1 overscroll-contain">
@@ -382,6 +477,35 @@ export default function SupervisorHomePage() {
                 const lastVisit = lastVisitBySchool.get(school.id);
                 const onCooldown = !canVisitSchoolAgain(lastVisit);
                 const daysLeft = lastVisit ? daysUntilSchoolVisitAllowed(lastVisit) : 0;
+                const locationStatus = supervisorSchoolLocationStatus(school);
+                const placeLabel = supervisorSchoolPlaceLabel(school);
+                const distM =
+                  sortNearest &&
+                  userGps &&
+                  locationStatus === "ready" &&
+                  Number(school.lat) &&
+                  Number(school.lng)
+                    ? Math.round(
+                        distanceMeters(
+                          userGps.lat,
+                          userGps.lng,
+                          Number(school.lat),
+                          Number(school.lng),
+                        ),
+                      )
+                    : null;
+                const locationBadgeClass =
+                  locationStatus === "ready"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : locationStatus === "needs_admin"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-amber-100 text-amber-800";
+                const locationBadgeLabel =
+                  locationStatus === "ready"
+                    ? t("locationReady")
+                    : locationStatus === "needs_admin"
+                      ? t("locationNeedsAdmin")
+                      : t("locationFinding");
                 const cardClass = hasTodayCommit
                   ? "bg-orange-50 border-orange-200 shadow-sm"
                   : onCooldown
@@ -403,6 +527,9 @@ export default function SupervisorHomePage() {
                           <p className="text-xs text-amber-700 font-medium mt-0.5">
                             {t("visitCooldownHint").replace("{days}", String(daysLeft))}
                           </p>
+                          {placeLabel && (
+                            <p className="text-[11px] text-slate-600 mt-0.5 truncate">{placeLabel}</p>
+                          )}
                           <p className="text-[11px] text-slate-500 mt-0.5">{school.block}</p>
                         </div>
                       </div>
@@ -429,7 +556,7 @@ export default function SupervisorHomePage() {
                         {school.schoolName.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-bold text-slate-900 text-sm break-words">{school.schoolName}</p>
                           {hasTodayCommit && (
                             <span className="shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-[#ff791a] text-white">
@@ -441,11 +568,16 @@ export default function SupervisorHomePage() {
                               {t("visited")}
                             </span>
                           )}
+                          <span
+                            className={`shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${locationBadgeClass}`}
+                          >
+                            {locationBadgeLabel}
+                          </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
+                        <p className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1 truncate">
                           <MapPin size={10} className="shrink-0" />
-                          {school.block}
-                          {school.noOfToilets > 0 && ` · ${school.noOfToilets} ${t("toilets")}`}
+                          {placeLabel || school.block}
+                          {distM != null ? ` · ${distM} m` : ""}
                         </p>
                         <p className="text-[11px] text-slate-500 font-mono mt-0.5">UDISE {school.udise}</p>
                       </div>

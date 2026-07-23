@@ -57,6 +57,9 @@ type ResolveRow = {
   locationVerified?: boolean;
   matchScore?: number;
   resolutionStep?: string;
+  message?: string;
+  failureReason?: string;
+  successReason?: string;
 };
 
 export default function SchoolLocationResolver({
@@ -66,7 +69,7 @@ export default function SchoolLocationResolver({
   const [district, setDistrict] = useState("");
   const [block, setBlock] = useState("");
   const [saveVerified, setSaveVerified] = useState(false);
-  const [skipExisting, setSkipExisting] = useState(true);
+  const [skipExisting, setSkipExisting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -250,7 +253,7 @@ export default function SchoolLocationResolver({
             onChange={(e) => setSkipExisting(e.target.checked)}
             disabled={readOnly || loading}
           />
-          Skip already saved
+          Skip already verified (off by default — resolves every school)
         </label>
         {!readOnly && (
           <button
@@ -296,6 +299,7 @@ export default function SchoolLocationResolver({
               <tr>
                 <th className="text-left p-2">School</th>
                 <th className="text-left p-2">Status</th>
+                <th className="text-left p-2">Reason</th>
                 <th className="text-left p-2">Match</th>
                 <th className="text-left p-2">Map</th>
               </tr>
@@ -339,6 +343,9 @@ export default function SchoolLocationResolver({
                         {row.matchScore != null ? ` · score ${row.matchScore}` : ""}
                       </span>
                     )}
+                  </td>
+                  <td className="p-2 text-slate-600">
+                    {row.message || row.failureReason || row.successReason || "—"}
                   </td>
                   <td className="p-2">
                     {row.matchedPlaceName || "—"}

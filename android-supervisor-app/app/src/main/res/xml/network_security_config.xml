@@ -9,6 +9,9 @@
         <domain includeSubdomains="true">hostingersite.com</domain>
         <domain includeSubdomains="true">basemaps.cartocdn.com</domain>
         <domain includeSubdomains="true">cartocdn.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">google.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
