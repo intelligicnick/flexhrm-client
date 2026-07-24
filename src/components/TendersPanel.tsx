@@ -6,6 +6,7 @@ import {
   Search,
   Pencil,
   Trash2,
+  CircleX,
   Upload,
   Clock,
   AlertTriangle,
@@ -317,7 +318,8 @@ function canManageTender(tender: Tender, canManageLockedTenders: boolean): boole
 }
 
 function canPermanentlyDeleteTender(tender: Tender, canManageLockedTenders: boolean): boolean {
-  return isTenderDeleted(tender) && canManageLockedTenders;
+  if (!canManageLockedTenders) return false;
+  return isTenderDeleted(tender) || isMissedParticipation(tender);
 }
 
 function canSelectTenderForBulk(
@@ -1261,7 +1263,7 @@ const TenderCardRow = React.memo(function TenderCardRow({
                 className="p-1.5 rounded-md hover:bg-red-100 text-red-500 hover:text-red-700 cursor-pointer shrink-0"
                 title="Delete permanently"
               >
-                <Trash2 size={14} />
+                <CircleX size={14} />
               </button>
             )}
             {!readOnly && !deleted && (!locked || canManageLockedTenders) && (
@@ -1282,6 +1284,16 @@ const TenderCardRow = React.memo(function TenderCardRow({
                 >
                   <Trash2 size={14} />
                 </button>
+                {locked && canManageLockedTenders && (
+                  <button
+                    type="button"
+                    onClick={() => void onPermanentDelete(tender)}
+                    className="p-1.5 rounded-md hover:bg-red-100 text-red-600 hover:text-red-800 cursor-pointer shrink-0"
+                    title="Delete permanently"
+                  >
+                    <CircleX size={14} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -1443,7 +1455,7 @@ const TenderTableRow = React.memo(function TenderTableRow({
                 className="p-1.5 rounded-lg hover:bg-red-100 text-red-500 hover:text-red-700 cursor-pointer"
                 title="Delete permanently"
               >
-                <Trash2 size={14} />
+                <CircleX size={14} />
               </button>
             ) : !deleted && (!locked || canManageLockedTenders) ? (
               <div className="flex items-center gap-1">
@@ -1463,6 +1475,16 @@ const TenderTableRow = React.memo(function TenderTableRow({
                 >
                   <Trash2 size={14} />
                 </button>
+                {locked && canManageLockedTenders && (
+                  <button
+                    type="button"
+                    onClick={() => void onPermanentDelete(tender)}
+                    className="p-1.5 rounded-lg hover:bg-red-100 text-red-600 hover:text-red-800 cursor-pointer"
+                    title="Delete permanently"
+                  >
+                    <CircleX size={14} />
+                  </button>
+                )}
               </div>
             ) : null}
           </td>
@@ -1970,7 +1992,7 @@ export default function TendersPanel({
 
   const handleBulkPermanentDelete = useCallback(async () => {
     if (selectedDeletedTenderIds.length === 0) {
-      setToast("Select soft-deleted tenders to permanently remove.");
+      setToast("Select soft-deleted or missed (locked) tenders to permanently remove.");
       return;
     }
     const count = selectedDeletedTenderIds.length;
@@ -2472,7 +2494,7 @@ export default function TendersPanel({
                     onClick={() => void handleBulkPermanentDelete()}
                     disabled={selectedDeletedTenderIds.length === 0}
                     className="px-3.5 py-2 text-xs rounded-xl border border-red-300 bg-red-50 text-red-700 font-semibold hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    title="Remove selected soft-deleted tenders from FlexHRM permanently"
+                    title="Permanently remove selected soft-deleted or missed (locked) tenders"
                   >
                     Delete Permanently
                   </button>
