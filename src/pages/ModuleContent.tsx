@@ -131,7 +131,7 @@ import {
   filterSelectableBulkDays,
   employeeMatchesAttendanceRecordFilter,
 } from "../lib/attendance-helpers";
-import { getModuleKey, PERMISSION_MODULES, SidebarItemDef, isAdminModuleTab } from "../lib/permissions";
+import { getModuleKey, PERMISSION_MODULES, SidebarItemDef, isAdminModuleTab, isSuperAdminRole } from "../lib/permissions";
 import {
   clampSelectedColumns,
   isColumnAllowed,
@@ -874,7 +874,7 @@ export default function ModuleContent() {
 
   const canEditAdmin = !!userPermissions.admin?.edit;
   const isSuperAdmin =
-    String(sessionRole || "").toLowerCase() === "admin" ||
+    isSuperAdminRole(sessionRole) ||
     String(sessionUser || "").toLowerCase() === "admin";
   const canViewSalary = !!userPermissions.salary?.view;
   const canEditSalary = !!userPermissions.salary?.edit;

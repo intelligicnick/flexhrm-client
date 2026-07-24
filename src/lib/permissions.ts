@@ -29,7 +29,7 @@ export function canEditModule(userPermissions: UserPermissionsMap, tabName: stri
   return !!userPermissions?.[key]?.edit;
 }
 
-/** Matches backend `buildPermissions` super-admin detection (role name only). */
+/** Matches backend `buildPermissions` / `isSuperAdminSession` role check. */
 export function isSuperAdminRole(role: string | null | undefined): boolean {
   const normalized = String(role || "").trim().toLowerCase();
   return normalized === "admin" || normalized === "";
