@@ -29,6 +29,105 @@ export function canEditModule(userPermissions: UserPermissionsMap, tabName: stri
   return !!userPermissions?.[key]?.edit;
 }
 
+/** Matches backend `buildPermissions` super-admin detection (role name only). */
+export function isSuperAdminRole(role: string | null | undefined): boolean {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "admin" || normalized === "";
+}
+
+/**
+ * Resolve the effective permission matrix for the logged-in admin.
+ * Prefer `/auth/me` session permissions; fail closed when unknown.
+ */
+export function resolveUserPermissions(options: {
+  sessionRole: string | null | undefined;
+  sessionPermissions: UserPermissionsMap;
+  rolesList?: Array<{
+    name?: string;
+    permissions?: Record<string, Partial<{ view: boolean; edit: boolean; delete: boolean }>>;
+  }>;
+}): Record<PermissionModuleKey, { view: boolean; edit: boolean; delete: boolean }> {
+  const { sessionRole, sessionPermissions, rolesList = [] } = options;
+
+  if (isSuperAdminRole(sessionRole)) {
+    return Object.fromEntries(
+      PERMISSION_MODULES.map((m) => [m, { view: true, edit: true, delete: true }]),
+    ) as Record<PermissionModuleKey, { view: boolean; edit: boolean; delete: boolean }>;
+  }
+
+  if (sessionPermissions) {
+    const result = createEmptyRolePermissions();
+    PERMISSION_MODULES.forEach((m) => {
+      result[m] = createFullRolePermission(sessionPermissions[m]);
+    });
+    return result;
+  }
+
+  const matchedRole = rolesList.find(
+    (r) => String(r.name || "").toLowerCase() === String(sessionRole || "").toLowerCase(),
+  );
+  if (matchedRole?.permissions) {
+    const result = createEmptyRolePermissions();
+    PERMISSION_MODULES.forEach((m) => {
+      result[m] = createFullRolePermission(matchedRole.permissions?.[m]);
+    });
+    return result;
+  }
+
+  return createEmptyRolePermissions();
+}
+
+/**
+ * Hide sidebar / hamburger items (and nested children) the role cannot view,
+ * and drop parent groups that end up with no visible children.
+ */
+export function filterSidebarItemsForAccess(
+  items: SidebarItemDef[],
+  userPermissions: UserPermissionsMap,
+  options?: {
+    search?: string;
+    isSubscriptionDenied?: (tabName: string) => boolean;
+  },
+): SidebarItemDef[] {
+  const search = options?.search?.trim().toLowerCase() ?? "";
+  const isDenied = options?.isSubscriptionDenied ?? (() => false);
+
+  const canSeeTab = (tabName: string): boolean => {
+    if (tabName === "Search") return true;
+    if (isDenied(tabName)) return false;
+    return canViewModule(userPermissions, tabName);
+  };
+
+  return items
+    .map((item): SidebarItemDef | null => {
+      if (item.name === "Search") {
+        return search ? item : null;
+      }
+
+      if (item.children?.length) {
+        let children = item.children.filter((child) => canSeeTab(child.tab));
+        if (search) {
+          const parentMatches = item.name.toLowerCase().includes(search);
+          if (!parentMatches) {
+            children = children.filter(
+              (child) =>
+                child.name.toLowerCase().includes(search) ||
+                child.tab.toLowerCase().includes(search),
+            );
+          }
+        }
+        if (!children.length) return null;
+        if (!canSeeTab(item.name)) return null;
+        return { ...item, children };
+      }
+
+      if (search && !item.name.toLowerCase().includes(search)) return null;
+      if (!canSeeTab(item.name)) return null;
+      return item;
+    })
+    .filter((item): item is SidebarItemDef => item != null);
+}
+
 export const getModuleKey = (tabName: string): string => {
   switch (tabName) {
     case "Dashboard":

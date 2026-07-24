@@ -182,11 +182,12 @@ import {
 import {
   getModuleKey,
   PERMISSION_MODULES,
-  createEmptyRolePermissions,
-  createFullRolePermission,
   DEFAULT_NEW_ROLE_PERMISSIONS,
   SidebarItemDef,
   isAdminModuleTab,
+  isSuperAdminRole,
+  resolveUserPermissions,
+  filterSidebarItemsForAccess,
 } from "../lib/permissions";
 import {
   applySalaryUiRestrictions,
@@ -482,29 +483,18 @@ export function useHRMSApp() {
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
   // Parse permissions dynamically — prefer server session from /api/auth/me
-  const userPermissions = useMemo(() => {
-    const isSuperAdmin = String(sessionRole || "").toLowerCase() === "admin" || String(sessionUser || "").toLowerCase() === "admin";
-    const result: Record<string, { view: boolean; edit: boolean; delete: boolean }> = {};
-
-    PERMISSION_MODULES.forEach(m => {
-      if (isSuperAdmin) {
-        result[m] = { view: true, edit: true, delete: true };
-      } else if (sessionPermissions?.[m]) {
-        result[m] = sessionPermissions[m];
-      } else {
-        const matchedRole = rolesList.find(r => String(r.name || "").toLowerCase() === String(sessionRole || "").toLowerCase());
-        const perm = matchedRole?.permissions?.[m];
-        result[m] = createFullRolePermission(perm);
-      }
-    });
-    return result;
-  }, [sessionRole, sessionUser, rolesList, sessionPermissions]);
+  const userPermissions = useMemo(
+    () =>
+      resolveUserPermissions({
+        sessionRole,
+        sessionPermissions,
+        rolesList,
+      }),
+    [sessionRole, rolesList, sessionPermissions],
+  );
 
   const userUiRestrictions = useMemo(() => {
-    const isSuperAdmin =
-      String(sessionRole || "").toLowerCase() === "admin" ||
-      String(sessionUser || "").toLowerCase() === "admin";
-    if (isSuperAdmin) return {} as RoleUiRestrictions;
+    if (isSuperAdminRole(sessionRole)) return {} as RoleUiRestrictions;
 
     if (sessionUiRestrictions) return sessionUiRestrictions;
 
@@ -512,7 +502,7 @@ export function useHRMSApp() {
       (r) => String(r.name || "").toLowerCase() === String(sessionRole || "").toLowerCase(),
     );
     return (matchedRole?.uiRestrictions as RoleUiRestrictions) ?? {};
-  }, [sessionRole, sessionUser, rolesList, sessionUiRestrictions]);
+  }, [sessionRole, rolesList, sessionUiRestrictions]);
 
   const salaryUiRestrictions = useMemo(
     () => getModuleUiRestrictions(userUiRestrictions, "salary"),
@@ -8224,30 +8214,15 @@ export function useHRMSApp() {
     { name: "Monitor", icon: Monitor, badge: "New" },
   ];
 
-  // Filtered sidebar items
-  const filteredSidebarItems = useMemo(() => {
-    let items = sidebarItems;
-    if (!sidebarSearch.trim()) {
-      items = items.filter(item => item.name !== "Search");
-    } else {
-      items = items.filter(item => 
-        item.name.toLowerCase().includes(sidebarSearch.toLowerCase())
-      );
-    }
-    // Filter by role permissions and subscription entitlements
-    return items.filter(item => {
-      if (tenantEntitlements.isSubscriptionDenied(item.name)) return false;
-      const key = getModuleKey(item.name);
-      if (!key && item.children?.length) {
-        return item.children.some((child) => {
-          if (tenantEntitlements.isSubscriptionDenied(child.tab)) return false;
-          return !!userPermissions[getModuleKey(child.tab)]?.view;
-        });
-      }
-      if (!key) return true;
-      return !!userPermissions[key]?.view;
-    });
-  }, [sidebarSearch, sidebarItems, userPermissions, tenantEntitlements]);
+  // Sidebar / hamburger: only modules the role can view (and plan allows)
+  const filteredSidebarItems = useMemo(
+    () =>
+      filterSidebarItemsForAccess(sidebarItems, userPermissions, {
+        search: sidebarSearch,
+        isSubscriptionDenied: tenantEntitlements.isSubscriptionDenied,
+      }),
+    [sidebarSearch, sidebarItems, userPermissions, tenantEntitlements],
+  );
 
   const activeModuleKey = getModuleKey(activeSidebarTab);
   const isModuleAccessDenied =

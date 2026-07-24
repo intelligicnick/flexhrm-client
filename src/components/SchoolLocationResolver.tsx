@@ -28,9 +28,14 @@ function duplicatePinWarnings(
 }
 
 function resolutionStepLabel(step?: string): string {
+  if (step === "dramitkumar_registry") return "Step 0 · schoolinfo.dramitkumar.in (UDISE)";
+  if (step === "schools_org_in_registry") return "Step 0 · schools.org.in (UDISE)";
   if (step === "school") return "Step 1 · School on Google";
-  if (step === "village") return "Step 2 · Village on Google";
-  if (step === "osm_village") return "Step 3 · Village on OpenStreetMap";
+  if (step === "block_cache") return "Step 2 · Reused village pin in block";
+  if (step === "onefivenine_village") return "Step 2 · Village on onefivenine.com";
+  if (step === "onefivenine_direct") return "Step 2 · onefivenine direct URL";
+  if (step === "google_combo" || step === "village") return "Step 3 · Village on Google";
+  if (step === "osm_combo" || step === "osm_village") return "Step 4 · Village on OpenStreetMap";
   return "";
 }
 
@@ -181,8 +186,9 @@ export default function SchoolLocationResolver({
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           <strong>Step 1:</strong> Google Maps lookup for the school itself (100 m).{" "}
-          <strong>Step 2:</strong> If not found, lookup the village from the school name (400 m).
-          Block offices and wrong villages are never used. Google address must name this block and district.
+          <strong>Step 2:</strong> <a href="https://www.onefivenine.com/india/villages/" target="_blank" rel="noopener noreferrer">onefivenine.com</a> village lookup with progressive school-name combinations (400 m).{" "}
+          <strong>Step 3:</strong> Google village from school name.{" "}
+          <strong>Step 4:</strong> OpenStreetMap fallback. Block offices and wrong villages are never used.
         </p>
         <ol className="text-[11px] text-slate-500 mt-2 space-y-1 list-decimal list-inside">
           <li>

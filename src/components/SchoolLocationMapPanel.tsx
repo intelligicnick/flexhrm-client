@@ -61,9 +61,14 @@ function pinStatus(school: SchoolWork): "verified" | "draft" | "missing" {
 }
 
 function resolutionStepLabel(step?: string): string {
+  if (step === "dramitkumar_registry") return "Step 0 · schoolinfo.dramitkumar.in (UDISE)";
+  if (step === "schools_org_in_registry") return "Step 0 · schools.org.in (UDISE)";
   if (step === "school") return "Step 1 · School on Google";
-  if (step === "village") return "Step 2 · Village on Google";
-  if (step === "osm_village") return "Step 3 · Village on OpenStreetMap";
+  if (step === "block_cache") return "Step 2 · Reused village pin in block";
+  if (step === "onefivenine_village") return "Step 2 · Village on onefivenine.com";
+  if (step === "onefivenine_direct") return "Step 2 · onefivenine direct URL";
+  if (step === "google_combo" || step === "village") return "Step 3 · Village on Google";
+  if (step === "osm_combo" || step === "osm_village") return "Step 4 · Village on OpenStreetMap";
   return "";
 }
 
@@ -415,8 +420,10 @@ export default function SchoolLocationMapPanel({
           Village-First School Locations
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Resolves each school via <strong>Google Places</strong> (backend only) using school name, village, block, district, and{" "}
-          <strong>UDISE</strong>. Map uses <strong>OSM + Esri satellite</strong> with street/satellite/hybrid layers and village names on every pin.
+          Step 0 checks <strong>schoolinfo.dramitkumar.in</strong> and <strong>schools.org.in</strong> by UDISE for GPS pins. Then{" "}
+          <strong>Google Places</strong> (school name + block + district). If Google misses a village,{" "}
+          <strong>onefivenine.com</strong> is tried with progressive name combinations. Map uses <strong>OSM + Esri satellite</strong>{" "}
+          with street/satellite/hybrid layers and village names on every pin.
         </p>
       </div>
 

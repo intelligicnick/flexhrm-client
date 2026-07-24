@@ -99,7 +99,7 @@ import {
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
+import { getModuleKey, canViewModule, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -921,6 +921,7 @@ export default function DashboardLayout() {
                                 <UserCircle size={14} className="text-slate-400" />
                                 My Account Profile
                               </button>
+                              {!!userPermissions.employees?.view && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -935,6 +936,7 @@ export default function DashboardLayout() {
                                 <Settings size={14} className="text-slate-400" />
                                 Portal Settings
                               </button>
+                              )}
                               <div className="border-t border-slate-100 my-1"></div>
                               <button
                                 type="button"
@@ -1022,7 +1024,7 @@ export default function DashboardLayout() {
         
                         {/* Desktop Profile Dropdown with Logout (Hidden on mobile) */}
                         <div className="hidden md:flex items-center gap-2">
-                          {sessionPermissions?.schoolWork?.view !== false && (
+                          {!!userPermissions.schoolWork?.view && (
                             <NotificationsBell
                               unreadCount={adminNotificationUnreadCount}
                               notifications={adminNotifications}
@@ -1072,6 +1074,7 @@ export default function DashboardLayout() {
                                 <UserCircle size={14} className="text-slate-400" />
                                 My Account Profile
                               </button>
+                              {!!userPermissions.employees?.view && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1088,6 +1091,7 @@ export default function DashboardLayout() {
                                 <Settings size={14} className="text-slate-400" />
                                 Portal Settings
                               </button>
+                              )}
                               <div className="border-t border-slate-100 my-1"></div>
                               <button
                                 type="button"
@@ -1481,10 +1485,7 @@ export default function DashboardLayout() {
                       { name: "Attendance", label: "Records", icon: Clock },
                       { name: "Salary", label: "Payroll", icon: Coins },
                       { name: "Directory", label: "Contacts", icon: Contact },
-                    ].filter((item) => {
-                      const key = getModuleKey(item.name);
-                      return !key || !!userPermissions[key]?.view;
-                    }).map((item) => {
+                    ].filter((item) => canViewModule(userPermissions, item.name)).map((item) => {
                       const IconComponent = item.icon;
                       const isSelected = activeSidebarTab === item.name;
                       return (
