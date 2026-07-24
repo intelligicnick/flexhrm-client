@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route } from 'react-router';
 import { HRMSProvider } from "../../context/HRMSContext";
 import AppErrorBoundary from "../../components/AppErrorBoundary";
 import { installObserverBackBridge } from "../../lib/observer-back-handler";

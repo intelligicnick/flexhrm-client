@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from 'react-router';
 import PasswordInput from "../../components/PasswordInput";
 import LoginCaptcha from "../../components/auth/LoginCaptcha";
 import { useHRMS } from "../../context/HRMSContext";

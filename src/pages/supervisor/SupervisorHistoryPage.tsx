@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext } from 'react-router';
 import { ChevronDown, MapPin, Package } from "lucide-react";
 import { SchoolVisit } from "../../types";
 import { parseApiError } from "../../api";

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from 'react-router';
 import {
   MapPin,
   ChevronRight,
@@ -9,7 +9,7 @@ import {
   ClipboardList,
   Building2,
 } from "lucide-react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext } from 'react-router';
 import { SchoolWork, CommitmentDiary, SchoolVisit } from "../../types";
 import { useSupervisorI18n } from "./SupervisorI18nContext";
 import { toIsoDate } from "../../lib/supervisor-dates";

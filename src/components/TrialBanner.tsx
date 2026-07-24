@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from 'react-router';
 import { AlertTriangle, X } from "lucide-react";
 import { apiUrl } from "../api";
 

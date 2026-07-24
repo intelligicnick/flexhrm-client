@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect } from "react";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from 'react-router';
 import { useHRMS } from "../../context/HRMSContext";
 import { AppNotification } from "../../types";
 import { getObserverNotificationTarget } from "../../lib/notification-navigation";

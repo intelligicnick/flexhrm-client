@@ -7,13 +7,13 @@ import React, { lazy, Suspense } from "react";
 import {
   createBrowserRouter,
   createRoutesFromElements,
-  RouterProvider,
   Routes,
   Route,
   Navigate,
   useSearchParams,
   useLocation,
-} from "react-router-dom";
+} from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { parseIdCardFromVerifyParam, parseVerifyTokenFromParam } from "./components/id-card/verify-url";
 import { AuthProvider, useAuthContext } from "./context/AuthContext";
 import LoginPage from "./components/auth/LoginPage";

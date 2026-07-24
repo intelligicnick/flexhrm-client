@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useBlocker, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, useBlocker, useNavigate, useOutletContext, useParams } from 'react-router';
 import { ArrowLeft, Camera, CheckCircle2, ImagePlus, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SchoolWork, SCHOOL_MATERIAL_ITEMS } from "../../types";
 import { parseApiError } from "../../api";

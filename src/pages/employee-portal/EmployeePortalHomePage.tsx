@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from 'react-router';
 import { MapPin, Navigation, RefreshCw } from "lucide-react";
 import { apiUrl, parseApiError } from "../../api";
 

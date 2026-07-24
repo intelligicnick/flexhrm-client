@@ -1,6 +1,6 @@
 import React from "react";
 import { Construction } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from 'react-router';
 import { getPlatformModule } from "./platformModules";
 import { PageHeader } from "./PlatformShared";
 

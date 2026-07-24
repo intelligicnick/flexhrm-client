@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate } from 'react-router';
 import PlatformLayout from "./PlatformLayout";
 import PlatformOverviewPage from "./PlatformOverviewPage";
 import PlatformCompaniesPage from "./PlatformCompaniesPage";

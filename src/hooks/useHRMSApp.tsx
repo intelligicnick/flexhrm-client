@@ -2,7 +2,7 @@
  * Core HRMS application state and handlers (extracted from App.tsx).
  */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { useNavigate, useLocation, useBlocker } from "react-router-dom";
+import { useNavigate, useLocation, useBlocker } from 'react-router';
 import { resetAllBusyButtons } from "../components/ActionButtonFeedback";
 import { 
   Users, 

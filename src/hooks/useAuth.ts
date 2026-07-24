@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from 'react-router';
 import { apiUrl, parseApiError } from "../api";
 import { clearCsrfToken, setCsrfToken } from "../lib/csrf";
 import { createFullRolePermission, PERMISSION_MODULES } from "../lib/permissions";

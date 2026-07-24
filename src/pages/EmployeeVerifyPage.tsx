@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from 'react-router';
 import { BadgeCheck, ShieldAlert, UserRound } from "lucide-react";
 import { apiUrl } from "../api";
 import {

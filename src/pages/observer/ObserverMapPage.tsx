@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate } from 'react-router';
 import { useHRMS } from "../../context/HRMSContext";
 import { registerObserverBackHandler } from "../../lib/observer-back-handler";
 import FieldTrackingMap from "../../components/FieldTrackingMap";

@@ -1,6 +1,6 @@
 import React from "react";
 import { LucideIcon, Calendar } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from 'react-router';
 
 export function ObserverStatGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-2 gap-2.5">{children}</div>;

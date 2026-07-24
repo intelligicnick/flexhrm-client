@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from 'react-router';
 import { Shield } from "lucide-react";
 import { apiUrl, parseApiError } from "../../api";
 import { setCsrfToken } from "../../lib/csrf";

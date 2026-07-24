@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from 'react-router';
 import { ChevronDown, ChevronRight, LogOut, Menu, X } from "lucide-react";
 import { PLATFORM_MODULES, PLATFORM_MODULE_GROUPS } from "./platformModules";
 import { usePlatformAuth } from "../../hooks/usePlatformAuth";

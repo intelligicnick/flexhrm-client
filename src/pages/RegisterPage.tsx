@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from 'react-router';
 import { Building2, CheckCircle } from "lucide-react";
 import { apiUrl, parseApiError } from "../api";
 

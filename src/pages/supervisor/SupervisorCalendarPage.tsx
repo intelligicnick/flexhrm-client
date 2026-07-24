@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext } from 'react-router';
 import { ChevronLeft, ChevronRight, Plus, CalendarRange } from "lucide-react";
 import { SchoolWork, PlannedVisit, CommitmentDiary } from "../../types";
 import { parseApiError } from "../../api";
