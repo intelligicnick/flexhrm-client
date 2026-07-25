@@ -596,6 +596,7 @@ export default function ModuleContent() {
     currentSupervisor,
     setCurrentSupervisor,
     handleSaveSchoolSupervisor,
+    handleToggleStarSchoolSupervisor,
     handleDeleteSchoolSupervisor,
     openAddSupervisorForm,
     PERMISSION_MODULES,
@@ -5244,6 +5245,7 @@ export default function ModuleContent() {
                                     setCurrentSupervisor(supervisor);
                                     setIsSupervisorFormOpen(true);
                                   }}
+                                  onToggleStarSupervisor={handleToggleStarSchoolSupervisor}
                                   onDeleteSupervisor={handleDeleteSchoolSupervisor}
                                   onUpdateVisitStatus={handleUpdateVisitStatus}
                                   onBulkUpdateVisitStatus={handleBulkUpdateVisitStatus}

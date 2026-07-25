@@ -6,6 +6,8 @@ export interface SchoolVisitCooldownInfo {
   lastVisitBySupervisorId?: string | null;
   lastVisitBySupervisorName?: string | null;
   blockSharedCooldown: boolean;
+  /** Star supervisors bypass the 5-day school visit cooldown. */
+  cooldownExempt?: boolean;
 }
 
 export function daysSinceIsoDate(isoDate: string, from = new Date()): number {

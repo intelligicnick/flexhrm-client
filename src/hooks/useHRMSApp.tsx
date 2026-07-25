@@ -7223,6 +7223,7 @@ export function useHRMSApp() {
           name: data.name,
           phone: data.phone,
           assignedBlocks: data.assignedBlocks,
+          isStarSupervisor: !!data.isStarSupervisor,
           loginEnabled: data.loginEnabled,
           loginPhone: data.loginPhone,
           password: data.password,
@@ -7238,6 +7239,35 @@ export function useHRMSApp() {
       return true;
     } catch (err: any) {
       setErrorMessage("Supervisor save failed: " + err.message);
+      return false;
+    }
+  };
+
+  const handleToggleStarSchoolSupervisor = async (
+    supervisor: SchoolSupervisor,
+  ): Promise<boolean> => {
+    try {
+      setErrorMessage(null);
+      const res = await fetch(`/api/school-supervisors/${supervisor.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isStarSupervisor: !supervisor.isStarSupervisor,
+        }),
+      });
+      if (!res.ok) {
+        const errorJson = await res.json();
+        throw new Error(errorJson.message || errorJson.error || "Server rejected star update.");
+      }
+      await fetchSchoolSupervisors();
+      triggerSuccess(
+        !supervisor.isStarSupervisor
+          ? `⭐ "${supervisor.name}" is now a star supervisor (no 5-day visit wait).`
+          : `Removed star from "${supervisor.name}" — 5-day visit wait restored.`,
+      );
+      return true;
+    } catch (err: any) {
+      setErrorMessage("Star supervisor update failed: " + err.message);
       return false;
     }
   };
@@ -8790,6 +8820,7 @@ export function useHRMSApp() {
     currentSupervisor,
     setCurrentSupervisor,
     handleSaveSchoolSupervisor,
+    handleToggleStarSchoolSupervisor,
     handleDeleteSchoolSupervisor,
     openAddSupervisorForm,
     PERMISSION_MODULES,

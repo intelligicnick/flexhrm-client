@@ -17,6 +17,7 @@ import {
   Briefcase,
   Clock,
   Loader2,
+  Star,
 } from "lucide-react";
 import { apiUrl } from "../api";
 import { formatDurationMinutes, formatRelativeTimeAgo } from "../lib/date-helpers";
@@ -169,6 +170,18 @@ export default function SchoolSupervisorViewModal({
       label: "Mobile Login",
       value: supervisor.loginEnabled ? "Enabled" : "Disabled",
       icon: <ShieldCheck size={14} className="text-emerald-600" />,
+    },
+    {
+      label: "Star Supervisor",
+      value: supervisor.isStarSupervisor
+        ? "Yes — no 5-day visit wait"
+        : "No — normal 5-day cooldown",
+      icon: (
+        <Star
+          size={14}
+          className={supervisor.isStarSupervisor ? "fill-amber-400 text-amber-500" : "text-slate-400"}
+        />
+      ),
     },
     {
       label: "Status",

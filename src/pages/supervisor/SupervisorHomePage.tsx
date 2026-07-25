@@ -70,7 +70,10 @@ function isTodayInRange(fromDate: string, toDate: string, today: string): boolea
 }
 
 export default function SupervisorHomePage() {
-  const { supervisorFetch } = useOutletContext<{ supervisorFetch: typeof fetch }>();
+  const { supervisorFetch, isStarSupervisor } = useOutletContext<{
+    supervisorFetch: typeof fetch;
+    isStarSupervisor?: boolean;
+  }>();
   const { t, lang } = useSupervisorI18n();
   const navigate = useNavigate();
   const [schools, setSchools] = useState<SchoolWork[]>([]);
@@ -517,7 +520,7 @@ export default function SupervisorHomePage() {
                 const visitedThisWeek = visitedSchoolIds.has(school.id);
                 const hasTodayCommit = todayCommitments.some((c) => c.schoolWorkId === school.id);
                 const lastVisit = lastVisitBySchool.get(school.id);
-                const onCooldown = !canVisitSchoolAgain(lastVisit);
+                const onCooldown = !isStarSupervisor && !canVisitSchoolAgain(lastVisit);
                 const daysLeft = lastVisit ? daysUntilSchoolVisitAllowed(lastVisit) : 0;
                 const locationStatus = supervisorSchoolLocationStatus(school);
                 const placeLabel = supervisorSchoolPlaceLabel(school);

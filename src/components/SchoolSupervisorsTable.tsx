@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Edit2, ExternalLink, Eye, LogIn, Phone, Plus, School, ShieldCheck, Trash2, Users } from "lucide-react";
+import { Check, Copy, Edit2, ExternalLink, Eye, LogIn, Phone, Plus, School, ShieldCheck, Star, Trash2, Users } from "lucide-react";
 import { getSupervisorLoginUrl } from "./id-card/verify-url";
 import { loginAsSupervisor } from "../lib/supervisor-login";
 import { apiUrl, parseApiError } from "../api";
@@ -17,6 +17,7 @@ interface SchoolSupervisorsTableProps {
   onAdd: () => void;
   onEdit: (supervisor: SchoolSupervisor) => void;
   onDelete: (id: string) => void;
+  onToggleStar?: (supervisor: SchoolSupervisor) => Promise<boolean>;
   readOnly?: boolean;
 }
 
@@ -26,6 +27,7 @@ export default function SchoolSupervisorsTable({
   onAdd,
   onEdit,
   onDelete,
+  onToggleStar,
   readOnly = false,
 }: SchoolSupervisorsTableProps) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -36,7 +38,22 @@ export default function SchoolSupervisorsTable({
   const [deviceOtpFor, setDeviceOtpFor] = useState<string | null>(null);
   const [deviceOtpResult, setDeviceOtpResult] = useState<{ name: string; otp: string; expiresAt: string } | null>(null);
   const [generatingOtp, setGeneratingOtp] = useState(false);
+  const [togglingStarId, setTogglingStarId] = useState<string | null>(null);
   const supervisorLoginUrl = getSupervisorLoginUrl();
+
+  const handleToggleStar = async (supervisor: SchoolSupervisor) => {
+    if (!onToggleStar || readOnly) return;
+    setTogglingStarId(supervisor.id);
+    setLoginAsError(null);
+    try {
+      const ok = await onToggleStar(supervisor);
+      if (!ok) setLoginAsError("Could not update star supervisor status.");
+    } catch (err: unknown) {
+      setLoginAsError(err instanceof Error ? err.message : "Could not update star supervisor status.");
+    } finally {
+      setTogglingStarId(null);
+    }
+  };
 
   const handleGenerateDeviceOtp = async (supervisor: SchoolSupervisor) => {
     setGeneratingOtp(true);
@@ -235,6 +252,7 @@ export default function SchoolSupervisorsTable({
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="text-left px-3 py-2 font-bold">Name</th>
+                <th className="text-center px-2 py-2 font-bold">Star</th>
                 <th className="text-left px-3 py-2 font-bold">Activity</th>
                 <th className="text-left px-3 py-2 font-bold">Phone</th>
                 <th className="text-left px-3 py-2 font-bold">Assigned Blocks</th>
@@ -248,7 +266,36 @@ export default function SchoolSupervisorsTable({
                 const coveredSchools = getSchoolsForSupervisor(supervisor, schools);
                 return (
                   <tr key={supervisor.id} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2 font-semibold text-slate-800">{supervisor.name || "—"}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-800">
+                      <span className="inline-flex items-center gap-1.5">
+                        {supervisor.isStarSupervisor && (
+                          <Star size={13} className="fill-amber-400 text-amber-500 shrink-0" />
+                        )}
+                        {supervisor.name || "—"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <button
+                        type="button"
+                        disabled={readOnly || !onToggleStar || togglingStarId === supervisor.id}
+                        onClick={() => handleToggleStar(supervisor)}
+                        className={`p-1.5 rounded-lg transition cursor-pointer disabled:opacity-50 ${
+                          supervisor.isStarSupervisor
+                            ? "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                            : "text-slate-300 hover:bg-amber-50 hover:text-amber-500"
+                        }`}
+                        title={
+                          supervisor.isStarSupervisor
+                            ? "Star supervisor — no 5-day visit wait (click to remove)"
+                            : "Mark as star supervisor — unlimited visits in assigned blocks"
+                        }
+                      >
+                        <Star
+                          size={16}
+                          className={supervisor.isStarSupervisor ? "fill-amber-400" : ""}
+                        />
+                      </button>
+                    </td>
                     <td className="px-3 py-2">{renderSupervisorActivity(supervisor)}</td>
                     <td className="px-3 py-2 text-slate-600">
                       <span className="inline-flex items-center gap-1">

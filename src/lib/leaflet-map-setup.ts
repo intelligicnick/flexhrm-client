@@ -85,12 +85,12 @@ export function createSatelliteTileLayer(): L.TileLayer {
   );
 }
 
-/** Transparent place-name labels for satellite view. */
+/** Transparent place-name labels for satellite view (Voyager has denser village names). */
 export function createSatelliteLabelLayer(): L.TileLayer {
   const touch = isTouchMapDevice();
   const native = isFlexHrmNativeApp();
   return L.tileLayer(
-    "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
+    "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",
     {
       attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: "abcd",

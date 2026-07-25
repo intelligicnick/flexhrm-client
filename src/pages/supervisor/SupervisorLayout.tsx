@@ -55,6 +55,7 @@ function SupervisorLayoutInner() {
   const name = localStorage.getItem("hrms_supervisor_name") || "Supervisor";
   const [valid, setValid] = useState<boolean | null>(() => (token ? true : false));
   const [impersonated, setImpersonated] = useState(false);
+  const [isStarSupervisor, setIsStarSupervisor] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const pageTitle = useMemo(
@@ -90,6 +91,15 @@ function SupervisorLayoutInner() {
       }
       if (data.name) {
         localStorage.setItem("hrms_supervisor_name", data.name);
+      }
+      setIsStarSupervisor(!!data.isStarSupervisor);
+      try {
+        localStorage.setItem(
+          "hrms_supervisor_is_star",
+          data.isStarSupervisor ? "1" : "0",
+        );
+      } catch {
+        /* ignore */
       }
       persistSupervisorSession({
         token: sessionToken,
@@ -186,6 +196,12 @@ function SupervisorLayoutInner() {
     }
     clearSupervisorSession();
     clearSupervisorImpersonatedFlag();
+    setIsStarSupervisor(false);
+    try {
+      localStorage.removeItem("hrms_supervisor_is_star");
+    } catch {
+      /* ignore */
+    }
     navigate("/supervisor/login");
   };
 
@@ -259,7 +275,7 @@ function SupervisorLayoutInner() {
         </header>
 
         <main className={`flex-1 px-4 pt-4 ${hideNav ? "pb-4" : "pb-28"}`}>
-          <Outlet context={{ supervisorFetch }} />
+          <Outlet context={{ supervisorFetch, isStarSupervisor }} />
         </main>
 
         {!hideNav && (

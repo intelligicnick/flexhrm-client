@@ -17,6 +17,7 @@ interface FieldTeamPanelProps {
   schools: SchoolWork[];
   onAddSupervisor: () => void;
   onEditSupervisor: (supervisor: SchoolSupervisor) => void;
+  onToggleStarSupervisor?: (supervisor: SchoolSupervisor) => Promise<boolean>;
   onDeleteSupervisor: (id: string) => void;
   onUpdateVisitStatus: (id: string, status: "approved" | "rejected") => Promise<boolean>;
   onBulkUpdateVisitStatus?: (ids: string[], status: "approved" | "rejected") => Promise<boolean>;
@@ -54,6 +55,7 @@ export default function FieldTeamPanel({
   schools,
   onAddSupervisor,
   onEditSupervisor,
+  onToggleStarSupervisor,
   onDeleteSupervisor,
   onUpdateVisitStatus,
   onBulkUpdateVisitStatus,
@@ -231,6 +233,7 @@ export default function FieldTeamPanel({
             onAdd={onAddSupervisor}
             onEdit={onEditSupervisor}
             onDelete={onDeleteSupervisor}
+            onToggleStar={onToggleStarSupervisor}
             readOnly={readOnly}
           />
           <SupervisorPwaInstallCard />

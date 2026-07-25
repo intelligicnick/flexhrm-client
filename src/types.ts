@@ -308,6 +308,8 @@ export interface SchoolSupervisor {
   name: string;
   phone: string;
   assignedBlocks: string[];
+  /** Star supervisors can visit assigned-block schools without the 5-day cooldown. */
+  isStarSupervisor?: boolean;
   loginEnabled?: boolean;
   loginPhone?: string;
   status: string;

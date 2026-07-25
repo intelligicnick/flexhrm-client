@@ -58,7 +58,10 @@ type VisitPhotoLightboxState = {
 
 export default function SupervisorVisitPage() {
   const { schoolId } = useParams<{ schoolId: string }>();
-  const { supervisorFetch } = useOutletContext<{ supervisorFetch: typeof fetch }>();
+  const { supervisorFetch, isStarSupervisor } = useOutletContext<{
+    supervisorFetch: typeof fetch;
+    isStarSupervisor?: boolean;
+  }>();
   const { t, lang } = useSupervisorI18n();
   const navigate = useNavigate();
   const [school, setSchool] = useState<SchoolWork | null>(null);
@@ -338,6 +341,7 @@ export default function SupervisorVisitPage() {
             lastVisitBySupervisorId: data.lastVisitBySupervisorId ?? null,
             lastVisitBySupervisorName: data.lastVisitBySupervisorName ?? null,
             blockSharedCooldown: !!data.blockSharedCooldown,
+            cooldownExempt: !!data.cooldownExempt,
           });
         }
       } catch {
@@ -357,8 +361,12 @@ export default function SupervisorVisitPage() {
 
   const lastVisitDate = lastVisitInfo?.lastVisitDate ?? null;
   const visitBlocked = useMemo(
-    () => lastVisitInfo != null && !canVisitSchoolAgain(lastVisitDate),
-    [lastVisitInfo, lastVisitDate],
+    () =>
+      !isStarSupervisor &&
+      !lastVisitInfo?.cooldownExempt &&
+      lastVisitInfo != null &&
+      !canVisitSchoolAgain(lastVisitDate),
+    [isStarSupervisor, lastVisitInfo, lastVisitDate],
   );
   const daysUntilAllowed = lastVisitDate ? daysUntilSchoolVisitAllowed(lastVisitDate) : 0;
   const cooldownHint = formatVisitCooldownHint(t, {

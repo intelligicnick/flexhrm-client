@@ -23,6 +23,7 @@ export default function SchoolSupervisorFormModal({
     name: supervisor?.name || "",
     phone: supervisor?.phone || "",
     assignedBlocks: [...(supervisor?.assignedBlocks || [])],
+    isStarSupervisor: !!supervisor?.isStarSupervisor,
     loginEnabled: !!supervisor?.loginEnabled,
     loginPhone: supervisor?.loginPhone || supervisor?.phone || "",
     password: "",
@@ -128,6 +129,22 @@ export default function SchoolSupervisorFormModal({
               Supervisors see all schools in their assigned blocks on the mobile portal.
             </p>
           </div>
+          <label className="flex items-start gap-2 text-xs font-semibold text-slate-700 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={formData.isStarSupervisor}
+              onChange={(event) =>
+                setFormData((prev) => ({ ...prev, isStarSupervisor: event.target.checked }))
+              }
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-extrabold text-amber-800">⭐ Star supervisor</span>
+              <span className="block text-[10px] font-medium text-amber-700 mt-0.5">
+                Can visit any school in assigned blocks any number of times — no 5-day wait.
+              </span>
+            </span>
+          </label>
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
             <input
               type="checkbox"

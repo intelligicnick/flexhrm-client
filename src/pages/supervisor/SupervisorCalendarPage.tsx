@@ -185,6 +185,7 @@ export default function SupervisorCalendarPage() {
     const map = cooldownInfoBySchool(schoolCooldowns);
     const blocked = new Set<string>();
     for (const [schoolId, info] of map) {
+      if (info.cooldownExempt) continue;
       if (!canVisitSchoolAgain(info.lastVisitDate)) {
         blocked.add(normalizeSchoolWorkId(schoolId));
       }
