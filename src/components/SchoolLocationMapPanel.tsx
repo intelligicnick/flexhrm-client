@@ -3,6 +3,7 @@ import { CheckCircle2, Loader2, MapPin, RefreshCw, Search } from "lucide-react";
 import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
+import { BULK_BATCH_DELAY_MS, fetchBulkBatch, sleep } from "../lib/bulk-fetch";
 import { SchoolWork } from "../types";
 import SchoolLeafletMap from "./SchoolLeafletMap";
 
@@ -211,7 +212,7 @@ export default function SchoolLocationMapPanel({
             : "Starting school location resolve (Google Places)…",
         );
 
-        const res = await fetchWithRetry("/api/school-works/bulk-assign-village-locations", {
+        const res = await fetchBulkBatch("/api/school-works/bulk-assign-village-locations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -222,6 +223,21 @@ export default function SchoolLocationMapPanel({
             schoolLimit: 2,
             schoolOffset,
           }),
+        }, {
+          onWait: (reason, waitMs) => {
+            const secs = Math.ceil(waitMs / 1000);
+            const label =
+              reason === "rate_limit"
+                ? "Rate limit — pausing"
+                : reason === "gateway"
+                  ? "Server busy — retrying"
+                  : "Connection issue — retrying";
+            setProgress(
+              total > 0
+                ? `${label} ${secs}s, then continuing (${Math.min(schoolOffset + 1, total)}/${total})…`
+                : `${label} ${secs}s, then continuing…`,
+            );
+          },
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.message || "School resolve failed.");
@@ -262,6 +278,7 @@ export default function SchoolLocationMapPanel({
         setSummary({ total, totalVillages, resolved, skipped, failed, villagesResolved });
         if (!data.hasMore) break;
         schoolOffset = Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) || schoolOffset + 2;
+        await sleep(BULK_BATCH_DELAY_MS);
       }
       setProgress(null);
       if (skipExisting && resolved === 0 && skipped > 0 && failed === 0) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Loader2, MapPin, RefreshCw } from "lucide-react";
+import { BULK_BATCH_DELAY_MS, fetchBulkBatch, sleep } from "../lib/bulk-fetch";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { suspiciousPlaceMatchReason } from "../lib/school-place-match";
 import { SchoolWork } from "../types";
@@ -133,7 +134,7 @@ export default function SchoolLocationResolver({
             : "Starting location lookup…",
         );
 
-        const res = await fetch("/api/school-works/bulk-resolve-locations", {
+        const res = await fetchBulkBatch("/api/school-works/bulk-resolve-locations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -144,6 +145,21 @@ export default function SchoolLocationResolver({
             limit: batchSize,
             offset,
           }),
+        }, {
+          onWait: (reason, waitMs) => {
+            const secs = Math.ceil(waitMs / 1000);
+            const label =
+              reason === "rate_limit"
+                ? "Rate limit — pausing"
+                : reason === "gateway"
+                  ? "Server busy — retrying"
+                  : "Connection issue — retrying";
+            setProgress(
+              total > 0
+                ? `${label} ${secs}s, then continuing (${Math.min(offset + 1, total)}/${total})…`
+                : `${label} ${secs}s, then continuing…`,
+            );
+          },
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.message || "Location resolve failed.");
@@ -160,6 +176,7 @@ export default function SchoolLocationResolver({
 
         if (!data.hasMore) break;
         offset = Number(data.nextOffset) || offset + batchSize;
+        await sleep(BULK_BATCH_DELAY_MS);
       }
       setProgress(null);
       if (total > 0 && resolved === 0 && skipped === 0 && failed === total) {
