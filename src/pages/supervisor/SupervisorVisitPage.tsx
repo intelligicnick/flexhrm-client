@@ -135,11 +135,14 @@ export default function SupervisorVisitPage() {
   );
 
   const distanceToSchoolM = useMemo(() => {
-    if (!schoolPinReady || !gpsCoords || !school) return null;
+    if (!gpsCoords || !school) return null;
+    const schoolLat = Number(school.lat);
+    const schoolLng = Number(school.lng);
+    if (!isValidGpsCoord(schoolLat, schoolLng)) return null;
     return Math.round(
-      distanceMeters(gpsCoords.lat, gpsCoords.lng, Number(school.lat), Number(school.lng)),
+      distanceMeters(gpsCoords.lat, gpsCoords.lng, schoolLat, schoolLng),
     );
-  }, [schoolPinReady, gpsCoords, school]);
+  }, [gpsCoords, school]);
 
   const geofenceRadiusM = useMemo(() => {
     if (!school) return 100;
@@ -540,9 +543,7 @@ export default function SupervisorVisitPage() {
     !saving &&
     !capturingPhoto &&
     !visitBlocked &&
-    gpsReady === true &&
-    schoolPinReady &&
-    withinSchoolGeofence;
+    gpsReady === true;
 
   if (schoolLoading) {
     return <SupervisorLoadingScreen message={t("loading")} />;
@@ -650,23 +651,50 @@ export default function SupervisorVisitPage() {
       )}
 
       {!schoolPinReady && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-bold">
             {schoolPinInvalid
-              ? "School pin needs correction"
+              ? "School pin needs correction (admin)"
               : resolvingLocation
                 ? t("findingSchoolLocation")
-                : "School location not set up"}
+                : "School pin not verified — you can still submit"}
           </p>
           <p className="mt-1 text-xs">
             {schoolPinInvalid
-              ? `${school.schoolName}${villageName ? ` (${villageName})` : ""}: saved pin is outside Bihar or wrong area. Admin must re-run Pin & Resolve for ${school.block}.`
+              ? `${school.schoolName}${villageName ? ` (${villageName})` : ""}: saved pin looks wrong. Your visit photo GPS will be recorded for admin review.`
               : resolvingLocation
-                ? `${school.schoolName}${villageName ? ` — ${villageName}` : ""}, UDISE ${school.udise}`
+                ? `${school.schoolName}${villageName ? ` — ${villageName}` : ""}, UDISE ${school.udise}: looking up location…`
                 : locationResolveFailed
-                  ? `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}: Google could not find this school automatically. Admin may need to fix in Field Team.`
-                  : `${school.schoolName}${villageName ? ` — village ${villageName}` : ""}, UDISE ${school.udise}: waiting for automatic Google location…`}
+                  ? `${school.schoolName}${villageName ? ` — ${villageName}` : ""}: auto lookup failed. Submit anyway — your current GPS on the photo is what counts.`
+                  : `${school.schoolName}${villageName ? ` — ${villageName}` : ""}, UDISE ${school.udise}: no verified school pin yet. Submit with your current location — admin will review.`}
           </p>
+        </div>
+      )}
+
+      {gpsReady && gpsCoords && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+          <p className="font-bold flex items-center gap-1.5">
+            <MapPin size={14} className="text-[#ff791a]" />
+            Your current location (stamped on photo)
+          </p>
+          <p className="mt-1 text-xs text-slate-600">
+            {gpsPlaceName || "Resolving place name…"}
+          </p>
+          <p className="mt-0.5 text-[11px] font-mono text-slate-500">
+            {formatLatLngDecimal(gpsCoords.lat, gpsCoords.lng)}
+          </p>
+          {distanceToSchoolM != null && schoolPinReady && (
+            <p className={`mt-1 text-xs font-semibold ${withinSchoolGeofence ? "text-emerald-700" : "text-amber-800"}`}>
+              {withinSchoolGeofence
+                ? `Within school area (${distanceToSchoolM} m from pin)`
+                : `${distanceToSchoolM} m from school pin — visit will be flagged for admin review`}
+            </p>
+          )}
+          {distanceToSchoolM != null && !schoolPinReady && (
+            <p className="mt-1 text-xs text-slate-500">
+              {distanceToSchoolM} m from saved draft pin (if any)
+            </p>
+          )}
         </div>
       )}
 

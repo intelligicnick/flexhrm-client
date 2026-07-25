@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, MapPin, RefreshCw, Search } from "lucide-react";
 import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
@@ -26,6 +26,11 @@ async function fetchWithRetry(
   }
   throw formatNetworkFetchError(lastErr);
 }
+
+const MANUAL_BATCH_SIZE = 30;
+const API_CHUNK_SIZE = 5;
+
+type ResolveMode = "manual_batch" | "continuous";
 
 interface SchoolLocationMapPanelProps {
   schools: SchoolWork[];
@@ -93,6 +98,8 @@ export default function SchoolLocationMapPanel({
   const [district, setDistrict] = useState("");
   const [block, setBlock] = useState("");
   const [skipExisting, setSkipExisting] = useState(false);
+  const [resolveMode, setResolveMode] = useState<ResolveMode>("manual_batch");
+  const [manualBatchOffset, setManualBatchOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +147,28 @@ export default function SchoolLocationMapPanel({
     return list;
   }, [mergedSchools, district, block]);
 
+  const orderedBlockSchools = useMemo(
+    () => [...filteredSchools].sort((a, b) => (a.srNo ?? 0) - (b.srNo ?? 0)),
+    [filteredSchools],
+  );
+
+  const totalBlockSchools = orderedBlockSchools.length;
+  const totalManualBatches = Math.max(1, Math.ceil(totalBlockSchools / MANUAL_BATCH_SIZE));
+  const currentManualBatchIndex = Math.floor(manualBatchOffset / MANUAL_BATCH_SIZE);
+  const currentBatchSchools = useMemo(
+    () => orderedBlockSchools.slice(manualBatchOffset, manualBatchOffset + MANUAL_BATCH_SIZE),
+    [orderedBlockSchools, manualBatchOffset],
+  );
+  const allManualBatchesComplete =
+    totalBlockSchools > 0 && manualBatchOffset >= totalBlockSchools;
+
+  useEffect(() => {
+    setManualBatchOffset(0);
+    setResolveRows([]);
+    setSummary(null);
+    setError(null);
+  }, [district, block, skipExisting, resolveMode]);
+
   const villageGroups = useMemo((): VillageGroup[] => {
     const map = new Map<string, SchoolWork[]>();
     for (const school of filteredSchools) {
@@ -184,61 +213,97 @@ export default function SchoolLocationMapPanel({
     }));
   }, []);
 
-  const runAutoPin = async () => {
+  const applyResolveResultRows = useCallback(
+    (rows: Array<Record<string, unknown>>) => {
+      for (const row of rows) {
+        const schoolId = String(row.schoolWorkId || "");
+        if (!schoolId) continue;
+        if (
+          row.status === "verified" ||
+          row.status === "draft" ||
+          row.status === "resolved" ||
+          row.status === "unsafe_pin"
+        ) {
+          patchOverride(schoolId, {
+            lat: Number(row.lat),
+            lng: Number(row.lng),
+            matchedPlaceName: String(row.matchedPlaceName || ""),
+            locationConfidence: String(row.locationConfidence || "village"),
+            locationVerified: row.status === "verified" || !!row.locationVerified,
+            geofenceRadiusM: Number(row.geofenceRadiusM) || 400,
+            googleMapsUrl: String(row.googleMapsUrl || ""),
+            locationSource: String(row.locationSource || ""),
+          });
+        }
+      }
+    },
+    [patchOverride],
+  );
+
+  const resolveSchoolRange = async (startOffset: number, endOffset: number | null) => {
     if (!block.trim()) {
       setError("Select a block first.");
       return;
     }
+
     setLoading(true);
     setError(null);
-    setSummary(null);
-    setResolveRows([]);
     setProgress(null);
 
-    let schoolOffset = 0;
-    let total = 0;
+    let schoolOffset = startOffset;
+    let total = totalBlockSchools;
     let totalVillages = 0;
     let resolved = 0;
     let skipped = 0;
     let failed = 0;
     let villagesResolved = 0;
-    const allRows: Array<Record<string, unknown>> = [];
+    const batchRows: Array<Record<string, unknown>> = [];
+    const rangeEnd = endOffset ?? Number.MAX_SAFE_INTEGER;
 
     try {
-      while (true) {
+      while (schoolOffset < rangeEnd) {
+        const chunkLimit = Math.min(API_CHUNK_SIZE, rangeEnd - schoolOffset);
+        if (chunkLimit <= 0) break;
+
         setProgress(
           total > 0
-            ? `Resolving schools ${Math.min(schoolOffset + 1, total)}–${Math.min(schoolOffset + 2, total)} of ${total} (Google + UDISE + village)…`
-            : "Starting school location resolve (Google Places)…",
+            ? resolveMode === "manual_batch"
+              ? `Resolving schools ${schoolOffset + 1}–${Math.min(schoolOffset + chunkLimit, total)} of ${total} (batch ${currentManualBatchIndex + 1}/${totalManualBatches})…`
+              : `Resolving schools ${schoolOffset + 1}–${Math.min(schoolOffset + chunkLimit, total)} of ${total}…`
+            : "Starting school location resolve…",
         );
 
-        const res = await fetchBulkBatch("/api/school-works/bulk-assign-village-locations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            block: block.trim(),
-            district: district.trim() || undefined,
-            saveDraft: true,
-            skipExisting,
-            schoolLimit: 2,
-            schoolOffset,
-          }),
-        }, {
-          onWait: (reason, waitMs) => {
-            const secs = Math.ceil(waitMs / 1000);
-            const label =
-              reason === "rate_limit"
-                ? "Rate limit — pausing"
-                : reason === "gateway"
-                  ? "Server busy — retrying"
-                  : "Connection issue — retrying";
-            setProgress(
-              total > 0
-                ? `${label} ${secs}s, then continuing (${Math.min(schoolOffset + 1, total)}/${total})…`
-                : `${label} ${secs}s, then continuing…`,
-            );
+        const res = await fetchBulkBatch(
+          "/api/school-works/bulk-assign-village-locations",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              block: block.trim(),
+              district: district.trim() || undefined,
+              saveDraft: true,
+              skipExisting,
+              schoolLimit: chunkLimit,
+              schoolOffset,
+            }),
           },
-        });
+          {
+            onWait: (reason, waitMs) => {
+              const secs = Math.ceil(waitMs / 1000);
+              const label =
+                reason === "rate_limit"
+                  ? "Rate limit — pausing"
+                  : reason === "gateway"
+                    ? "Server busy — retrying"
+                    : "Connection issue — retrying";
+              setProgress(
+                total > 0
+                  ? `${label} ${secs}s, then continuing (${Math.min(schoolOffset + 1, total)}/${total})…`
+                  : `${label} ${secs}s, then continuing…`,
+              );
+            },
+          },
+        );
         const data = await res.json();
         if (!res.ok) throw new Error(data?.message || "School resolve failed.");
 
@@ -250,52 +315,72 @@ export default function SchoolLocationMapPanel({
         villagesResolved += Number(data.villagesResolved) || 0;
 
         if (Array.isArray(data.results)) {
-          allRows.push(...data.results);
-          setResolveRows([...allRows]);
-          for (const row of data.results) {
-            const schoolId = String(row.schoolWorkId || "");
-            if (!schoolId) continue;
-            if (
-              row.status === "verified" ||
-              row.status === "draft" ||
-              row.status === "resolved" ||
-              row.status === "unsafe_pin"
-            ) {
-              patchOverride(schoolId, {
-                lat: Number(row.lat),
-                lng: Number(row.lng),
-                matchedPlaceName: String(row.matchedPlaceName || ""),
-                locationConfidence: String(row.locationConfidence || "village"),
-                locationVerified: row.status === "verified" || !!row.locationVerified,
-                geofenceRadiusM: Number(row.geofenceRadiusM) || 400,
-                googleMapsUrl: String(row.googleMapsUrl || ""),
-                locationSource: String(row.locationSource || ""),
-              });
-            }
-          }
+          batchRows.push(...data.results);
+          applyResolveResultRows(data.results);
         }
 
         setSummary({ total, totalVillages, resolved, skipped, failed, villagesResolved });
+
+        const nextOffset =
+          Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) ||
+          schoolOffset + chunkLimit;
+        schoolOffset = nextOffset;
+
         if (!data.hasMore) break;
-        schoolOffset = Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) || schoolOffset + 2;
+        if (schoolOffset >= rangeEnd) break;
         await sleep(BULK_BATCH_DELAY_MS);
       }
+
+      setResolveRows(batchRows);
       setProgress(null);
+
       if (skipExisting && resolved === 0 && skipped > 0 && failed === 0) {
         setError(
-          "All schools were skipped because they already have verified pins. Uncheck “Skip schools with existing pins” to re-resolve every school.",
+          "All schools in this batch were skipped because they already have verified pins.",
         );
-      } else if (failed > 0 && resolved === 0) {
+      } else if (failed > 0 && resolved === 0 && skipped === 0) {
         setError(
-          `${failed} school(s) could not be auto-verified — see the resolve log below for each reason.`,
+          `${failed} school(s) in this batch could not be auto-verified — see the resolve log below.`,
         );
       }
+
+      return { resolved, skipped, failed, processed: batchRows.length };
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "School resolve failed.");
+      if (batchRows.length > 0) setResolveRows(batchRows);
+      return null;
     } finally {
       setLoading(false);
       setProgress(null);
     }
+  };
+
+  const runAutoPin = async () => {
+    setSummary(null);
+    setResolveRows([]);
+    await resolveSchoolRange(0, null);
+  };
+
+  const runManualBatch = async () => {
+    if (currentBatchSchools.length === 0) {
+      setError("No schools in this batch.");
+      return;
+    }
+
+    const result = await resolveSchoolRange(
+      manualBatchOffset,
+      manualBatchOffset + currentBatchSchools.length,
+    );
+    if (result) {
+      setManualBatchOffset((prev) => prev + currentBatchSchools.length);
+    }
+  };
+
+  const restartManualBatches = () => {
+    setManualBatchOffset(0);
+    setSummary(null);
+    setResolveRows([]);
+    setError(null);
   };
 
   const runSearch = async () => {
@@ -489,7 +574,19 @@ export default function SchoolLocationMapPanel({
           />
           Skip schools with existing verified pins (off by default — every school is resolved)
         </label>
-        {!readOnly && (
+        <div>
+          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Resolve mode</label>
+          <select
+            value={resolveMode}
+            onChange={(e) => setResolveMode(e.target.value as ResolveMode)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-xs min-w-[200px]"
+            disabled={readOnly || loading}
+          >
+            <option value="manual_batch">30 schools per batch (recommended)</option>
+            <option value="continuous">All schools at once</option>
+          </select>
+        </div>
+        {!readOnly && resolveMode === "continuous" && (
           <button
             type="button"
             onClick={() => void runAutoPin()}
@@ -497,10 +594,106 @@ export default function SchoolLocationMapPanel({
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#ff791a] text-white text-xs font-bold disabled:opacity-50"
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Resolve & verify schools
+            Resolve all schools
           </button>
         )}
       </div>
+
+      {!readOnly && resolveMode === "manual_batch" && block && (
+        <div className="border border-slate-200 rounded-lg bg-slate-50 p-4 space-y-3">
+          {allManualBatchesComplete ? (
+            <>
+              <p className="text-sm font-semibold text-emerald-800">
+                All {totalBlockSchools} schools processed in {totalManualBatches} batch
+                {totalManualBatches === 1 ? "" : "es"}.
+              </p>
+              <p className="text-xs text-slate-600">
+                You can run the resolve process again from batch 1 — useful after fixes or to re-check pins.
+              </p>
+              <button
+                type="button"
+                onClick={restartManualBatches}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#ff791a] text-[#ff791a] text-xs font-bold disabled:opacity-50"
+              >
+                <RefreshCw size={14} />
+                Start over from batch 1
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">
+                    Batch {currentManualBatchIndex + 1} of {totalManualBatches}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Schools {manualBatchOffset + 1}–
+                    {manualBatchOffset + currentBatchSchools.length} of {totalBlockSchools} ·{" "}
+                    {currentBatchSchools.length} in this batch
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runManualBatch()}
+                  disabled={loading || currentBatchSchools.length === 0}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#ff791a] text-white text-xs font-bold disabled:opacity-50 shrink-0"
+                >
+                  {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Resolve this batch ({currentBatchSchools.length})
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Resolve this group first. When done, the next 30 schools appear automatically — click again for each batch.
+                This avoids rate limits and Hostinger timeouts.
+              </p>
+              <ul className="max-h-48 overflow-auto border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 text-xs">
+                {currentBatchSchools.map((school, index) => {
+                  const status = pinStatus(school);
+                  return (
+                    <li key={school.id} className="px-3 py-2 flex items-start gap-2">
+                      <span className="text-slate-400 w-5 shrink-0">{manualBatchOffset + index + 1}.</span>
+                      <span className={`w-2 h-2 rounded-full mt-1 shrink-0 ${statusDotClass(status)}`} />
+                      <span className="min-w-0">
+                        <span className="font-semibold text-slate-800 block truncate">{school.schoolName}</span>
+                        <span className="text-[10px] text-slate-400">
+                          {school.udise ? `UDISE ${school.udise}` : "No UDISE"}
+                          {" · "}
+                          {status === "verified"
+                            ? "Verified"
+                            : status === "draft"
+                              ? "Draft pin"
+                              : "No pin"}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {currentManualBatchIndex > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setManualBatchOffset((prev) =>
+                      Math.max(0, prev - MANUAL_BATCH_SIZE),
+                    )
+                  }
+                  disabled={loading}
+                  className="text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50"
+                >
+                  ← Previous batch (view only)
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {!readOnly && resolveMode === "manual_batch" && !block && (
+        <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          Select a block to see schools in batches of 30.
+        </p>
+      )}
 
       {progress && (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -780,10 +973,11 @@ export default function SchoolLocationMapPanel({
       <details className="text-[11px] text-slate-500 border border-slate-100 rounded-lg px-3 py-2">
         <summary className="font-semibold text-slate-600 cursor-pointer">Admin verify checklist (Amour / any block)</summary>
         <ol className="mt-2 space-y-1 list-decimal list-inside">
-          <li>Select district + block, click <strong>Resolve & verify schools</strong>.</li>
-          <li>Green = auto-verified via Google (school name + village + UDISE + Bihar check).</li>
-          <li>Orange = old draft pin — re-run resolve with skip unchecked.</li>
-          <li>Pink = not found — search village manually on the map and drag pin.</li>
+          <li>Select district + block. Use <strong>30 schools per batch</strong> mode (recommended).</li>
+          <li>Review the list, click <strong>Resolve this batch</strong>, then repeat for the next 30 until done.</li>
+          <li>Or switch to <strong>All schools at once</strong> for a full automatic run.</li>
+          <li>Red pin = wrong district GPS (e.g. Muzaffarpur area for Purnia schools) — re-resolve or drag manually.</li>
+          <li>Green = verified · Orange = draft · Pink = no pin</li>
           <li>Supervisors see village name + distance from required pin when submitting visits.</li>
         </ol>
       </details>

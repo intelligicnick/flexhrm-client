@@ -20,6 +20,12 @@ export function visitPingMatchLabel(status?: VisitPingMatchStatus): string {
       return "APK trail far from school";
     case "visit_ping_mismatch":
       return "Visit GPS vs APK mismatch";
+    case "school_pin_missing":
+      return "School pin not set";
+    case "outside_geofence":
+      return "Outside school geofence";
+    case "poor_gps_accuracy":
+      return "Poor GPS accuracy";
     case "matched":
       return "Geofence matched";
     default:

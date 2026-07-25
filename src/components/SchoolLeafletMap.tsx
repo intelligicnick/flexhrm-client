@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { SchoolWork } from "../types";
-import { localityHintFromSchoolName } from "../lib/school-place-match";
+import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import {
   attachFieldMapLayerControl,
   attachMapResizeObserver,
@@ -20,6 +20,7 @@ function hasValidPin(school: SchoolWork): boolean {
 
 function markerColor(school: SchoolWork): string {
   if (!hasValidPin(school)) return "#f87171";
+  if (isUnsafeSchoolPin(school)) return "#dc2626";
   if (school.locationVerified) return "#10b981";
   return "#f59e0b";
 }

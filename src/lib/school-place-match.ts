@@ -273,6 +273,23 @@ export function coordinatesInBihar(lat: number, lng: number): boolean {
   return lat >= 24.15 && lat <= 27.85 && lng >= 83.25 && lng <= 88.15;
 }
 
+const DISTRICT_BOUNDS: Record<string, { minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
+  purnia: { minLat: 25.45, maxLat: 26.55, minLng: 86.75, maxLng: 87.95 },
+  madhepura: { minLat: 25.55, maxLat: 26.45, minLng: 86.35, maxLng: 87.35 },
+};
+
+export function coordinatesInExpectedDistrict(lat: number, lng: number, district: string): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const bounds = DISTRICT_BOUNDS[normalizeToken(district)];
+  if (!bounds) return true;
+  return (
+    lat >= bounds.minLat &&
+    lat <= bounds.maxLat &&
+    lng >= bounds.minLng &&
+    lng <= bounds.maxLng
+  );
+}
+
 export function isUnsafeSchoolPin(school: {
   schoolName?: string;
   matchedPlaceName?: string;
@@ -286,10 +303,6 @@ export function isUnsafeSchoolPin(school: {
 }): boolean {
   const lat = Number(school.lat);
   const lng = Number(school.lng);
-  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
-    return true;
-  }
-
   const matchedPlaceName = String(school.matchedPlaceName || "").trim();
   const formattedAddress = String(school.formattedAddress || "").trim();
   const schoolName = String(school.schoolName || "").trim();
@@ -297,6 +310,13 @@ export function isUnsafeSchoolPin(school: {
   const district = String(school.district || "").trim();
   const confidence = String(school.locationConfidence || "").trim();
   const siblingBlocks = school.siblingBlocks ?? [];
+
+  if (Number.isFinite(lat) && Number.isFinite(lng) && !coordinatesInBihar(lat, lng)) {
+    return true;
+  }
+  if (Number.isFinite(lat) && Number.isFinite(lng) && district) {
+    if (!coordinatesInExpectedDistrict(lat, lng, district)) return true;
+  }
 
   if (matchedPlaceName && isAdminPlaceName(matchedPlaceName, block)) {
     return true;
