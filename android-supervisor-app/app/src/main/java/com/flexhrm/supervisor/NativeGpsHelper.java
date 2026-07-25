@@ -89,12 +89,8 @@ public final class NativeGpsHelper {
       return toJson(lastCachedLocation);
     }
 
-    Location blocking = getLastLocationBlocking(context, 3000L);
-    if (blocking != null) {
-      lastCachedLocation = blocking;
-      return toJson(blocking);
-    }
-
+    // Never block the JavascriptInterface thread (CountDownLatch caused ANRs /
+    // process kills when opening a school). Fresh GPS arrives via requestFreshCoordinates.
     Location legacy = pickBestLocationLegacy(context);
     if (legacy != null) {
       lastCachedLocation = legacy;

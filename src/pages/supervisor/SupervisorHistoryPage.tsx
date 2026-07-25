@@ -173,6 +173,7 @@ function VisitCard({
                     className="text-[10px] font-bold px-2 py-1 rounded-lg bg-orange-50 text-orange-700 border border-orange-100"
                   >
                     {getMaterialLabel(m.item, t)}
+                    {m.qty > 1 ? ` × ${m.qty}` : ""}
                   </span>
                 ))}
               </div>

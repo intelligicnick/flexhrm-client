@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, MapPin, RefreshCw, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  CircleHelp,
+  Loader2,
+  MapPin,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { localityHintFromSchoolName, isUnsafeSchoolPin } from "../lib/school-place-match";
 import { locationConfidenceLabel } from "../lib/school-geofence";
 import { formatNetworkFetchError } from "../api";
@@ -90,6 +98,33 @@ function statusDotClass(status: "verified" | "draft" | "missing"): string {
   if (status === "draft") return "bg-amber-500";
   return "bg-rose-400";
 }
+
+function statusBadgeClass(status: "verified" | "draft" | "missing"): string {
+  if (status === "verified") return "bg-emerald-50 text-emerald-700 ring-emerald-200/80";
+  if (status === "draft") return "bg-amber-50 text-amber-800 ring-amber-200/80";
+  return "bg-rose-50 text-rose-700 ring-rose-200/80";
+}
+
+function statusLabel(status: "verified" | "draft" | "missing"): string {
+  if (status === "verified") return "Verified";
+  if (status === "draft") return "Draft";
+  return "No pin";
+}
+
+/** Soften ALL-CAPS school names from registries for readable UI. */
+function displaySchoolName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return trimmed;
+  const letters = trimmed.replace(/[^A-Za-z]/g, "");
+  if (!letters || letters !== letters.toUpperCase()) return trimmed;
+  return trimmed
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (ch) => ch.toUpperCase());
+}
+
+const selectClassName =
+  "w-full h-9 px-3 border border-slate-200 rounded-lg text-xs bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#ff791a]/25 focus:border-[#ff791a]/60 disabled:opacity-50";
+const labelClassName = "text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1";
 
 export default function SchoolLocationMapPanel({
   schools,
@@ -514,473 +549,584 @@ export default function SchoolLocationMapPanel({
     }
   };
 
+  const batchProgressPct =
+    totalBlockSchools > 0
+      ? Math.min(100, Math.round((manualBatchOffset / totalBlockSchools) * 100))
+      : 0;
+
   return (
-    <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
-      <div>
-        <h2 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-          <MapPin className="text-[#ff791a]" size={18} />
-          Village-First School Locations
-        </h2>
-        <p className="text-xs text-slate-500 mt-1">
-          Step 0 checks <strong>schoolinfo.dramitkumar.in</strong> and <strong>schools.org.in</strong> by UDISE for GPS pins. Then{" "}
-          <strong>Google Places</strong> (school name + block + district). If Google misses a village,{" "}
-          <strong>onefivenine.com</strong> is tried with progressive name combinations. Map uses <strong>OSM + Esri satellite</strong>{" "}
-          with street/satellite/hybrid layers and village names on every pin.
-        </p>
-      </div>
+    <section className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+      <header className="px-5 pt-5 pb-4 border-b border-slate-100 bg-linear-to-br from-orange-50/50 via-white to-slate-50/40">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-extrabold text-slate-900 text-lg flex items-center gap-2.5">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white border border-orange-100 shadow-xs shrink-0">
+                <MapPin className="text-[#ff791a]" size={18} />
+              </span>
+              Village-First School Locations
+            </h2>
+            <p className="text-xs text-slate-500 mt-1.5 max-w-xl leading-relaxed">
+              Pin schools by village, drag to correct on the map, then verify before supervisors can submit visits.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold text-slate-500">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Verified
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Draft
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Missing
+            </span>
+          </div>
+        </div>
+      </header>
 
-      <div className="flex flex-wrap gap-2 items-end">
-        <div>
-          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">District</label>
-          <select
-            value={district}
-            onChange={(e) => {
-              setDistrict(e.target.value);
-              setBlock("");
-            }}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs"
-            disabled={readOnly || loading}
-          >
-            <option value="">All districts</option>
-            {districts.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Block</label>
-          <select
-            value={block}
-            onChange={(e) => setBlock(e.target.value)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs min-w-[160px]"
-            disabled={readOnly || loading}
-          >
-            <option value="">Select block</option>
-            {blocks.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </div>
-        <label className="flex items-center gap-2 text-xs text-slate-600 pb-2">
-          <input
-            type="checkbox"
-            checked={skipExisting}
-            onChange={(e) => setSkipExisting(e.target.checked)}
-            disabled={readOnly || loading}
-          />
-          Skip schools with existing verified pins (off by default — every school is resolved)
-        </label>
-        <div>
-          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Resolve mode</label>
-          <select
-            value={resolveMode}
-            onChange={(e) => setResolveMode(e.target.value as ResolveMode)}
-            className="px-3 py-2 border border-slate-200 rounded-lg text-xs min-w-[200px]"
-            disabled={readOnly || loading}
-          >
-            <option value="manual_batch">30 schools per batch (recommended)</option>
-            <option value="continuous">All schools at once</option>
-          </select>
-        </div>
-        {!readOnly && resolveMode === "continuous" && (
-          <button
-            type="button"
-            onClick={() => void runAutoPin()}
-            disabled={loading || !block}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#ff791a] text-white text-xs font-bold disabled:opacity-50"
-          >
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Resolve all schools
-          </button>
-        )}
-      </div>
-
-      {!readOnly && resolveMode === "manual_batch" && block && (
-        <div className="border border-slate-200 rounded-lg bg-slate-50 p-4 space-y-3">
-          {allManualBatchesComplete ? (
-            <>
-              <p className="text-sm font-semibold text-emerald-800">
-                All {totalBlockSchools} schools processed in {totalManualBatches} batch
-                {totalManualBatches === 1 ? "" : "es"}.
-              </p>
-              <p className="text-xs text-slate-600">
-                You can run the resolve process again from batch 1 — useful after fixes or to re-check pins.
-              </p>
+      <div className="p-5 space-y-5">
+        <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_auto] gap-3 items-end">
+            <div>
+              <label className={labelClassName}>District</label>
+              <select
+                value={district}
+                onChange={(e) => {
+                  setDistrict(e.target.value);
+                  setBlock("");
+                }}
+                className={selectClassName}
+                disabled={readOnly || loading}
+              >
+                <option value="">All districts</option>
+                {districts.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClassName}>Block</label>
+              <select
+                value={block}
+                onChange={(e) => setBlock(e.target.value)}
+                className={selectClassName}
+                disabled={readOnly || loading}
+              >
+                <option value="">Select block</option>
+                {blocks.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClassName}>Resolve mode</label>
+              <select
+                value={resolveMode}
+                onChange={(e) => setResolveMode(e.target.value as ResolveMode)}
+                className={selectClassName}
+                disabled={readOnly || loading}
+              >
+                <option value="manual_batch">30 schools per batch (recommended)</option>
+                <option value="continuous">All schools at once</option>
+              </select>
+            </div>
+            {!readOnly && resolveMode === "continuous" ? (
               <button
                 type="button"
-                onClick={restartManualBatches}
-                disabled={loading}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#ff791a] text-[#ff791a] text-xs font-bold disabled:opacity-50"
+                onClick={() => void runAutoPin()}
+                disabled={loading || !block}
+                className="inline-flex h-9 items-center justify-center gap-1.5 px-4 rounded-lg bg-[#ff791a] hover:bg-[#e4640c] text-white text-xs font-bold disabled:opacity-50 transition-colors"
               >
-                <RefreshCw size={14} />
-                Start over from batch 1
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Resolve all
               </button>
-            </>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">
-                    Batch {currentManualBatchIndex + 1} of {totalManualBatches}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Schools {manualBatchOffset + 1}–
-                    {manualBatchOffset + currentBatchSchools.length} of {totalBlockSchools} ·{" "}
-                    {currentBatchSchools.length} in this batch
-                  </p>
+            ) : (
+              <div className="hidden xl:block" aria-hidden />
+            )}
+          </div>
+          <label className="mt-3 flex items-start gap-2 text-xs text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={skipExisting}
+              onChange={(e) => setSkipExisting(e.target.checked)}
+              disabled={readOnly || loading}
+              className="mt-0.5 rounded border-slate-300 text-[#ff791a] focus:ring-[#ff791a]/40"
+            />
+            <span>
+              Skip schools that already have verified pins
+              <span className="text-slate-400"> — off by default, every school is resolved</span>
+            </span>
+          </label>
+        </div>
+
+        {!readOnly && resolveMode === "manual_batch" && block && (
+          <div className="rounded-xl border border-slate-200/80 bg-white overflow-hidden shadow-xs">
+            {allManualBatchesComplete ? (
+              <div className="p-5 space-y-3 bg-emerald-50/40">
+                <div className="flex items-start gap-3">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 shrink-0">
+                    <CheckCircle2 size={18} />
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold text-emerald-900">
+                      All {totalBlockSchools} schools processed
+                    </p>
+                    <p className="text-xs text-emerald-800/80 mt-0.5">
+                      Finished in {totalManualBatches} batch{totalManualBatches === 1 ? "" : "es"}. Run again from
+                      batch 1 after fixes or to re-check pins.
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => void runManualBatch()}
-                  disabled={loading || currentBatchSchools.length === 0}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#ff791a] text-white text-xs font-bold disabled:opacity-50 shrink-0"
+                  onClick={restartManualBatches}
+                  disabled={loading}
+                  className="inline-flex h-9 items-center gap-1.5 px-4 rounded-lg border border-[#ff791a] text-[#ff791a] hover:bg-orange-50 text-xs font-bold disabled:opacity-50 transition-colors"
                 >
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  Resolve this batch ({currentBatchSchools.length})
+                  <RefreshCw size={14} />
+                  Start over from batch 1
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Resolve this group first. When done, the next 30 schools appear automatically — click again for each batch.
-                This avoids rate limits and Hostinger timeouts.
-              </p>
-              <ul className="max-h-48 overflow-auto border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 text-xs">
-                {currentBatchSchools.map((school, index) => {
-                  const status = pinStatus(school);
-                  return (
-                    <li key={school.id} className="px-3 py-2 flex items-start gap-2">
-                      <span className="text-slate-400 w-5 shrink-0">{manualBatchOffset + index + 1}.</span>
-                      <span className={`w-2 h-2 rounded-full mt-1 shrink-0 ${statusDotClass(status)}`} />
-                      <span className="min-w-0">
-                        <span className="font-semibold text-slate-800 block truncate">{school.schoolName}</span>
-                        <span className="text-[10px] text-slate-400">
-                          {school.udise ? `UDISE ${school.udise}` : "No UDISE"}
-                          {" · "}
-                          {status === "verified"
-                            ? "Verified"
-                            : status === "draft"
-                              ? "Draft pin"
-                              : "No pin"}
+            ) : (
+              <>
+                <div className="px-4 pt-4 pb-3 space-y-3 border-b border-slate-100">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-900">
+                        Batch {currentManualBatchIndex + 1} of {totalManualBatches}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Schools {manualBatchOffset + 1}–
+                        {manualBatchOffset + currentBatchSchools.length} of {totalBlockSchools}
+                        <span className="text-slate-300 mx-1.5">·</span>
+                        {currentBatchSchools.length} in this batch
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void runManualBatch()}
+                      disabled={loading || currentBatchSchools.length === 0}
+                      className="inline-flex h-9 items-center gap-1.5 px-4 rounded-lg bg-[#ff791a] hover:bg-[#e4640c] text-white text-xs font-bold disabled:opacity-50 shrink-0 shadow-xs transition-colors"
+                    >
+                      {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      Resolve this batch ({currentBatchSchools.length})
+                    </button>
+                  </div>
+                  <div>
+                    <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#ff791a] transition-all duration-300"
+                        style={{ width: `${batchProgressPct}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1.5">
+                      Resolve one batch at a time to avoid rate limits and timeouts. Next batch loads automatically when this one finishes.
+                    </p>
+                  </div>
+                </div>
+
+                <ul className="max-h-56 overflow-auto divide-y divide-slate-100">
+                  {currentBatchSchools.map((school, index) => {
+                    const status = pinStatus(school);
+                    return (
+                      <li
+                        key={school.id}
+                        className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50/80 transition-colors"
+                      >
+                        <span className="text-[11px] tabular-nums text-slate-400 w-6 shrink-0 text-right">
+                          {manualBatchOffset + index + 1}
                         </span>
-                      </span>
-                    </li>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(status)}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="text-xs font-semibold text-slate-800 block truncate">
+                            {displaySchoolName(school.schoolName || "")}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {school.udise ? `UDISE ${school.udise}` : "No UDISE"}
+                          </span>
+                        </span>
+                        <span
+                          className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ring-1 ${statusBadgeClass(status)}`}
+                        >
+                          {statusLabel(status)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {currentManualBatchIndex > 0 && (
+                  <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/50">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setManualBatchOffset((prev) => Math.max(0, prev - MANUAL_BATCH_SIZE))
+                      }
+                      disabled={loading}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50"
+                    >
+                      <ArrowLeft size={12} />
+                      Previous batch (view only)
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {!readOnly && resolveMode === "manual_batch" && !block && (
+          <p className="text-xs text-slate-500 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-4 py-3">
+            Select a block to load schools in batches of 30.
+          </p>
+        )}
+
+        {progress && (
+          <p className="text-xs text-slate-600 bg-orange-50/60 border border-orange-100 rounded-xl px-3.5 py-2.5 flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin text-[#ff791a] shrink-0" />
+            {progress}
+          </p>
+        )}
+
+        {error && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5">{error}</p>
+        )}
+
+        {summary && (
+          <div className="flex flex-wrap gap-2">
+            {[
+              ["Schools", summary.total],
+              ["Villages", summary.totalVillages],
+              ["Verified", summary.resolved],
+              ["Skipped", summary.skipped],
+              ["Failed", summary.failed],
+            ].map(([label, value]) => (
+              <span
+                key={String(label)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px]"
+              >
+                <span className="text-slate-500 font-medium">{label}</span>
+                <span className="font-bold text-slate-800 tabular-nums">{value}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {resolveRows.length > 0 && (
+          <div className="max-h-72 overflow-auto rounded-xl border border-slate-200/80">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-50 sticky top-0 z-10">
+                <tr className="text-[10px] uppercase tracking-wide text-slate-500">
+                  <th className="text-left font-bold px-3 py-2.5">School</th>
+                  <th className="text-left font-bold px-3 py-2.5">Result</th>
+                  <th className="text-left font-bold px-3 py-2.5">Reason</th>
+                  <th className="text-left font-bold px-3 py-2.5">Match</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resolveRows.map((row) => {
+                  const schoolId = String(row.schoolWorkId || "");
+                  const status = String(row.status || "");
+                  return (
+                    <tr
+                      key={schoolId || String(row.schoolName)}
+                      className="border-t border-slate-100 hover:bg-slate-50/60"
+                    >
+                      <td className="px-3 py-2.5 align-top">
+                        <p className="font-semibold text-slate-800">
+                          {displaySchoolName(String(row.schoolName || ""))}
+                        </p>
+                        {row.villageHint ? (
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            Village:{" "}
+                            <span className="font-medium text-slate-600">{String(row.villageHint)}</span>
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className={`px-3 py-2.5 align-top capitalize font-semibold ${resolveStatusClass(status)}`}>
+                        {status.replace(/_/g, " ")}
+                        {row.resolutionStep ? (
+                          <span className="block text-[10px] font-normal text-slate-500 normal-case mt-0.5">
+                            {resolutionStepLabel(String(row.resolutionStep))}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2.5 align-top text-slate-600">
+                        {String(row.message || row.failureReason || row.successReason || "—")}
+                      </td>
+                      <td className="px-3 py-2.5 align-top">
+                        {row.matchedPlaceName ? String(row.matchedPlaceName) : "—"}
+                        {row.googleMapsUrl ? (
+                          <a
+                            href={String(row.googleMapsUrl)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-[#ff791a] font-semibold hover:underline mt-0.5"
+                          >
+                            Open map
+                          </a>
+                        ) : null}
+                      </td>
+                    </tr>
                   );
                 })}
-              </ul>
-              {currentManualBatchIndex > 0 && (
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="flex-1 min-w-[220px] flex gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runSearch();
+                }}
+                placeholder="Search village, school, or paste lat, lng"
+                className="w-full h-9 pl-9 pr-3 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#ff791a]/25 focus:border-[#ff791a]/60 disabled:opacity-50"
+                disabled={readOnly}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void runSearch()}
+              disabled={searching || readOnly}
+              className="inline-flex h-9 items-center gap-1.5 px-3.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 disabled:opacity-50 transition-colors"
+            >
+              {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Search
+            </button>
+          </div>
+          {selectedSchool?.googleMapsUrl && (
+            <a
+              href={selectedSchool.googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold text-[#ff791a] hover:underline"
+            >
+              Open in Google Maps
+            </a>
+          )}
+        </div>
+
+        {searchHits.length > 0 && (
+          <ul className="max-h-36 overflow-auto rounded-xl border border-slate-200/80 text-xs divide-y divide-slate-100 bg-white">
+            {searchHits.map((hit) => (
+              <li key={`${hit.lat}-${hit.lng}-${hit.displayName}`}>
                 <button
                   type="button"
-                  onClick={() =>
-                    setManualBatchOffset((prev) =>
-                      Math.max(0, prev - MANUAL_BATCH_SIZE),
-                    )
-                  }
-                  disabled={loading}
-                  className="text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50"
+                  onClick={() => applySearchHit(hit)}
+                  className="w-full text-left px-3.5 py-2.5 hover:bg-orange-50/50 transition-colors"
+                  disabled={!selectedSchool || readOnly}
                 >
-                  ← Previous batch (view only)
+                  {hit.displayName}
                 </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {!readOnly && resolveMode === "manual_batch" && !block && (
-        <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-          Select a block to see schools in batches of 30.
-        </p>
-      )}
-
-      {progress && (
-        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center gap-2">
-          <Loader2 size={14} className="animate-spin text-[#ff791a]" />
-          {progress}
-        </p>
-      )}
-
-      {error && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
-      )}
-
-      {summary && (
-        <p className="text-xs text-slate-600">
-          Schools {summary.total} · Villages {summary.totalVillages} · Verified {summary.resolved} · Skipped{" "}
-          {summary.skipped} · Failed {summary.failed}
-        </p>
-      )}
-
-      {resolveRows.length > 0 && (
-        <div className="max-h-72 overflow-auto border border-slate-100 rounded-lg">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-50 sticky top-0">
-              <tr>
-                <th className="text-left p-2">School</th>
-                <th className="text-left p-2">Result</th>
-                <th className="text-left p-2">Reason</th>
-                <th className="text-left p-2">Match</th>
-              </tr>
-            </thead>
-            <tbody>
-              {resolveRows.map((row) => {
-                const schoolId = String(row.schoolWorkId || "");
-                const status = String(row.status || "");
-                return (
-                  <tr key={schoolId || String(row.schoolName)} className="border-t border-slate-100">
-                    <td className="p-2">
-                      <p className="font-semibold text-slate-800">{String(row.schoolName || "")}</p>
-                      {row.villageHint ? (
-                        <p className="text-[10px] text-slate-400">
-                          Village: <span className="font-medium text-slate-600">{String(row.villageHint)}</span>
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className={`p-2 capitalize font-semibold ${resolveStatusClass(status)}`}>
-                      {status.replace(/_/g, " ")}
-                      {row.resolutionStep ? (
-                        <span className="block text-[10px] font-normal text-slate-500 normal-case">
-                          {resolutionStepLabel(String(row.resolutionStep))}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="p-2 text-slate-600">
-                      {String(row.message || row.failureReason || row.successReason || "—")}
-                    </td>
-                    <td className="p-2">
-                      {row.matchedPlaceName ? String(row.matchedPlaceName) : "—"}
-                      {row.googleMapsUrl ? (
-                        <a
-                          href={String(row.googleMapsUrl)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="block text-[#ff791a] font-semibold hover:underline mt-0.5"
-                        >
-                          Open map
-                        </a>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="flex-1 min-w-[200px] flex gap-2">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void runSearch();
-            }}
-            placeholder="Search village, school, or paste lat, lng"
-            className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs"
-            disabled={readOnly}
-          />
-          <button
-            type="button"
-            onClick={() => void runSearch()}
-            disabled={searching || readOnly}
-            className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700"
-          >
-            {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-            Search
-          </button>
-        </div>
-        {selectedSchool?.googleMapsUrl && (
-          <a
-            href={selectedSchool.googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-semibold text-[#ff791a] hover:underline"
-          >
-            Open in Google Maps
-          </a>
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
 
-      {searchHits.length > 0 && (
-        <ul className="max-h-32 overflow-auto border border-slate-100 rounded-lg text-xs divide-y divide-slate-100">
-          {searchHits.map((hit) => (
-            <li key={`${hit.lat}-${hit.lng}-${hit.displayName}`}>
-              <button
-                type="button"
-                onClick={() => applySearchHit(hit)}
-                className="w-full text-left px-3 py-2 hover:bg-slate-50"
-                disabled={!selectedSchool || readOnly}
-              >
-                {hit.displayName}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3 min-h-[420px]">
-        <div className="border border-slate-100 rounded-lg overflow-auto max-h-[420px]">
-          {villageGroups.length === 0 ? (
-            <p className="text-xs text-slate-400 p-3">Select a block to list villages.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100 text-xs">
-              {villageGroups.map((group) => (
-                <li key={group.village}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedVillage(group.village);
-                      setSelectedSchoolId(group.schools[0]?.id ?? null);
-                    }}
-                    className={`w-full text-left px-3 py-2 hover:bg-slate-50 ${
-                      selectedVillage === group.village ? "bg-orange-50" : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`w-2 h-2 rounded-full shrink-0 ${
-                          group.verifiedCount === group.schools.length
-                            ? "bg-emerald-500"
-                            : group.missingCount > 0
-                              ? "bg-rose-400"
-                              : "bg-amber-500"
+        <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-3 min-h-[440px]">
+          <div className="rounded-xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[440px] bg-white">
+            <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50/80 shrink-0">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Villages</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                {villageGroups.length > 0
+                  ? `${villageGroups.length} in ${block || "selection"}`
+                  : "Select a block to list villages"}
+              </p>
+            </div>
+            <div className="overflow-auto flex-1">
+              {villageGroups.length === 0 ? (
+                <p className="text-xs text-slate-400 p-4">No villages for this filter.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-xs">
+                  {villageGroups.map((group) => (
+                    <li key={group.village}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedVillage(group.village);
+                          setSelectedSchoolId(group.schools[0]?.id ?? null);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 transition-colors ${
+                          selectedVillage === group.village
+                            ? "bg-orange-50 border-l-2 border-l-[#ff791a]"
+                            : "hover:bg-slate-50 border-l-2 border-l-transparent"
                         }`}
-                      />
-                      <span className="font-semibold text-slate-800">{group.village}</span>
-                      <span className="text-slate-400 ml-auto">{group.schools.length}</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5 pl-4">
-                      {group.verifiedCount} verified · {group.draftCount} draft · {group.missingCount} missing
-                      {group.schools.find((s) => s.matchedPlaceName)?.matchedPlaceName && (
-                        <> · Google: {group.schools.find((s) => s.matchedPlaceName)?.matchedPlaceName}</>
-                      )}
-                    </p>
-                  </button>
-                  {selectedVillage === group.village && (
-                    <div className="px-2 pb-2 space-y-1">
-                      {!readOnly && group.draftCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => void verifyVillage(group.village)}
-                          disabled={actionLoading}
-                          className="w-full text-left px-2 py-1.5 rounded bg-emerald-50 text-emerald-800 font-semibold flex items-center gap-1"
-                        >
-                          <CheckCircle2 size={12} /> Verify whole village
-                        </button>
-                      )}
-                      {group.schools.map((school) => {
-                        const status = pinStatus(school);
-                        return (
-                          <button
-                            key={school.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSchoolId(school.id);
-                              setSelectedVillage(group.village);
-                            }}
-                            className={`w-full text-left px-2 py-1.5 rounded border ${
-                              selectedSchoolId === school.id
-                                ? "border-[#ff791a] bg-orange-50/50"
-                                : "border-transparent hover:bg-slate-50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              group.verifiedCount === group.schools.length
+                                ? "bg-emerald-500"
+                                : group.missingCount > 0
+                                  ? "bg-rose-400"
+                                  : "bg-amber-500"
                             }`}
-                          >
-                            <div className="flex items-start gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full mt-1.5 ${statusDotClass(status)}`} />
-                              <span>
-                                <span className="font-medium text-slate-700 block">{school.schoolName}</span>
-                                <span className="text-[10px] text-slate-400 block">
-                                  {hasValidPin(school)
-                                    ? `${school.matchedPlaceName || localityHintFromSchoolName(school.schoolName || "")} · ${locationConfidenceLabel(school.locationConfidence)}`
-                                    : "No pin — run Resolve"}
-                                </span>
-                                {school.udise && (
-                                  <span className="text-[10px] text-slate-400">UDISE {school.udise}</span>
-                                )}
-                              </span>
-                            </div>
-                            {selectedSchoolId === school.id && hasValidPin(school) && !readOnly && !school.locationVerified && (
+                          />
+                          <span className="font-semibold text-slate-800 truncate">{group.village}</span>
+                          <span className="text-[10px] font-bold text-slate-400 ml-auto tabular-nums bg-slate-100 rounded-md px-1.5 py-0.5">
+                            {group.schools.length}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1 pl-4">
+                          {group.verifiedCount} verified · {group.draftCount} draft · {group.missingCount} missing
+                        </p>
+                      </button>
+                      {selectedVillage === group.village && (
+                        <div className="px-2.5 pb-2.5 space-y-1 bg-orange-50/30">
+                          {!readOnly && group.draftCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void verifyVillage(group.village)}
+                              disabled={actionLoading}
+                              className="w-full text-left px-2.5 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100/80 text-emerald-800 font-semibold flex items-center gap-1.5 transition-colors"
+                            >
+                              <CheckCircle2 size={13} /> Verify whole village
+                            </button>
+                          )}
+                          {group.schools.map((school) => {
+                            const status = pinStatus(school);
+                            return (
                               <button
+                                key={school.id}
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void verifySchool(school.id);
+                                onClick={() => {
+                                  setSelectedSchoolId(school.id);
+                                  setSelectedVillage(group.village);
                                 }}
-                                disabled={actionLoading}
-                                className="mt-1 ml-3 text-[10px] font-bold text-emerald-700"
+                                className={`w-full text-left px-2.5 py-2 rounded-lg border transition-colors ${
+                                  selectedSchoolId === school.id
+                                    ? "border-[#ff791a] bg-white shadow-xs"
+                                    : "border-transparent hover:bg-white/80"
+                                }`}
                               >
-                                Verify this school
+                                <div className="flex items-start gap-2">
+                                  <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${statusDotClass(status)}`} />
+                                  <span className="min-w-0">
+                                    <span className="font-medium text-slate-700 block leading-snug">
+                                      {displaySchoolName(school.schoolName || "")}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 block mt-0.5">
+                                      {hasValidPin(school)
+                                        ? `${school.matchedPlaceName || localityHintFromSchoolName(school.schoolName || "")} · ${locationConfidenceLabel(school.locationConfidence)}`
+                                        : "No pin — run Resolve"}
+                                    </span>
+                                    {school.udise && (
+                                      <span className="text-[10px] text-slate-400">UDISE {school.udise}</span>
+                                    )}
+                                  </span>
+                                </div>
+                                {selectedSchoolId === school.id &&
+                                  hasValidPin(school) &&
+                                  !readOnly &&
+                                  !school.locationVerified && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void verifySchool(school.id);
+                                      }}
+                                      disabled={actionLoading}
+                                      className="mt-1.5 ml-3.5 text-[10px] font-bold text-emerald-700 hover:text-emerald-900"
+                                    >
+                                      Verify this school
+                                    </button>
+                                  )}
                               </button>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200/80 overflow-hidden min-h-[320px] lg:min-h-[440px]">
+            <SchoolLeafletMap
+              schools={filteredSchools}
+              selectedSchoolId={selectedSchoolId}
+              readOnly={readOnly}
+              onSelectSchool={(schoolId) => {
+                const school = filteredSchools.find((s) => s.id === schoolId);
+                setSelectedSchoolId(schoolId);
+                if (school) {
+                  setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
+                }
+              }}
+              onDragPin={(schoolId, lat, lng) => {
+                const school = filteredSchools.find((s) => s.id === schoolId);
+                void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
+              }}
+            />
+          </div>
         </div>
 
-        <SchoolLeafletMap
-          schools={filteredSchools}
-          selectedSchoolId={selectedSchoolId}
-          readOnly={readOnly}
-          onSelectSchool={(schoolId) => {
-            const school = filteredSchools.find((s) => s.id === schoolId);
-            setSelectedSchoolId(schoolId);
-            if (school) {
-              setSelectedVillage(localityHintFromSchoolName(school.schoolName || "") || null);
-            }
-          }}
-          onDragPin={(schoolId, lat, lng) => {
-            const school = filteredSchools.find((s) => s.id === schoolId);
-            void saveDraftPin(schoolId, lat, lng, school?.matchedPlaceName);
-          }}
-        />
+        {selectedSchool && isUnsafeSchoolPin(selectedSchool) && (
+          <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5">
+            This pin is outside Bihar or does not match district/block — likely a wrong match.
+            Search for the correct village in {selectedSchool.district || "district"} /{" "}
+            {selectedSchool.block || "block"}, drag the pin, then verify.
+          </p>
+        )}
+
+        {selectedSchool && (
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/60 px-3.5 py-2.5 text-[11px] text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              Selected{" "}
+              <span className="font-semibold text-slate-800">
+                {displaySchoolName(selectedSchool.schoolName || "")}
+              </span>
+            </span>
+            {selectedSchool.matchedPlaceName && (
+              <span>
+                Place <span className="font-semibold text-slate-700">{selectedSchool.matchedPlaceName}</span>
+              </span>
+            )}
+            {hasValidPin(selectedSchool) && (
+              <span className="tabular-nums">
+                {Number(selectedSchool.lat).toFixed(5)}, {Number(selectedSchool.lng).toFixed(5)}
+                <span className="text-slate-300 mx-1.5">·</span>
+                {selectedSchool.locationVerified ? "Verified" : "Draft"}
+              </span>
+            )}
+          </div>
+        )}
+
+        <details className="group rounded-xl border border-slate-200/80 bg-white text-[11px] text-slate-500 overflow-hidden">
+          <summary className="flex items-center gap-2 px-3.5 py-2.5 font-semibold text-slate-600 cursor-pointer list-none hover:bg-slate-50 transition-colors">
+            <CircleHelp size={14} className="text-slate-400 shrink-0" />
+            How resolving works & checklist
+            <span className="ml-auto text-slate-400 group-open:rotate-180 transition-transform">▾</span>
+          </summary>
+          <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 space-y-3">
+            <p className="leading-relaxed">
+              Step 0 checks <strong>schoolinfo.dramitkumar.in</strong> and <strong>schools.org.in</strong> by UDISE.
+              Then Google Places (school + block + district). If that misses,{" "}
+              <strong>onefivenine.com</strong> is tried. Map layers: OSM + Esri satellite.
+            </p>
+            <ol className="space-y-1.5 list-decimal list-inside text-slate-600">
+              <li>Select district + block. Prefer <strong>30 schools per batch</strong>.</li>
+              <li>Review the list, click <strong>Resolve this batch</strong>, then continue until done.</li>
+              <li>Or use <strong>All schools at once</strong> for a full automatic run.</li>
+              <li>Wrong-district GPS (e.g. Muzaffarpur for Purnia) — re-resolve or drag manually.</li>
+              <li>Green = verified · Amber = draft · Rose = no pin</li>
+              <li>Supervisors see village name + distance from the required pin when submitting visits.</li>
+            </ol>
+          </div>
+        </details>
       </div>
-
-      {selectedSchool && isUnsafeSchoolPin(selectedSchool) && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-          This pin is outside Bihar or does not match district/block — likely a wrong match (e.g. Rajasthan).
-          Search for the correct village in {selectedSchool.district || "district"} / {selectedSchool.block || "block"}, drag the pin, then verify.
-        </p>
-      )}
-
-      {selectedSchool && (
-        <p className="text-[11px] text-slate-500">
-          Selected: <span className="font-semibold text-slate-700">{selectedSchool.schoolName}</span>
-          {selectedSchool.matchedPlaceName && (
-            <>
-              {" "}
-              · Google place: <span className="font-semibold">{selectedSchool.matchedPlaceName}</span>
-            </>
-          )}
-          {hasValidPin(selectedSchool) && (
-            <>
-              {" "}
-              · {Number(selectedSchool.lat).toFixed(5)}, {Number(selectedSchool.lng).toFixed(5)}
-              {selectedSchool.locationVerified ? " · Verified" : " · Draft"}
-            </>
-          )}
-        </p>
-      )}
-
-      <details className="text-[11px] text-slate-500 border border-slate-100 rounded-lg px-3 py-2">
-        <summary className="font-semibold text-slate-600 cursor-pointer">Admin verify checklist (Amour / any block)</summary>
-        <ol className="mt-2 space-y-1 list-decimal list-inside">
-          <li>Select district + block. Use <strong>30 schools per batch</strong> mode (recommended).</li>
-          <li>Review the list, click <strong>Resolve this batch</strong>, then repeat for the next 30 until done.</li>
-          <li>Or switch to <strong>All schools at once</strong> for a full automatic run.</li>
-          <li>Red pin = wrong district GPS (e.g. Muzaffarpur area for Purnia schools) — re-resolve or drag manually.</li>
-          <li>Green = verified · Orange = draft · Pink = no pin</li>
-          <li>Supervisors see village name + distance from required pin when submitting visits.</li>
-        </ol>
-      </details>
     </section>
   );
 }

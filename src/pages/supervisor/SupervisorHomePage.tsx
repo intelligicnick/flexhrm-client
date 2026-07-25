@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate } from 'react-router';
 import {
   MapPin,
   ChevronRight,
   CalendarDays,
+  Clock3,
   MessageSquarePlus,
   History,
   ClipboardList,
@@ -43,6 +45,7 @@ import {
   SupervisorSection,
   SupervisorStatCard,
   SupervisorStatGrid,
+  SupervisorActionButton,
 } from "./SupervisorUI";
 
 function getWeekBounds(): { fromDate: string; toDate: string } {
@@ -79,6 +82,10 @@ export default function SupervisorHomePage() {
   const [sortNearest, setSortNearest] = useState(false);
   const [userGps, setUserGps] = useState<{ lat: number; lng: number } | null>(null);
   const [locationWarmDone, setLocationWarmDone] = useState(false);
+  const [cooldownPopup, setCooldownPopup] = useState<{
+    schoolName: string;
+    daysLeft: number;
+  } | null>(null);
 
   const today = toIsoDate(new Date());
 
@@ -316,6 +323,41 @@ export default function SupervisorHomePage() {
 
   return (
     <div className="space-y-4 pb-2">
+      {cooldownPopup &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="home-cooldown-title"
+          >
+            <div className="relative z-[10001] w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+                <Clock3 size={36} className="text-amber-600" />
+              </div>
+              <h2 id="home-cooldown-title" className="text-lg font-black text-slate-900">
+                {t("visitCooldownTitle")}
+              </h2>
+              <p className="mt-1 text-sm font-semibold text-slate-800">{cooldownPopup.schoolName}</p>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                {t("visitCooldownHint").replace("{days}", String(cooldownPopup.daysLeft))}
+              </p>
+              <p className="mt-3 text-2xl font-black tabular-nums text-amber-700">
+                {t("visitCooldownDaysLeft").replace("{days}", String(cooldownPopup.daysLeft))}
+              </p>
+              <SupervisorActionButton
+                type="button"
+                onClick={() => setCooldownPopup(null)}
+                fullWidth
+                className="mt-6 py-3.5"
+              >
+                {t("visitCooldownGotIt")}
+              </SupervisorActionButton>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       <SupervisorPageHeader
         title={`${greeting}${name ? `, ${name}` : ""}`}
         subtitle={new Date().toLocaleDateString(lang === "hi" ? "hi-IN" : "en-IN", {
@@ -514,9 +556,16 @@ export default function SupervisorHomePage() {
 
                 if (onCooldown) {
                   return (
-                    <div
+                    <button
                       key={school.id}
-                      className={`block rounded-xl border p-3.5 ${cardClass}`}
+                      type="button"
+                      onClick={() =>
+                        setCooldownPopup({
+                          schoolName: school.schoolName,
+                          daysLeft,
+                        })
+                      }
+                      className={`block w-full text-left rounded-xl border p-3.5 ${cardClass}`}
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-sm font-bold bg-slate-200 text-slate-500">
@@ -533,7 +582,7 @@ export default function SupervisorHomePage() {
                           <p className="text-[11px] text-slate-500 mt-0.5">{school.block}</p>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 }
 

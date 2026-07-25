@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useBlocker, useNavigate, useOutletContext, useParams } from 'react-router';
-import { ArrowLeft, Camera, CheckCircle2, ImagePlus, MapPin, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, CheckCircle2, Clock3, ImagePlus, MapPin, Minus, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SchoolWork, SCHOOL_MATERIAL_ITEMS } from "../../types";
 import { parseApiError } from "../../api";
 import {
@@ -38,6 +38,7 @@ import {
 import { useSupervisorOverlayBack, useSupervisorUnsavedBackGuard } from "../../lib/supervisor-back-handler";
 import { SupervisorActionButton, SupervisorConfirmDialog, SupervisorLoadingScreen } from "./SupervisorUI";
 import SupervisorSchoolMap from "../../components/supervisor/SupervisorSchoolMap";
+import { isFlexHrmNativeApp } from "../../lib/supervisor-installed-apps";
 import { supervisorSchoolVillageName, resolveSchoolStampLabels, invalidateSchoolStampLabelCache, type SchoolStampLabels } from "../../lib/supervisor-school-location";
 
 function photoSrc(photo: StampedVisitPhoto) {
@@ -99,6 +100,7 @@ export default function SupervisorVisitPage() {
   const [earnedXp, setEarnedXp] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<VisitPhotoLightboxState | null>(null);
+  const [cooldownPopupOpen, setCooldownPopupOpen] = useState(false);
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const leaveConfirmedRef = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -221,6 +223,9 @@ export default function SupervisorVisitPage() {
   }, [supervisorFetch]);
 
   useEffect(() => {
+    // Field Team APK uses Leaflet/OSM — Google Maps JS crashes many Android WebViews.
+    if (isFlexHrmNativeApp()) return;
+
     let cancelled = false;
     void (async () => {
       try {
@@ -352,8 +357,8 @@ export default function SupervisorVisitPage() {
 
   const lastVisitDate = lastVisitInfo?.lastVisitDate ?? null;
   const visitBlocked = useMemo(
-    () => !canVisitSchoolAgain(lastVisitDate),
-    [lastVisitDate],
+    () => lastVisitInfo != null && !canVisitSchoolAgain(lastVisitDate),
+    [lastVisitInfo, lastVisitDate],
   );
   const daysUntilAllowed = lastVisitDate ? daysUntilSchoolVisitAllowed(lastVisitDate) : 0;
   const cooldownHint = formatVisitCooldownHint(t, {
@@ -363,12 +368,21 @@ export default function SupervisorVisitPage() {
     currentSupervisorName,
   });
 
-  const changeMaterial = (item: string) => {
+  useEffect(() => {
+    if (visitBlocked) setCooldownPopupOpen(true);
+  }, [visitBlocked]);
+
+  const adjustMaterialQty = (item: string, delta: number) => {
     setMaterials((prev) => {
-      if (prev.some((m) => m.item === item)) {
+      const existing = prev.find((m) => m.item === item);
+      const nextQty = (existing?.qty || 0) + delta;
+      if (nextQty <= 0) {
         return prev.filter((m) => m.item !== item);
       }
-      return [...prev, { item, qty: 1 }];
+      if (existing) {
+        return prev.map((m) => (m.item === item ? { ...m, qty: nextQty } : m));
+      }
+      return [...prev, { item, qty: nextQty }];
     });
   };
 
@@ -394,6 +408,10 @@ export default function SupervisorVisitPage() {
   useSupervisorUnsavedBackGuard(hasUnsavedData && !leaveConfirmOpen, promptLeaveConfirm);
 
   useSupervisorOverlayBack(success, () => setSuccess(false));
+  useSupervisorOverlayBack(cooldownPopupOpen && visitBlocked, () => {
+    setCooldownPopupOpen(false);
+    navigate("/supervisor");
+  });
 
   const confirmLeave = useCallback(() => {
     leaveConfirmedRef.current = true;
@@ -537,7 +555,7 @@ export default function SupervisorVisitPage() {
     }
   };
 
-  const materialsCount = materials.length;
+  const materialsCount = materials.reduce((sum, m) => sum + (Number(m.qty) || 0), 0);
   const canSubmit =
     photos.length > 0 &&
     !saving &&
@@ -578,15 +596,53 @@ export default function SupervisorVisitPage() {
         onCancel={cancelLeave}
       />
 
+      {cooldownPopupOpen &&
+        visitBlocked &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="visit-cooldown-title"
+          >
+            <div className="relative z-[10001] w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+                <Clock3 size={36} className="text-amber-600" />
+              </div>
+              <h2 id="visit-cooldown-title" className="text-lg font-black text-slate-900">
+                {t("visitCooldownTitle")}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">{cooldownHint}</p>
+              {daysUntilAllowed > 0 && (
+                <p className="mt-3 text-2xl font-black tabular-nums text-amber-700">
+                  {t("visitCooldownDaysLeft").replace("{days}", String(daysUntilAllowed))}
+                </p>
+              )}
+              <SupervisorActionButton
+                type="button"
+                onClick={() => {
+                  setCooldownPopupOpen(false);
+                  navigate("/supervisor");
+                }}
+                fullWidth
+                className="mt-6 py-3.5"
+              >
+                {t("visitCooldownGotIt")}
+              </SupervisorActionButton>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       {success &&
         createPortal(
           <div
-            className="fixed inset-0 z-[250] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="visit-success-title"
           >
-            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+            <div className="relative z-[10001] w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
                 <CheckCircle2 size={36} className="text-emerald-600" />
               </div>
@@ -641,15 +697,6 @@ export default function SupervisorVisitPage() {
         </p>
       </div>
 
-      {visitBlocked && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <p className="font-bold">{t("visitCooldownTitle")}</p>
-          <p className="mt-1 text-xs">
-            {cooldownHint}
-          </p>
-        </div>
-      )}
-
       {!schoolPinReady && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-bold">
@@ -698,8 +745,8 @@ export default function SupervisorVisitPage() {
         </div>
       )}
 
-      {schoolPinReady && mapsApiKey && (
-        <section className="space-y-2">
+      {!success && schoolPinReady && (isFlexHrmNativeApp() || mapsApiKey) && (
+        <section className="relative z-0 space-y-2">
           {school.matchedPlaceName && (
             <p className="text-xs text-slate-600 px-1">
               {t("googleFoundPlace")}:{" "}
@@ -819,22 +866,49 @@ export default function SupervisorVisitPage() {
 
         <section className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
           <h2 className="text-sm font-bold text-slate-800">{t("materialsGiven")}</h2>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-2">
             {SCHOOL_MATERIAL_ITEMS.map((item) => {
-              const selected = materials.some((m) => m.item === item);
+              const qty = materials.find((m) => m.item === item)?.qty || 0;
+              const selected = qty > 0;
               return (
-                <button
+                <div
                   key={item}
-                  type="button"
-                  onClick={() => changeMaterial(item)}
-                  className={`rounded-xl px-3 py-2.5 border text-left text-sm font-semibold transition cursor-pointer ${
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${
                     selected
-                      ? "bg-orange-50 border-orange-300 text-[#ff791a]"
-                      : "bg-slate-50 border-slate-100 text-slate-800"
+                      ? "bg-orange-50 border-orange-300"
+                      : "bg-slate-50 border-slate-100"
                   }`}
                 >
-                  {getMaterialLabel(item, t)}
-                </button>
+                  <span
+                    className={`min-w-0 flex-1 text-sm font-semibold leading-snug ${
+                      selected ? "text-[#ff791a]" : "text-slate-800"
+                    }`}
+                  >
+                    {getMaterialLabel(item, t)}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      aria-label={`Decrease ${item}`}
+                      disabled={qty <= 0}
+                      onClick={() => adjustMaterialQty(item, -1)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 disabled:opacity-40"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="w-8 text-center text-sm font-black tabular-nums text-slate-900">
+                      {qty}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Increase ${item}`}
+                      onClick={() => adjustMaterialQty(item, 1)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-orange-200 bg-orange-100 text-[#ff791a]"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
               );
             })}
           </div>

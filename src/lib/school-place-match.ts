@@ -323,9 +323,11 @@ export function isUnsafeSchoolPin(school: {
   }
 
   if (formattedAddress && district) {
-    const confidence = String(school.locationConfidence || "").trim();
     if (confidence === "village") {
       if (!placeInExpectedDistrict(formattedAddress, district)) return true;
+      if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
+        return true;
+      }
     } else if (block && !placeInExpectedAdminArea(formattedAddress, block, district, siblingBlocks)) {
       return true;
     }

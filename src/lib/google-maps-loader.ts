@@ -27,7 +27,8 @@ export async function loadGoogleMaps(apiKey: string): Promise<typeof google> {
     script.dataset.flexhrmGoogleMaps = '1';
     script.async = true;
     script.defer = true;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=marker`;
+    // Classic Marker only — avoid loading the Advanced Marker library in WebViews.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
     script.onload = () => {
       if (window.google?.maps) resolve(window.google);
       else reject(new Error('Google Maps failed to initialize.'));

@@ -189,7 +189,7 @@ export default function FieldTeamPanel({
               : view === "commitments"
                 ? "Daily and date-range visit commitments submitted by supervisors"
                 : view === "school-locations"
-                  ? "Auto-pin villages on the map, drag pins to correct, then verify before supervisors can submit visits"
+                  ? "Pin by village, correct on the map, then verify before supervisors can submit visits"
                   : "Manage supervisors and their block assignments"}
         </span>
       </div>

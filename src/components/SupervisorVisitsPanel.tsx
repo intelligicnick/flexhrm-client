@@ -23,6 +23,7 @@ import { DateInput } from "./ui/DateInput";
 import VisitPhotoLightbox, { VisitPhotoThumbnail } from "./VisitPhotoLightbox";
 import { formatLatLngDecimal, isValidGpsCoord } from "../lib/gps-coords";
 import { localityHintFromSchoolName } from "../lib/school-place-match";
+import { schoolGeofenceRadiusM } from "../lib/school-geofence";
 import {
   buildDualPinGoogleMapsUrl,
   buildDualPinOsmUrl,
@@ -34,6 +35,29 @@ import {
   visitPingMatchBadgeClass,
   visitPingMatchLabel,
 } from "../lib/visit-ping-verification";
+
+const DEFAULT_GEOFENCE_RADIUS_M = 400;
+
+function formatAwayDistanceKm(meters: number): string {
+  const km = meters / 1000;
+  const rounded = km >= 10 ? Math.round(km) : Math.round(km * 10) / 10;
+  return `${rounded} km away from locations`;
+}
+
+function visitDistanceAway(
+  visit: SchoolVisit,
+  schools?: SchoolWork[],
+): { away: boolean; meters: number; radiusM: number } | null {
+  if (typeof visit.distanceToSchoolM !== "number" || visit.distanceToSchoolM <= 0) {
+    return null;
+  }
+  const school = schools?.find((s) => s.id === visit.schoolWorkId);
+  const radiusM = school ? schoolGeofenceRadiusM(school) : DEFAULT_GEOFENCE_RADIUS_M;
+  const away =
+    visit.locationMatchStatus === "outside_geofence" ||
+    visit.distanceToSchoolM > radiusM;
+  return { away, meters: visit.distanceToSchoolM, radiusM };
+}
 
 interface SupervisorVisitsPanelProps {
   visits: SchoolVisit[];
@@ -148,11 +172,19 @@ function VisitLocationLinks({
       >
         OpenStreetMap
       </a>
-      {typeof visit.distanceToSchoolM === "number" && visit.distanceToSchoolM > 0 && (
-        <span className="text-[10px] text-slate-500">
-          Distance: {visit.distanceToSchoolM} m
-        </span>
-      )}
+      {(() => {
+        const dist = visitDistanceAway(visit, schools);
+        if (!dist) return null;
+        return dist.away ? (
+          <span className="text-[10px] font-semibold text-red-600">
+            {formatAwayDistanceKm(dist.meters)}
+          </span>
+        ) : (
+          <span className="text-[10px] text-slate-500">
+            Distance: {dist.meters} m
+          </span>
+        );
+      })()}
     </div>
   );
 }
@@ -686,9 +718,18 @@ export default function SupervisorVisitsPanel({
                           : ""}
                         {" — "}
                         {visit.supervisorName}
-                        {typeof visit.distanceToSchoolM === "number" && visit.distanceToSchoolM > 0
-                          ? ` · ${visit.distanceToSchoolM} m from pin`
-                          : ""}
+                        {(() => {
+                          const dist = visitDistanceAway(visit, schools);
+                          if (!dist) return null;
+                          return dist.away ? (
+                            <span className="text-red-600 font-semibold">
+                              {" · "}
+                              {formatAwayDistanceKm(dist.meters)}
+                            </span>
+                          ) : (
+                            ` · ${dist.meters} m from pin`
+                          );
+                        })()}
                       </span>
                       <div className="mt-1">
                         <VisitPingVerificationBadge visit={visit} />

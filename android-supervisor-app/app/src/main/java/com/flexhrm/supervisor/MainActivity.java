@@ -563,9 +563,23 @@ public class MainActivity extends AppCompatActivity {
                     || host.contains("hostingersite.com"))) {
               return false;
             }
+            // Keep common map tile / CDN hosts inside WebView — do not bounce to an
+            // external browser (and never crash if no browser is available).
+            if (host != null
+                && (host.contains("openstreetmap.org")
+                    || host.contains("openstreetmap.fr")
+                    || host.contains("basemaps.cartocdn.com")
+                    || host.contains("arcgisonline.com")
+                    || host.contains("tile.openstreetmap"))) {
+              return false;
+            }
             if ("https".equalsIgnoreCase(uri.getScheme())
                 || "http".equalsIgnoreCase(uri.getScheme())) {
-              startActivity(new Intent(Intent.ACTION_VIEW, uri));
+              try {
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+              } catch (Exception ignored) {
+                // No browser / ActivityNotFound — keep the portal alive.
+              }
               return true;
             }
             return false;
