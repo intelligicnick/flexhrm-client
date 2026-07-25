@@ -155,7 +155,8 @@ export function setupFetchInterceptor(): void {
       }
     }
 
-    let response: Response;
+    let response: Response | undefined;
+    const maxAttempts = isApiCall ? 3 : 1;
     try {
       // #region agent log
       if (isApiCall) {
@@ -174,7 +175,31 @@ export function setupFetchInterceptor(): void {
         );
       }
       // #endregion
-      response = await originalFetch(resolvedInput, resolvedInit);
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const next = await originalFetch(resolvedInput, resolvedInit);
+          // Retry briefly on Hostinger gateway blips.
+          if (
+            isApiCall &&
+            attempt < maxAttempts &&
+            (next.status === 502 || next.status === 503 || next.status === 504)
+          ) {
+            await next.text().catch(() => undefined);
+            await new Promise((r) => setTimeout(r, 250 * attempt));
+            continue;
+          }
+          response = next;
+          break;
+        } catch (err) {
+          if (!isApiCall || !isNetworkFetchError(err) || attempt >= maxAttempts) {
+            throw err;
+          }
+          await new Promise((r) => setTimeout(r, 250 * attempt));
+        }
+      }
+      if (!response) {
+        throw new TypeError("Failed to fetch");
+      }
       // #region agent log
       if (isApiCall) {
         debugSessionLog(

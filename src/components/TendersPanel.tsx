@@ -1640,10 +1640,13 @@ export default function TendersPanel({
       if (isFiledBucket(t.status) || t.filedDate.trim()) filed += 1;
       if (t.status === "qualified") qualified += 1;
       if (isNearNotParticipated(t) || isMissedParticipation(t)) urgent += 1;
+      if (isMissedParticipation(t)) {
+        passed += 1;
+        return;
+      }
       const ts = parseEndDateMs(t.endDate);
       if (ts === null) return;
       if (ts >= now) upcoming += 1;
-      else passed += 1;
     });
     return { total: activeTenders.length, upcoming, passed, filed, qualified, urgent, manpower, travel };
   }, [activeTenders]);
@@ -1672,12 +1675,16 @@ export default function TendersPanel({
       );
     }
     if (deadlineFilter !== "all") {
-      const now = Date.now();
-      rows = rows.filter((t) => {
-        const ts = parseEndDateMs(t.endDate);
-        if (ts === null) return deadlineFilter === "upcoming";
-        return deadlineFilter === "upcoming" ? ts >= now : ts < now;
-      });
+      if (deadlineFilter === "passed") {
+        rows = rows.filter((t) => isMissedParticipation(t));
+      } else {
+        const now = Date.now();
+        rows = rows.filter((t) => {
+          const ts = parseEndDateMs(t.endDate);
+          if (ts === null) return true;
+          return ts >= now;
+        });
+      }
     }
     if (dateFrom || dateTo) {
       rows = rows.filter((t) => tenderMatchesDateRange(t, dateRangeField, dateFrom, dateTo));
@@ -2216,7 +2223,7 @@ export default function TendersPanel({
       icon: AlertTriangle,
       iconBg: "bg-red-100 text-red-600",
       tone: "text-red-700",
-      sub: "Deadline elapsed",
+      sub: "Not participated · elapsed",
       active: deadlineFilter === "passed" && !statusFilter,
     },
   ];
