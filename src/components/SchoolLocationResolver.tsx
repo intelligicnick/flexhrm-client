@@ -118,7 +118,7 @@ export default function SchoolLocationResolver({
     setProgress(null);
     setRows([]);
 
-    const batchSize = 3;
+    const batchSize = 1;
     let offset = 0;
     let total = 0;
     let resolved = 0;

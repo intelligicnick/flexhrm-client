@@ -18,17 +18,17 @@ import SchoolLeafletMap from "./SchoolLeafletMap";
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
-  retries = 3,
+  retries = 2,
 ): Promise<Response> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
-      const res = await fetch(url, init);
-      return res;
+      // No AbortSignal.timeout — aborted cross-origin fetches often look like "Failed to fetch".
+      return await fetch(url, init);
     } catch (err) {
       lastErr = err;
       if (attempt < retries - 1) {
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 1200));
       }
     }
   }
@@ -36,7 +36,8 @@ async function fetchWithRetry(
 }
 
 const MANUAL_BATCH_SIZE = 30;
-const API_CHUNK_SIZE = 5;
+/** One school per HTTP request — Hostinger proxy ~20s; multi-school chunks get killed mid-resolve. */
+const API_CHUNK_SIZE = 1;
 
 type ResolveMode = "manual_batch" | "continuous";
 
@@ -300,70 +301,106 @@ export default function SchoolLocationMapPanel({
         const chunkLimit = Math.min(API_CHUNK_SIZE, rangeEnd - schoolOffset);
         if (chunkLimit <= 0) break;
 
+        const schoolAtOffset = orderedBlockSchools[schoolOffset];
         setProgress(
           total > 0
             ? resolveMode === "manual_batch"
-              ? `Resolving schools ${schoolOffset + 1}–${Math.min(schoolOffset + chunkLimit, total)} of ${total} (batch ${currentManualBatchIndex + 1}/${totalManualBatches})…`
-              : `Resolving schools ${schoolOffset + 1}–${Math.min(schoolOffset + chunkLimit, total)} of ${total}…`
+              ? `Resolving school ${Math.min(schoolOffset + 1, total)} of ${total} (batch ${currentManualBatchIndex + 1}/${totalManualBatches})…`
+              : `Resolving school ${Math.min(schoolOffset + 1, total)} of ${total}…`
             : "Starting school location resolve…",
         );
 
-        const res = await fetchBulkBatch(
-          "/api/school-works/bulk-assign-village-locations",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              block: block.trim(),
-              district: district.trim() || undefined,
-              saveDraft: true,
-              skipExisting,
-              schoolLimit: chunkLimit,
-              schoolOffset,
-            }),
-          },
-          {
-            onWait: (reason, waitMs) => {
-              const secs = Math.ceil(waitMs / 1000);
-              const label =
-                reason === "rate_limit"
-                  ? "Rate limit — pausing"
-                  : reason === "gateway"
-                    ? "Server busy — retrying"
-                    : "Connection issue — retrying";
-              setProgress(
-                total > 0
-                  ? `${label} ${secs}s, then continuing (${Math.min(schoolOffset + 1, total)}/${total})…`
-                  : `${label} ${secs}s, then continuing…`,
-              );
+        try {
+          const res = await fetchBulkBatch(
+            "/api/school-works/bulk-assign-village-locations",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                block: block.trim(),
+                district: district.trim() || undefined,
+                saveDraft: true,
+                skipExisting,
+                schoolLimit: chunkLimit,
+                schoolOffset,
+                fastMode: true,
+              }),
             },
-          },
-        );
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.message || "School resolve failed.");
+            {
+              onWait: (reason, waitMs) => {
+                const secs = Math.ceil(waitMs / 1000);
+                const label =
+                  reason === "rate_limit"
+                    ? "Rate limit — pausing"
+                    : reason === "gateway"
+                      ? "Server busy — retrying"
+                      : "Brief network glitch — retrying";
+                setProgress(
+                  total > 0
+                    ? `${label} ${secs}s (${Math.min(schoolOffset + 1, total)}/${total})…`
+                    : `${label} ${secs}s…`,
+                );
+              },
+            },
+          );
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.message || "School resolve failed.");
 
-        total = Number(data.total) || total;
-        totalVillages = Number(data.totalVillages) || totalVillages;
-        resolved += Number(data.resolved) || 0;
-        skipped += Number(data.skipped) || 0;
-        failed += Number(data.failed) || 0;
-        villagesResolved += Number(data.villagesResolved) || 0;
+          total = Number(data.total) || total;
+          totalVillages = Number(data.totalVillages) || totalVillages;
+          resolved += Number(data.resolved) || 0;
+          skipped += Number(data.skipped) || 0;
+          failed += Number(data.failed) || 0;
+          villagesResolved += Number(data.villagesResolved) || 0;
 
-        if (Array.isArray(data.results)) {
-          batchRows.push(...data.results);
-          applyResolveResultRows(data.results);
+          if (Array.isArray(data.results)) {
+            batchRows.push(...data.results);
+            applyResolveResultRows(data.results);
+          }
+
+          setSummary({ total, totalVillages, resolved, skipped, failed, villagesResolved });
+          setResolveRows([...batchRows]);
+
+          const nextOffset =
+            Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) ||
+            schoolOffset + chunkLimit;
+          schoolOffset = nextOffset;
+
+          if (!data.hasMore) break;
+          if (schoolOffset >= rangeEnd) break;
+          await sleep(BULK_BATCH_DELAY_MS);
+        } catch (schoolErr: unknown) {
+          // Never stall the whole batch on one flaky school — mark failed and advance.
+          const message =
+            schoolErr instanceof Error ? schoolErr.message : "School resolve failed.";
+          failed += 1;
+          const failRow: Record<string, unknown> = {
+            schoolWorkId: schoolAtOffset?.id || "",
+            schoolName: schoolAtOffset?.schoolName || `School #${schoolOffset + 1}`,
+            udise: schoolAtOffset?.udise || "",
+            villageHint: localityHintFromSchoolName(schoolAtOffset?.schoolName || ""),
+            status: "not_found",
+            failureReason: "connection_or_timeout",
+            message,
+            stepsTried: ["client_skip_forward"],
+          };
+          batchRows.push(failRow);
+          setResolveRows([...batchRows]);
+          setSummary({
+            total,
+            totalVillages,
+            resolved,
+            skipped,
+            failed,
+            villagesResolved,
+          });
+          setProgress(
+            `Skipped school ${schoolOffset + 1} (${message.slice(0, 80)}${message.length > 80 ? "…" : ""}) — continuing…`,
+          );
+          schoolOffset += chunkLimit;
+          if (schoolOffset >= rangeEnd) break;
+          await sleep(BULK_BATCH_DELAY_MS);
         }
-
-        setSummary({ total, totalVillages, resolved, skipped, failed, villagesResolved });
-
-        const nextOffset =
-          Number(data.nextSchoolOffset ?? data.nextVillageOffset ?? data.nextOffset) ||
-          schoolOffset + chunkLimit;
-        schoolOffset = nextOffset;
-
-        if (!data.hasMore) break;
-        if (schoolOffset >= rangeEnd) break;
-        await sleep(BULK_BATCH_DELAY_MS);
       }
 
       setResolveRows(batchRows);
@@ -375,7 +412,7 @@ export default function SchoolLocationMapPanel({
         );
       } else if (failed > 0 && resolved === 0 && skipped === 0) {
         setError(
-          `${failed} school(s) in this batch could not be auto-verified — see the resolve log below.`,
+          `${failed} school(s) in this batch could not be auto-verified — see the resolve log below. You can re-run the batch for misses.`,
         );
       }
 
@@ -723,7 +760,7 @@ export default function SchoolLocationMapPanel({
                       />
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1.5">
-                      Resolve one batch at a time to avoid rate limits and timeouts. Next batch loads automatically when this one finishes.
+                      Resolves school-by-school (fast path). Flaky schools are skipped so the batch keeps moving.
                     </p>
                   </div>
                 </div>

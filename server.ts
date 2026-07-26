@@ -83,6 +83,13 @@ function createApiProxy(backendUrl: string) {
   const defaultPort = target.protocol === "https:" ? 443 : 80;
 
   return (req: Request, res: Response) => {
+    const isBulkResolve =
+      typeof req.originalUrl === "string" &&
+      (req.originalUrl.includes("/bulk-assign-village-locations") ||
+        req.originalUrl.includes("/bulk-resolve-locations"));
+    // Bulk resolve can take ~16s/school; give local proxy enough headroom.
+    const proxyTimeoutMs = isBulkResolve ? 120_000 : 60_000;
+
     const proxyReq = transport.request(
       {
         hostname: target.hostname,
@@ -90,12 +97,25 @@ function createApiProxy(backendUrl: string) {
         path: req.originalUrl,
         method: req.method,
         headers: { ...req.headers, host: target.host },
+        timeout: proxyTimeoutMs,
       },
       (proxyRes) => {
         res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
         proxyRes.pipe(res);
       }
     );
+
+    proxyReq.on("timeout", () => {
+      proxyReq.destroy();
+      if (!res.headersSent) {
+        res.status(504).json({
+          message:
+            "API proxy timed out waiting for the backend. For Pin & Resolve, retry one school at a time.",
+          error: "Gateway Timeout",
+          statusCode: 504,
+        });
+      }
+    });
 
     proxyReq.on("error", (err) => {
       console.error("[API proxy]", err.message);

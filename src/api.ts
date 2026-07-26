@@ -62,7 +62,34 @@ function isSupervisorNativeOrProduction(): boolean {
   return /FlexHrmSupervisor|FlexHrmObserver/i.test(navigator.userAgent);
 }
 
+function isAbortOrTimeoutError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = String((err as { name?: string }).name || "");
+  const message = String((err as { message?: string }).message || "").toLowerCase();
+  return (
+    name === "AbortError" ||
+    name === "TimeoutError" ||
+    message.includes("aborted") ||
+    message.includes("the operation was aborted") ||
+    message.includes("timed out") ||
+    message.includes("timeout")
+  );
+}
+
+function isBulkResolveUrl(urlStr: string): boolean {
+  return (
+    urlStr.includes("/bulk-assign-village-locations") ||
+    urlStr.includes("/bulk-resolve-locations")
+  );
+}
+
 export function formatNetworkFetchError(err: unknown, fallback?: string): Error {
+  if (isAbortOrTimeoutError(err)) {
+    return new Error(
+      fallback ||
+        "Request timed out. For Pin & Resolve, the server processes one school per request — click Resolve again to continue.",
+    );
+  }
   if (isNetworkFetchError(err)) {
     const apiBase = getApiBase();
     const productionMessage = apiBase
@@ -156,7 +183,11 @@ export function setupFetchInterceptor(): void {
     }
 
     let response: Response | undefined;
-    const maxAttempts = isApiCall ? 3 : 1;
+    const headersForRetry = new Headers(resolvedInit.headers ?? {});
+    const skipInterceptorRetry =
+      headersForRetry.has("x-flexhrm-no-retry") || isBulkResolveUrl(urlStr);
+    // Bulk resolve manages its own retries/timeouts — do not stack interceptor retries.
+    const maxAttempts = isApiCall && !skipInterceptorRetry ? 3 : 1;
     try {
       // #region agent log
       if (isApiCall) {
@@ -181,6 +212,7 @@ export function setupFetchInterceptor(): void {
           // Retry briefly on Hostinger gateway blips.
           if (
             isApiCall &&
+            !skipInterceptorRetry &&
             attempt < maxAttempts &&
             (next.status === 502 || next.status === 503 || next.status === 504)
           ) {
@@ -191,7 +223,8 @@ export function setupFetchInterceptor(): void {
           response = next;
           break;
         } catch (err) {
-          if (!isApiCall || !isNetworkFetchError(err) || attempt >= maxAttempts) {
+          if (isAbortOrTimeoutError(err)) throw err;
+          if (!isApiCall || skipInterceptorRetry || !isNetworkFetchError(err) || attempt >= maxAttempts) {
             throw err;
           }
           await new Promise((r) => setTimeout(r, 250 * attempt));
