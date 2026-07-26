@@ -36,10 +36,11 @@ async function fetchWithRetry(
 }
 
 const MANUAL_BATCH_SIZE = 30;
-/** One school per HTTP request — Hostinger proxy ~20s; multi-school chunks get killed mid-resolve. */
-const API_CHUNK_SIZE = 1;
+/** Match backend RESOLVE_TIMING.bulkSchoolsPerRequest — shared block cache per HTTP call. */
+const API_CHUNK_SIZE = 4;
 
 type ResolveMode = "manual_batch" | "continuous";
+type ResolveSpeed = "balanced" | "thorough";
 
 interface SchoolLocationMapPanelProps {
   schools: SchoolWork[];
@@ -135,6 +136,7 @@ export default function SchoolLocationMapPanel({
   const [block, setBlock] = useState("");
   const [skipExisting, setSkipExisting] = useState(false);
   const [resolveMode, setResolveMode] = useState<ResolveMode>("manual_batch");
+  const [resolveSpeed, setResolveSpeed] = useState<ResolveSpeed>("balanced");
   const [manualBatchOffset, setManualBatchOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -203,7 +205,7 @@ export default function SchoolLocationMapPanel({
     setResolveRows([]);
     setSummary(null);
     setError(null);
-  }, [district, block, skipExisting, resolveMode]);
+  }, [district, block, skipExisting, resolveMode, resolveSpeed]);
 
   const villageGroups = useMemo((): VillageGroup[] => {
     const map = new Map<string, SchoolWork[]>();
@@ -305,8 +307,8 @@ export default function SchoolLocationMapPanel({
         setProgress(
           total > 0
             ? resolveMode === "manual_batch"
-              ? `Resolving school ${Math.min(schoolOffset + 1, total)} of ${total} (batch ${currentManualBatchIndex + 1}/${totalManualBatches})…`
-              : `Resolving school ${Math.min(schoolOffset + 1, total)} of ${total}…`
+              ? `${resolveSpeed === "thorough" ? "Thorough" : "Balanced"} resolve — school ${Math.min(schoolOffset + 1, total)} of ${total} (batch ${currentManualBatchIndex + 1}/${totalManualBatches})…`
+              : `${resolveSpeed === "thorough" ? "Thorough" : "Balanced"} resolve — school ${Math.min(schoolOffset + 1, total)} of ${total}…`
             : "Starting school location resolve…",
         );
 
@@ -323,7 +325,7 @@ export default function SchoolLocationMapPanel({
                 skipExisting,
                 schoolLimit: chunkLimit,
                 schoolOffset,
-                fastMode: true,
+                fastMode: resolveSpeed === "balanced",
               }),
             },
             {
@@ -622,7 +624,7 @@ export default function SchoolLocationMapPanel({
 
       <div className="p-5 space-y-5">
         <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_auto] gap-3 items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1.2fr_auto] gap-3 items-end">
             <div>
               <label className={labelClassName}>District</label>
               <select
@@ -656,6 +658,18 @@ export default function SchoolLocationMapPanel({
                     {b}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClassName}>Resolve speed</label>
+              <select
+                value={resolveSpeed}
+                onChange={(e) => setResolveSpeed(e.target.value as ResolveSpeed)}
+                className={selectClassName}
+                disabled={readOnly || loading}
+              >
+                <option value="balanced">Balanced (recommended)</option>
+                <option value="thorough">Thorough — slower, more sources</option>
               </select>
             </div>
             <div>
@@ -1149,7 +1163,8 @@ export default function SchoolLocationMapPanel({
           </summary>
           <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 space-y-3">
             <p className="leading-relaxed">
-              Step 0 checks <strong>schoolinfo.dramitkumar.in</strong> and <strong>schools.org.in</strong> by UDISE.
+              Step 0 prefetches <strong>schoolinfo.dramitkumar.in</strong> for the whole block, then validates with block gate;
+              bad GPS falls back to <strong>onefivenine</strong> village in the correct block.
               Then Google Places (school + block + district). If that misses,{" "}
               <strong>onefivenine.com</strong> is tried. Map layers: OSM + Esri satellite.
             </p>

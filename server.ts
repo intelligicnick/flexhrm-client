@@ -87,8 +87,8 @@ function createApiProxy(backendUrl: string) {
       typeof req.originalUrl === "string" &&
       (req.originalUrl.includes("/bulk-assign-village-locations") ||
         req.originalUrl.includes("/bulk-resolve-locations"));
-    // Bulk resolve can take ~16s/school; give local proxy enough headroom.
-    const proxyTimeoutMs = isBulkResolve ? 120_000 : 60_000;
+    // Bulk resolve: up to 4 schools × 32s thorough budget ≈ 128s headroom.
+    const proxyTimeoutMs = isBulkResolve ? 150_000 : 60_000;
 
     const proxyReq = transport.request(
       {

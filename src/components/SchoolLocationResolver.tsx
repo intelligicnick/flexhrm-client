@@ -118,7 +118,7 @@ export default function SchoolLocationResolver({
     setProgress(null);
     setRows([]);
 
-    const batchSize = 1;
+    const batchSize = 4;
     let offset = 0;
     let total = 0;
     let resolved = 0;
@@ -142,6 +142,7 @@ export default function SchoolLocationResolver({
             district: district.trim() || undefined,
             saveVerified,
             skipExisting,
+            fastMode: true,
             limit: batchSize,
             offset,
           }),
