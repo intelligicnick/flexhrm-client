@@ -1,11 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist";
+import { pdfjsLib } from "../../lib/pdf-worker-setup";
 import { Loader2, Minus, Plus, RotateCcw } from "lucide-react";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;

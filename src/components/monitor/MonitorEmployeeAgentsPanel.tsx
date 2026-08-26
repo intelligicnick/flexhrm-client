@@ -140,7 +140,7 @@ export default function MonitorEmployeeAgentsPanel({
       )}
 
       <div className="border border-blue-200 bg-blue-50 rounded-xl p-4 text-xs text-blue-900">
-        <p className="font-semibold">Download Flex HRM Connect (Windows)</p>
+        <p className="font-semibold">Download Remote Connect (Windows)</p>
         <p className="mt-1 text-blue-800">
           Install the desktop agent on the employee PC, then enter the Monitor Key and Hash below.
         </p>
@@ -250,7 +250,7 @@ export default function MonitorEmployeeAgentsPanel({
             </div>
           </div>
           <p className="text-[10px] text-emerald-700">
-            Install the Flex HRM desktop agent on the employee&apos;s PC and enter these credentials. The agent will automatically link to this employee. Past screenshots and activity remain available in the monitor dashboard.
+            Install Remote Connect on the employee&apos;s PC and enter these credentials. The agent will automatically link to this employee. Past screenshots and activity remain available in the monitor dashboard.
           </p>
         </div>
       )}

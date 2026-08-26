@@ -202,6 +202,7 @@ export default function ConfigurationPanel() {
       ),
     [userPermissions.admin?.view],
   );
+  const canEditEmployees = !!userPermissions.employees?.edit;
 
   const filteredLocations = useMemo(() => {
     const q = locSearch.trim().toLowerCase();
@@ -334,7 +335,7 @@ export default function ConfigurationPanel() {
 
   const addLocation = () => {
     const val = newLocNameInput.trim();
-    if (!val) return;
+    if (!val || !canEditEmployees) return;
     handleAddLocationFromConfig(val, newLocCompliance, newLocPtEnabled);
   };
 
@@ -750,6 +751,11 @@ export default function ConfigurationPanel() {
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
         <h4 className="text-sm font-bold text-slate-800">Add office location</h4>
+        {!canEditEmployees && (
+          <p className="text-xs text-amber-700 font-semibold bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            Your role needs <strong>Employees → Edit</strong> permission to add office locations.
+          </p>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-2">
           <input
             id="new-loc-name-input"
@@ -764,18 +770,19 @@ export default function ConfigurationPanel() {
                 addLocation();
               }
             }}
-            className="w-full px-3 py-2 border border-slate-200 bg-white text-sm text-slate-800 rounded-lg placeholder-slate-400 focus:outline-none focus:border-orange-500"
+            disabled={!canEditEmployees}
+            className="w-full px-3 py-2 border border-slate-200 bg-white text-sm text-slate-800 rounded-lg placeholder-slate-400 focus:outline-none focus:border-orange-500 disabled:bg-slate-50 disabled:text-slate-400"
           />
           <button
             type="button"
             onClick={addLocation}
-            disabled={!newLocNameInput.trim()}
+            disabled={!canEditEmployees || !newLocNameInput.trim()}
             className="px-4 py-2 bg-[#ff791a] hover:bg-[#e4640c] disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm inline-flex items-center justify-center gap-1.5 cursor-pointer transition"
           >
             <Plus size={14} /> Add Location
           </button>
         </div>
-        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 space-y-3">
+        <div className={`rounded-lg border border-slate-100 bg-slate-50 p-3 space-y-3 ${!canEditEmployees ? "opacity-60 pointer-events-none" : ""}`}>
           <label htmlFor="new-loc-compliance" className="flex items-start gap-2 cursor-pointer select-none">
             <input
               type="checkbox"

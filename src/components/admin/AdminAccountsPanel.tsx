@@ -178,6 +178,20 @@ export default function AdminAccountsPanel() {
     String(sessionRole || "").toLowerCase() === "admin" ||
     String(sessionUser || "").toLowerCase() === "admin";
 
+  const selectedEditRolePermissions = useMemo(() => {
+    if (editAdminRole === "admin") {
+      return { employeesEdit: true, label: "Super-Admin (full access)" };
+    }
+    const matched = rolesList.find(
+      (role) => String(role.name || "").toLowerCase() === String(editAdminRole || "").toLowerCase(),
+    );
+    const employeesEdit = !!matched?.permissions?.employees?.edit || !!matched?.permissions?.employees?.delete;
+    return {
+      employeesEdit,
+      label: matched?.name || editAdminRole || "Unknown role",
+    };
+  }, [editAdminRole, rolesList]);
+
   const editingAdmin = useMemo(
     () => adminsList.find((adm) => adm.username === editingAdminUsername) ?? null,
     [adminsList, editingAdminUsername],
@@ -514,6 +528,17 @@ export default function AdminAccountsPanel() {
                     </option>
                   ))}
                 </select>
+                <p
+                  className={`mt-2 text-[10px] leading-relaxed rounded-lg px-2.5 py-2 border ${
+                    selectedEditRolePermissions.employeesEdit
+                      ? "bg-emerald-50 border-emerald-100 text-emerald-800"
+                      : "bg-amber-50 border-amber-100 text-amber-800"
+                  }`}
+                >
+                  {selectedEditRolePermissions.employeesEdit
+                    ? `"${selectedEditRolePermissions.label}" can add/edit employees, office locations, and job roles.`
+                    : `"${selectedEditRolePermissions.label}" is view-only for employees — cannot add office locations or edit employee records.`}
+                </p>
               </div>
 
               {editingAdmin.username.toLowerCase() !== "admin" && (

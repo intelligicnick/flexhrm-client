@@ -1394,6 +1394,11 @@ export function useHRMSApp() {
         }),
       });
       if (!res.ok) throw await parseApiError(res, "Failed to register location.");
+      const data = await res.json();
+      if (Array.isArray(data?.updatedLocations)) {
+        setSessionLocations(data.updatedLocations);
+        localStorage.setItem("hrms_locations", JSON.stringify(data.updatedLocations));
+      }
       await fetchLocations();
       setNewLocNameInput("");
       setNewLocCompliance(true);
@@ -5595,7 +5600,7 @@ export function useHRMSApp() {
         await fetchAdminProfile();
       }
     } catch (err: any) {
-      triggerSuccess(`Error updating admin: ${err.message}`);
+      setErrorMessage(err.message || "Failed to update administrator settings.");
     }
   };
 

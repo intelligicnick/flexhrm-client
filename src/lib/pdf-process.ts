@@ -1,14 +1,9 @@
-import * as pdfjsLib from "pdfjs-dist";
+import { pdfjsLib } from "./pdf-worker-setup";
 import { jsPDF } from "jspdf";
 import {
   CompressResult,
   qualityFromPercent,
 } from "./image-compress";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 function estimateDataUrlBytes(dataUrl: string): number {
   const base64 = dataUrl.includes(",") ? dataUrl.split(",").pop()! : dataUrl;

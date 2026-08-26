@@ -20,6 +20,20 @@ const EXTENSION_GUARD_BOOTSTRAP = fs.readFileSync(
   'utf8',
 );
 
+/** Copy pdf.js worker to public/ so Apache serves it as .js (shared hosting often breaks bundled .mjs). */
+const copyPdfWorkerPlugin = {
+  name: 'copy-pdf-worker',
+  buildStart() {
+    const workerSrc = path.resolve(__dirname, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs');
+    const workerDest = path.resolve(__dirname, 'public/pdf.worker.min.js');
+    if (!fs.existsSync(workerSrc)) {
+      console.warn('[copy-pdf-worker] pdfjs-dist worker not found — run npm install');
+      return;
+    }
+    fs.copyFileSync(workerSrc, workerDest);
+  },
+};
+
 const extensionErrorGuardPlugin = {
   name: 'extension-error-guard',
   transformIndexHtml: {
@@ -73,6 +87,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      copyPdfWorkerPlugin,
       extensionErrorGuardPlugin,
       stripRemoteFontsForNativeBuild(disablePwa),
       react(),

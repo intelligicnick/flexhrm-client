@@ -189,7 +189,7 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
     key: "employees",
     name: "Employees",
     includes:
-      "Roster, add/edit/delete, bulk CSV import, photos, ID cards, document upload (edit form), bulk edit requests",
+      "Roster, add/edit/delete, bulk CSV import, photos, ID cards, document upload (edit form), bulk edit requests, office locations, and job roles in Configuration",
   },
   {
     key: "schoolWork",

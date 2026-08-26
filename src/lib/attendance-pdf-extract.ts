@@ -1,12 +1,7 @@
-import * as pdfjsLib from "pdfjs-dist";
+import { pdfjsLib } from "./pdf-worker-setup";
 import type { Employee } from "../types";
 import { MONTH_NAME_LIST } from "./date-helpers";
 import { extractReferenceMusterRollPageText } from "./attendance-pdf-grid-extract";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
 
 type PdfTextItem = {
   str?: string;
