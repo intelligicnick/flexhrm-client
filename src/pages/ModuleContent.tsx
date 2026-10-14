@@ -5462,6 +5462,10 @@ export default function ModuleContent() {
                               {activeSidebarTab === "Tenders" && (
                                 <TendersPanel
                                   tenders={rawTenders}
+                                  accountUsernames={adminsList
+                                    .filter((admin) => !admin.disabled)
+                                    .map((admin) => String(admin.username || "").trim())
+                                    .filter(Boolean)}
                                   readOnly={!userPermissions.bids?.edit}
                                   canManageLockedTenders={isSuperAdmin}
                                   initialDeadlineFilter={tenderDeadlineFilter}

@@ -7007,7 +7007,10 @@ export function useHRMSApp() {
     const res = await fetch("/api/tenders/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({
+        items,
+        actorUsername: sessionUser || undefined,
+      }),
     });
     if (!res.ok) throw await parseApiError(res, "Failed to import tenders.");
     const data = await res.json();

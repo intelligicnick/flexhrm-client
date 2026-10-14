@@ -1543,6 +1543,8 @@ const TenderTableRow = React.memo(function TenderTableRow({
 
 interface TendersPanelProps {
   tenders: Tender[];
+  /** Active admin usernames for the account filter (merged with names on tenders). */
+  accountUsernames?: string[];
   readOnly?: boolean;
   canManageLockedTenders?: boolean;
   initialDeadlineFilter?: "all" | "upcoming" | "passed";
@@ -1562,6 +1564,7 @@ interface TendersPanelProps {
 
 export default function TendersPanel({
   tenders,
+  accountUsernames = [],
   readOnly = false,
   canManageLockedTenders = false,
   initialDeadlineFilter = "all",
@@ -1644,6 +1647,10 @@ export default function TendersPanel({
 
   const tenderAccountNames = useMemo(() => {
     const names = new Set<string>();
+    for (const username of accountUsernames) {
+      const trimmed = username.trim();
+      if (trimmed) names.add(trimmed);
+    }
     for (const tender of normalizedTenders) {
       const added = tenderAddedByAccount(tender);
       const synced = tenderGemSyncAccount(tender);
@@ -1651,7 +1658,7 @@ export default function TendersPanel({
       if (synced) names.add(synced);
     }
     return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [normalizedTenders]);
+  }, [normalizedTenders, accountUsernames]);
 
   const activeTenders = useMemo(
     () => normalizedTenders.filter((t) => !isTenderDeleted(t)),
