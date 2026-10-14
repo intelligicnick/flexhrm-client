@@ -607,7 +607,13 @@ function TenderCardDataPanel({
 }) {
   const { time, venue, hasMeeting } = resolvePreBidInfo(tender);
   const gemSync = formatStatusSyncedAt(tender.statusSyncedAt);
-  const gemSyncSub = [syncNote, previousSyncStatus ? `Was: ${previousSyncStatus}` : ""]
+  const syncedBy = tenderGemSyncAccount(tender);
+  const addedBy = tenderAddedByAccount(tender);
+  const gemSyncSub = [
+    syncedBy,
+    syncNote,
+    previousSyncStatus ? `Was: ${previousSyncStatus}` : "",
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -622,7 +628,11 @@ function TenderCardDataPanel({
             value={tender.filedDate ? formatTenderFiledDate(tender.filedDate) : "—"}
             valueClassName={tender.filedDate ? "text-sky-700" : "text-slate-400"}
           />
-          <CompactField label="Entry" value={tenderEntryDateLabel(tender)} />
+          <CompactField
+            label="Entry"
+            value={tenderEntryDateLabel(tender)}
+            sub={addedBy ? `Added by ${addedBy}` : undefined}
+          />
           <CompactField label="Qty" value={tender.quantity > 0 ? String(tender.quantity) : "—"} />
         </div>
         <div className="space-y-1.5 min-w-0 md:border-l md:border-slate-200/70 md:pl-3">
@@ -741,6 +751,12 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
         { label: "Bid end date", value: formatAppDate(tender.endDate, { withTime: /\d{1,2}:\d{2}/.test(tender.endDate) }) },
         { label: "Participation filed", value: tender.filedDate ? formatTenderFiledDate(tender.filedDate) : "" },
         { label: "Last GeM sync", value: formatStatusSyncedAt(tender.statusSyncedAt) },
+        ...(tenderGemSyncAccount(tender)
+          ? [{ label: "GeM sync by", value: tenderGemSyncAccount(tender) }]
+          : []),
+        ...(tenderAddedByAccount(tender)
+          ? [{ label: "Added by", value: tenderAddedByAccount(tender) }]
+          : []),
         ...(tender.statusSyncNote
           ? [{ label: "Sync note", value: formatStatusSyncNote(tender.statusSyncNote) || tender.statusSyncNote }]
           : []),
@@ -844,6 +860,14 @@ function splitLegacyPreBid(preBidAt: string): { at: string; venue: string } {
   const match = preBidAt.trim().match(/^(.+?)\s+@\s+(.+)$/);
   if (!match) return { at: preBidAt.trim(), venue: "" };
   return { at: match[1].trim(), venue: match[2].trim() };
+}
+
+function tenderAddedByAccount(tender: Tender): string {
+  return (tender.addedBy || tender.createdBy || "").trim();
+}
+
+function tenderGemSyncAccount(tender: Tender): string {
+  return (tender.gemSyncedBy || tender.statusSyncedBy || "").trim();
 }
 
 function normalizeTender(row: Tender): Tender {
@@ -1339,7 +1363,9 @@ const TenderTableRow = React.memo(function TenderTableRow({
   const { tender, deadline, deadlineCellClass, organisation, deleted, locked, urgent, missed, syncNote, previousSyncStatus } =
     item;
   const { time: preBidTime, venue: preBidVenue, hasMeeting: hasPreBid } = resolvePreBidInfo(tender);
-  const colSpan = readOnly ? 8 : 10;
+  const colSpan = readOnly ? 9 : 11;
+  const addedBy = tenderAddedByAccount(tender);
+  const gemSyncedBy = tenderGemSyncAccount(tender);
 
   return (
     <>
@@ -1436,9 +1462,23 @@ const TenderTableRow = React.memo(function TenderTableRow({
             </div>
           )}
         </td>
+        <td className="px-2 py-2.5 align-middle text-[11px] min-w-[88px] max-w-[120px]">
+          <span
+            className={`block truncate font-medium ${addedBy ? "text-slate-800" : "text-slate-300"}`}
+            title={addedBy ? `Added by ${addedBy}` : "Not recorded — save or re-import to set"}
+          >
+            {addedBy || "—"}
+          </span>
+        </td>
         <td className="px-2 py-2.5 align-middle text-[11px]">
           <span className={tender.statusSyncedAt ? "text-violet-800 font-medium" : "text-slate-300"}>
             {formatStatusSyncedAt(tender.statusSyncedAt)}
+          </span>
+          <span
+            className={`block text-[10px] mt-0.5 truncate ${gemSyncedBy ? "text-slate-600 font-medium" : "text-slate-300"}`}
+            title={gemSyncedBy ? `GeM sync by ${gemSyncedBy}` : "Not recorded — run GeM sync from extension"}
+          >
+            {gemSyncedBy || "—"}
           </span>
           {previousSyncStatus ? (
             <span className="block text-[10px] text-slate-500 mt-0.5">{previousSyncStatus}</span>
@@ -1541,6 +1581,7 @@ export default function TendersPanel({
   const [typeFilter, setTypeFilter] = useState<"" | TenderType>("");
   const [statusFilter, setStatusFilter] = useState<"" | TenderStatus>("");
   const [deadlineFilter, setDeadlineFilter] = useState<"all" | "upcoming" | "passed">(initialDeadlineFilter);
+  const [accountFilter, setAccountFilter] = useState("");
   const [dateRangeField, setDateRangeField] = useState<"endDate" | "filedDate">("endDate");
 
   useEffect(() => {
@@ -1600,6 +1641,17 @@ export default function TendersPanel({
     () => tenders.map(normalizeTender),
     [tenders],
   );
+
+  const tenderAccountNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const tender of normalizedTenders) {
+      const added = tenderAddedByAccount(tender);
+      const synced = tenderGemSyncAccount(tender);
+      if (added) names.add(added);
+      if (synced) names.add(synced);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [normalizedTenders]);
 
   const activeTenders = useMemo(
     () => normalizedTenders.filter((t) => !isTenderDeleted(t)),
@@ -1686,11 +1738,28 @@ export default function TendersPanel({
         });
       }
     }
+    if (accountFilter) {
+      rows = rows.filter(
+        (t) =>
+          tenderAddedByAccount(t) === accountFilter ||
+          tenderGemSyncAccount(t) === accountFilter,
+      );
+    }
     if (dateFrom || dateTo) {
       rows = rows.filter((t) => tenderMatchesDateRange(t, dateRangeField, dateFrom, dateTo));
     }
     return rows.sort(compareTenders);
-  }, [normalizedTenders, search, typeFilter, statusFilter, deadlineFilter, dateRangeField, dateFrom, dateTo]);
+  }, [
+    normalizedTenders,
+    search,
+    typeFilter,
+    statusFilter,
+    deadlineFilter,
+    accountFilter,
+    dateRangeField,
+    dateFrom,
+    dateTo,
+  ]);
 
   const listItems = useMemo((): TenderListItem[] => {
     return filtered.map((tender) => {
@@ -2147,14 +2216,22 @@ export default function TendersPanel({
     }
   };
 
-  const hasActiveFilters =
-    Boolean(typeFilter || statusFilter || deadlineFilter !== "all" || dateFrom || dateTo || searchInput.trim());
+  const hasActiveFilters = Boolean(
+    typeFilter ||
+      statusFilter ||
+      deadlineFilter !== "all" ||
+      accountFilter ||
+      dateFrom ||
+      dateTo ||
+      searchInput.trim(),
+  );
 
   const applyQuickFilter = (key: "all" | "filed" | "qualified" | "upcoming" | "passed") => {
     if (key === "all") {
       setTypeFilter("");
       setStatusFilter("");
       setDeadlineFilter("all");
+      setAccountFilter("");
       setSearchInput("");
       setSearch("");
       clearDateRange();
@@ -2549,6 +2626,19 @@ export default function TendersPanel({
               <option value="upcoming">Upcoming</option>
               <option value="passed">Passed</option>
             </select>
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className={`${selectClass} max-w-[180px]`}
+              title="Show tenders added or GeM-synced by this account"
+            >
+              <option value="">All accounts</option>
+              {tenderAccountNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => void onRefresh()}
@@ -2677,7 +2767,7 @@ export default function TendersPanel({
             </div>
           ) : (
             <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-xl border border-slate-200/80 shadow-sm scrollbar-thin bg-white">
-              <table className="w-full text-xs text-left min-w-[980px] border-separate border-spacing-0">
+              <table className="w-full text-xs text-left min-w-[1060px] border-separate border-spacing-0">
                 <thead className="bg-slate-800 text-slate-200 sticky top-0 z-10">
                   <tr className="text-[10px] uppercase tracking-wide">
                     {!readOnly && (
@@ -2698,6 +2788,7 @@ export default function TendersPanel({
                     <th className="px-2 py-2.5 font-bold">End Date</th>
                     <th className="px-2 py-2.5 font-bold w-[150px] min-w-[150px] max-w-[150px]">Pre-bid</th>
                     <th className="px-2 py-2.5 font-bold">Status</th>
+                    <th className="px-2 py-2.5 font-bold min-w-[88px]">Added by</th>
                     <th className="px-2 py-2.5 font-bold">GeM Sync</th>
                     {!readOnly && <th className="px-2 py-2.5 font-bold w-24" aria-label="Actions" />}
                   </tr>

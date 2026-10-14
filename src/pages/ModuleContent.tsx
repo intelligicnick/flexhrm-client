@@ -109,10 +109,11 @@ import ContractsPanel from "../components/ContractsPanel";
 import RenewalsPanel from "../components/RenewalsPanel";
 import BgDdPanel from "../components/BgDdPanel";
 import MonitorPanel from "../components/MonitorPanel";
+import UploadsPanel from "../components/UploadsPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
-import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab } from "../routes";
+import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab, isUploadsTab } from "../routes";
 import { RENEWAL_TAB_TO_CATEGORY } from "../lib/renewals";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -5526,6 +5527,13 @@ export default function ModuleContent() {
                             />
                           ) : isMonitorTab(activeSidebarTab) ? (
                             <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
+                          ) : isUploadsTab(activeSidebarTab) ? (
+                            <UploadsPanel
+                              selectedMonth={selectedMonth}
+                              monthsList={MONTHS_LIST}
+                              schoolBlocks={schoolBlocks}
+                              officeLocations={registryLocations}
+                            />
                           ) : activeSidebarTab !== "Employees" ? (
                            /* --- OTHER TABS VIEW: Dashboard, Recruitment, Leave, etc. --- */
                            <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-4xl mx-auto shadow-xs text-center space-y-6" id="incoming-tab-view">

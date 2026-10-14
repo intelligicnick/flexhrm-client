@@ -432,6 +432,14 @@ export interface Tender {
   deletedAt?: string;
   /** ISO timestamp when GeM status was last synced via Smart Capture */
   statusSyncedAt?: string;
+  /** FlexHRM account that created this tender */
+  createdBy?: string;
+  /** Same as createdBy (API alias) */
+  addedBy?: string;
+  /** FlexHRM account that last ran GeM sync */
+  statusSyncedBy?: string;
+  /** Same as statusSyncedBy (API alias) */
+  gemSyncedBy?: string;
   /** Last GeM sync result: "status change found" or "unchanged" */
   statusSyncNote?: string;
   /** Previous status before the most recent GeM sync update */

@@ -44,6 +44,14 @@ export function isMonitorTab(tab: string): tab is MonitorTab {
   return tab === MONITOR_TAB;
 }
 
+export const UPLOADS_TAB = "Uploads" as const;
+
+export type UploadsTab = typeof UPLOADS_TAB;
+
+export function isUploadsTab(tab: string): tab is UploadsTab {
+  return tab === UPLOADS_TAB;
+}
+
 export const TAB_TO_PATH: Record<string, string> = {
   "Dashboard": "/dashboard",
   "Employees": "/employees",
@@ -67,6 +75,7 @@ export const TAB_TO_PATH: Record<string, string> = {
   "Licenses": "/renewals/licenses",
   "BG & DD": "/bg-dd",
   "Monitor": "/monitor",
+  "Uploads": "/uploads",
   "My Info": "/my-info",
 };
 
@@ -134,5 +143,6 @@ export const APP_ROUTES = [
   { path: "/renewals/licenses", tab: "Licenses" },
   { path: "/bg-dd", tab: "BG & DD" },
   { path: "/monitor", tab: "Monitor" },
+  { path: "/uploads", tab: "Uploads" },
   { path: "/my-info", tab: "My Info" },
 ] as const;
