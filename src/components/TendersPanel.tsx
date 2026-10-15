@@ -833,19 +833,7 @@ function TenderExpandedDetails({
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">
                   {field.label}
                 </p>
-                {"href" in field && field.href ? (
-                  <a
-                    href={field.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 font-mono text-sm text-sky-700 hover:text-sky-900 hover:underline"
-                  >
-                    {field.value}
-                    <ExternalLink size={11} className="opacity-70" />
-                  </a>
-                ) : (
-                  <p className="text-slate-700 text-xs whitespace-pre-line leading-relaxed">{field.value}</p>
-                )}
+                <p className="text-slate-700 text-xs whitespace-pre-line leading-relaxed">{field.value}</p>
               </div>
             ))}
           </div>
