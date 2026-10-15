@@ -156,6 +156,7 @@ export const getModuleKey = (tabName: string): string => {
     case "BG & DD":
       return "bids";
     case "Monitor":
+    case "Agent Tasks":
       return "monitor";
     case "Salary": return "salary";
     case "Saved Bulk Pay": return "salary";
@@ -239,7 +240,7 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   {
     key: "monitor",
     name: "Employee Monitor",
-    includes: "Desktop agent monitoring, live activity, screenshots, productivity analytics, and alerts",
+    includes: "Desktop agent monitoring, agent tasks, live activity, screenshots, productivity analytics, and alerts",
   },
   {
     key: "admin",

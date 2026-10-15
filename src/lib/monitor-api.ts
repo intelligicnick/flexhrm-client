@@ -413,7 +413,49 @@ export const monitorApi = {
     }>(`/analytics/working-hours?${q}`);
   },
   applyRetention: () => monitorFetch<{ success: boolean }>("/settings/apply-retention", { method: "POST" }),
+  getAgentTaskSummary: () =>
+    monitorFetch<{ pending: number; doneToday: number }>("/agent-tasks/summary"),
+  getAgentTasks: (opts?: { employeeId?: string; status?: AgentTaskStatus }) =>
+    monitorFetch<MonitorAgentTask[]>(
+      withQuery("/agent-tasks", { employeeId: opts?.employeeId, status: opts?.status }),
+    ),
+  createAgentTask: (body: {
+    employeeId?: string;
+    employeeIds?: string[];
+    title: string;
+    description?: string;
+    dueDate?: string;
+  }) =>
+    monitorFetch<MonitorAgentTask | { created: number; tasks: MonitorAgentTask[] }>("/agent-tasks", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  patchAgentTask: (
+    id: string,
+    body: Partial<{ title: string; description: string; dueDate: string; status: AgentTaskStatus }>,
+  ) =>
+    monitorFetch<MonitorAgentTask>(`/agent-tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 };
+
+export type AgentTaskStatus = "pending" | "done" | "cancelled";
+
+export interface MonitorAgentTask {
+  id: string;
+  tenantId?: string;
+  employeeId: string;
+  employeeName: string;
+  title: string;
+  description?: string;
+  status: AgentTaskStatus;
+  dueDate?: string;
+  createdBy?: string;
+  createdAt?: string;
+  completedAt?: string;
+  completionNote?: string;
+}
 
 export function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);

@@ -47,7 +47,9 @@ import {
   composeTenderEndDateFromDateTimeLocal,
   parseTenderEndDateToDateTimeLocal,
   APP_TIMEZONE,
+  todayIsoDate,
 } from "../lib/date-helpers";
+import { getDateRangeForPeriod } from "../lib/supervisor-dates";
 import { validateOptionalAmountString } from "../lib/number-validation";
 import DateRangeField from "./ui/DateRangeField";
 import { DateInput, DateTimeInput } from "./ui/DateInput";
@@ -534,6 +536,11 @@ function formatPreBidVenueLabel(tender: Tender): string {
   if (venue) return venue;
   if (!hasMeeting && tender.noPreBid) return "—";
   return "—";
+}
+
+function tenderAddedAtMs(tender: Tender): number | null {
+  const raw = tender.entryDate?.trim() || tender.createdAt?.trim() || "";
+  return parseFlexibleDateMs(raw);
 }
 
 function tenderEntryDateLabel(tender: Tender): string {
@@ -1686,6 +1693,9 @@ export default function TendersPanel({
 
   const stats = useMemo(() => {
     const now = Date.now();
+    const today = todayIsoDate();
+    const week = getDateRangeForPeriod("week");
+    const month = getDateRangeForPeriod("month");
     let upcoming = 0;
     let passed = 0;
     let filed = 0;
@@ -1693,12 +1703,19 @@ export default function TendersPanel({
     let urgent = 0;
     let manpower = 0;
     let travel = 0;
+    let addedToday = 0;
+    let addedThisWeek = 0;
+    let addedThisMonth = 0;
     activeTenders.forEach((t) => {
       if (t.tenderType === "travel") travel += 1;
       else manpower += 1;
       if (isFiledBucket(t.status) || t.filedDate.trim()) filed += 1;
       if (t.status === "qualified") qualified += 1;
       if (isNearNotParticipated(t) || isMissedParticipation(t)) urgent += 1;
+      const addedMs = tenderAddedAtMs(t);
+      if (matchesIsoDateRange(addedMs, today, today)) addedToday += 1;
+      if (matchesIsoDateRange(addedMs, week.fromDate, week.toDate)) addedThisWeek += 1;
+      if (matchesIsoDateRange(addedMs, month.fromDate, month.toDate)) addedThisMonth += 1;
       if (isMissedParticipation(t)) {
         passed += 1;
         return;
@@ -1707,7 +1724,19 @@ export default function TendersPanel({
       if (ts === null) return;
       if (ts >= now) upcoming += 1;
     });
-    return { total: activeTenders.length, upcoming, passed, filed, qualified, urgent, manpower, travel };
+    return {
+      total: activeTenders.length,
+      upcoming,
+      passed,
+      filed,
+      qualified,
+      urgent,
+      manpower,
+      travel,
+      addedToday,
+      addedThisWeek,
+      addedThisMonth,
+    };
   }, [activeTenders]);
 
   const urgentTenders = useMemo(
@@ -2396,6 +2425,46 @@ export default function TendersPanel({
       </div>
 
       <div className="px-5 pt-5 pb-3 bg-linear-to-b from-slate-50/80 to-white">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">New tenders added</p>
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          {(
+            [
+              {
+                label: "Today",
+                value: stats.addedToday,
+                iconBg: "bg-emerald-100 text-emerald-600",
+                tone: "text-emerald-700",
+              },
+              {
+                label: "This week",
+                value: stats.addedThisWeek,
+                iconBg: "bg-teal-100 text-teal-600",
+                tone: "text-teal-700",
+              },
+              {
+                label: "This month",
+                value: stats.addedThisMonth,
+                iconBg: "bg-cyan-100 text-cyan-600",
+                tone: "text-cyan-700",
+              },
+            ] as const
+          ).map(({ label, value, iconBg, tone }) => (
+            <div
+              key={label}
+              className="rounded-xl border border-slate-100 bg-white px-4 py-3.5 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                  <p className={`text-2xl font-black tabular-nums mt-1 ${tone}`}>{value}</p>
+                </div>
+                <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
+                  <Plus size={15} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
           {statCards.map(({ key, label, value, icon: Icon, iconBg, tone, sub, active, highlight }) => (
             <button

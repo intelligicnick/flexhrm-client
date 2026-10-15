@@ -11,6 +11,7 @@ import {
   Globe,
   HardDrive,
   Key,
+  ClipboardList,
   LayoutDashboard,
   Monitor,
   RefreshCw,
@@ -28,6 +29,7 @@ import MonitorFilterBar from "./monitor/MonitorFilterBar";
 import MonitorSubNav from "./monitor/MonitorSubNav";
 import MonitorEmployeeDetail from "./monitor/MonitorEmployeeDetail";
 import MonitorEmployeeAgentsPanel from "./monitor/MonitorEmployeeAgentsPanel";
+import MonitorAgentTasksPanel from "./monitor/MonitorAgentTasksPanel";
 import MonitorLiveViewModal from "./monitor/MonitorLiveViewModal";
 import MonitorScreenshotLightbox from "./monitor/MonitorScreenshotLightbox";
 import {
@@ -64,6 +66,7 @@ type MonitorTab =
   | "productivity"
   | "alerts"
   | "agents"
+  | "agent-tasks"
   | "devices"
   | "settings";
 
@@ -121,6 +124,7 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Settings,
     items: [
       { id: "agents", label: "Employee Agents", icon: Key },
+      { id: "agent-tasks", label: "Agent Tasks", icon: ClipboardList },
       { id: "devices", label: "Devices", icon: HardDrive },
       { id: "settings", label: "Settings", icon: Settings },
     ],
@@ -1160,6 +1164,8 @@ export default function MonitorPanel({ readOnly = false }: MonitorPanelProps) {
             {activeTab === "agents" && (
               <MonitorEmployeeAgentsPanel readOnly={readOnly} onCredentialsChanged={refresh} />
             )}
+
+            {activeTab === "agent-tasks" && <MonitorAgentTasksPanel readOnly={readOnly} />}
 
             {activeTab === "devices" && (
               <div className="border border-slate-200 rounded-xl overflow-hidden">

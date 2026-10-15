@@ -48,6 +48,11 @@ export function uploadFileUrl(id: string): string {
   return `/api/uploads/${id}/file`;
 }
 
+/** Same-origin Excel bytes for in-app preview (avoids ImageKit CORS). */
+export function uploadPreviewUrl(id: string): string {
+  return `/api/uploads/${id}/preview`;
+}
+
 export function resourceOptionValue(kind: "block" | "office", id: string): string {
   return `${kind}:${id}`;
 }

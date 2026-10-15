@@ -9,6 +9,7 @@ import {
   resourceOptionValue,
   uploadsApi,
   uploadFileUrl,
+  uploadPreviewUrl,
   type StandaloneUpload,
 } from "../lib/uploads-api";
 
@@ -744,8 +745,7 @@ export default function UploadsPanel({
           try {
             let workbook = workbookCacheRef.current.get(item.id);
             if (!workbook) {
-              const url = item.imagekitUrl || uploadFileUrl(item.id);
-              const res = await fetch(url, { credentials: "include" });
+              const res = await fetch(uploadPreviewUrl(item.id), { credentials: "include" });
               if (!res.ok) continue;
               workbook = parseBulkPayXlsWorkbook(await res.arrayBuffer());
               workbookCacheRef.current.set(item.id, workbook);
@@ -930,8 +930,7 @@ export default function UploadsPanel({
       search: opts?.search ?? "",
     });
     try {
-      const url = item.imagekitUrl || uploadFileUrl(item.id);
-      const res = await fetch(url, { credentials: "include" });
+      const res = await fetch(uploadPreviewUrl(item.id), { credentials: "include" });
       if (!res.ok) throw new Error("Could not load file for preview.");
       const buffer = await res.arrayBuffer();
       const workbook = parseBulkPayXlsWorkbook(buffer);

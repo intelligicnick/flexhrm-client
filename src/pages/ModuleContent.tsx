@@ -109,11 +109,20 @@ import ContractsPanel from "../components/ContractsPanel";
 import RenewalsPanel from "../components/RenewalsPanel";
 import BgDdPanel from "../components/BgDdPanel";
 import MonitorPanel from "../components/MonitorPanel";
+import MonitorAgentTasksPanel from "../components/monitor/MonitorAgentTasksPanel";
 import UploadsPanel from "../components/UploadsPanel";
 import SchoolSupervisorFormModal from "../components/SchoolSupervisorFormModal";
 import { getSchoolHeaderValue } from "../lib/school-work-helpers";
 import { parseApiError } from "../api";
-import { isSchoolWorkTab, isBidsTab, isRenewalsTab, isBgDdTab, isMonitorTab, isUploadsTab } from "../routes";
+import {
+  isSchoolWorkTab,
+  isBidsTab,
+  isRenewalsTab,
+  isBgDdTab,
+  isMonitorTab,
+  isUploadsTab,
+  isAgentTasksTab,
+} from "../routes";
 import { RENEWAL_TAB_TO_CATEGORY } from "../lib/renewals";
 import {
   getCurrentFY, getFinancialYears, MONTH_NAME_LIST, getMonthsForFY,
@@ -5531,6 +5540,8 @@ export default function ModuleContent() {
                             />
                           ) : isMonitorTab(activeSidebarTab) ? (
                             <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
+                          ) : isAgentTasksTab(activeSidebarTab) ? (
+                            <MonitorAgentTasksPanel readOnly={!userPermissions.monitor?.edit} />
                           ) : isUploadsTab(activeSidebarTab) ? (
                             <UploadsPanel
                               selectedMonth={selectedMonth}

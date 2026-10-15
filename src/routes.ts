@@ -52,6 +52,14 @@ export function isUploadsTab(tab: string): tab is UploadsTab {
   return tab === UPLOADS_TAB;
 }
 
+export const AGENT_TASKS_TAB = "Agent Tasks" as const;
+
+export type AgentTasksTab = typeof AGENT_TASKS_TAB;
+
+export function isAgentTasksTab(tab: string): tab is AgentTasksTab {
+  return tab === AGENT_TASKS_TAB;
+}
+
 export const TAB_TO_PATH: Record<string, string> = {
   "Dashboard": "/dashboard",
   "Employees": "/employees",
@@ -76,6 +84,7 @@ export const TAB_TO_PATH: Record<string, string> = {
   "BG & DD": "/bg-dd",
   "Monitor": "/monitor",
   "Uploads": "/uploads",
+  "Agent Tasks": "/agent-tasks",
   "My Info": "/my-info",
 };
 
@@ -144,5 +153,6 @@ export const APP_ROUTES = [
   { path: "/bg-dd", tab: "BG & DD" },
   { path: "/monitor", tab: "Monitor" },
   { path: "/uploads", tab: "Uploads" },
+  { path: "/agent-tasks", tab: "Agent Tasks" },
   { path: "/my-info", tab: "My Info" },
 ] as const;

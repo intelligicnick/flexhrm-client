@@ -64,6 +64,7 @@ import {
   Landmark,
   Monitor,
   Upload,
+  ClipboardList,
 } from "lucide-react";
 import { loadExcelJS, loadPdfExport } from "../lib/lazy-export-deps";
 import { Employee, EmployeeChangeRequest, EXCEL_ROW_HEADERS, SchoolWork, SchoolPartner, SchoolSupervisor, SchoolVisit, SupervisorRequest, CommitmentDiary, Tender, CreateTenderInput, Contract, CreateContractInput, Renewal, CreateRenewalInput, BgDdRecord, CreateBgDdInput, AppNotification, SchoolMonthlyBilling, SchoolDistrict, SchoolBlock, SCHOOL_EXCEL_ROW_HEADERS } from "../types";
@@ -8252,6 +8253,7 @@ export function useHRMSApp() {
     { name: "BG & DD", icon: Landmark, badge: "New" },
     { name: "Monitor", icon: Monitor, badge: "New" },
     { name: "Uploads", icon: Upload, badge: "New" },
+    { name: "Agent Tasks", icon: ClipboardList, badge: "New" },
   ];
 
   // Sidebar / hamburger: only modules the role can view (and plan allows)
