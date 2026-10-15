@@ -543,6 +543,13 @@ function tenderAddedAtMs(tender: Tender): number | null {
   return parseFlexibleDateMs(raw);
 }
 
+function tenderParticipatedAtMs(tender: Tender): number | null {
+  if (tender.status === "not_filed") return null;
+  const raw = tender.filedDate?.trim() || "";
+  if (!raw) return null;
+  return parseFlexibleDateMs(raw);
+}
+
 function tenderEntryDateLabel(tender: Tender): string {
   const raw = tender.entryDate?.trim() || tender.createdAt?.trim() || "";
   if (!raw) return "—";
@@ -737,7 +744,15 @@ function truncatePreview(
   return { preview: `${value.slice(0, max)}…`, truncated: true };
 }
 
-function TenderExpandedDetails({ tender }: { tender: Tender }) {
+function TenderExpandedDetails({
+  tender,
+  copiedBidId,
+  onCopy,
+}: {
+  tender: Tender;
+  copiedBidId: string | null;
+  onCopy: (tender: Tender) => void;
+}) {
   const consignee = tenderConsignee(tender);
   const addReq = tenderAdditionalRequirements(tender);
   const department = tenderDepartment(tender);
@@ -746,11 +761,6 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
     {
       title: "Bid details",
       fields: [
-        {
-          label: "Bid number",
-          value: tender.bidNo,
-          href: resolveGemBidPdfUrl(tender) ?? resolveGemBidSearchUrl(tender.bidNo),
-        },
         { label: "Item category", value: tender.category },
         { label: "Type", value: tender.tenderType === "travel" ? "Car tenders" : "Manpower" },
         { label: "Quantity", value: tender.quantity ? String(tender.quantity) : "" },
@@ -806,6 +816,14 @@ function TenderExpandedDetails({ tender }: { tender: Tender }) {
             <span className="w-1 h-3 rounded-full bg-[#ff791a]" />
             {section.title}
           </p>
+          {section.title === "Bid details" && tender.bidNo?.trim() && (
+            <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2.5 mb-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                Bid number
+              </p>
+              <BidNumberCell tender={tender} copiedBidId={copiedBidId} onCopy={onCopy} />
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
             {section.fields.map((field) => (
               <div
@@ -1027,6 +1045,10 @@ function BidNumberCell({ tender, copiedBidId, onCopy }: BidNumberCellProps) {
   const copied = copiedBidId === tender.id;
   const deleted = isTenderDeleted(tender);
   const missed = isMissedParticipation(tender);
+  const participatedLabel =
+    tender.status !== "not_filed" && tender.filedDate?.trim()
+      ? formatTenderFiledDate(tender.filedDate)
+      : "";
 
   return (
     <div>
@@ -1060,16 +1082,25 @@ function BidNumberCell({ tender, copiedBidId, onCopy }: BidNumberCellProps) {
             e.stopPropagation();
             onCopy(tender);
           }}
-          className="shrink-0 p-0.5 rounded hover:bg-slate-200/80 text-slate-400 hover:text-slate-700 cursor-pointer transition"
+          className="shrink-0 p-0.5 rounded hover:bg-slate-200/80 text-slate-500 hover:text-slate-800 cursor-pointer transition"
           title={copied ? "Copied!" : "Copy bid number"}
+          aria-label={copied ? "Copied bid number" : "Copy bid number"}
         >
           {copied ? (
-            <Check size={11} className="text-emerald-600" />
+            <Check size={12} className="text-emerald-600" />
           ) : (
-            <Copy size={11} />
+            <Copy size={12} />
           )}
         </button>
       </div>
+      {participatedLabel ? (
+        <p
+          className="text-[10px] text-sky-700 font-medium mt-0.5 leading-tight"
+          title={`Participated on ${participatedLabel}`}
+        >
+          Participated · {participatedLabel}
+        </p>
+      ) : null}
       {(deleted || missed) && (
         <div className="mt-0.5 flex flex-wrap gap-1">
           {deleted && (
@@ -1341,7 +1372,7 @@ const TenderCardRow = React.memo(function TenderCardRow({
 
       {isExpanded && (
         <div className="border-t border-orange-100 bg-orange-50/30 px-3 py-2.5">
-          <TenderExpandedDetails tender={tender} />
+          <TenderExpandedDetails tender={tender} copiedBidId={copiedBidId} onCopy={onCopy} />
         </div>
       )}
     </article>
@@ -1540,7 +1571,7 @@ const TenderTableRow = React.memo(function TenderTableRow({
       {isExpanded && (
         <tr className="bg-orange-50/40 border-t border-orange-100">
           <td colSpan={colSpan} className="px-4 py-4">
-            <TenderExpandedDetails tender={tender} />
+            <TenderExpandedDetails tender={tender} copiedBidId={copiedBidId} onCopy={onCopy} />
           </td>
         </tr>
       )}
@@ -1706,6 +1737,9 @@ export default function TendersPanel({
     let addedToday = 0;
     let addedThisWeek = 0;
     let addedThisMonth = 0;
+    let participatedToday = 0;
+    let participatedThisWeek = 0;
+    let participatedThisMonth = 0;
     activeTenders.forEach((t) => {
       if (t.tenderType === "travel") travel += 1;
       else manpower += 1;
@@ -1716,6 +1750,10 @@ export default function TendersPanel({
       if (matchesIsoDateRange(addedMs, today, today)) addedToday += 1;
       if (matchesIsoDateRange(addedMs, week.fromDate, week.toDate)) addedThisWeek += 1;
       if (matchesIsoDateRange(addedMs, month.fromDate, month.toDate)) addedThisMonth += 1;
+      const participatedMs = tenderParticipatedAtMs(t);
+      if (matchesIsoDateRange(participatedMs, today, today)) participatedToday += 1;
+      if (matchesIsoDateRange(participatedMs, week.fromDate, week.toDate)) participatedThisWeek += 1;
+      if (matchesIsoDateRange(participatedMs, month.fromDate, month.toDate)) participatedThisMonth += 1;
       if (isMissedParticipation(t)) {
         passed += 1;
         return;
@@ -1736,6 +1774,9 @@ export default function TendersPanel({
       addedToday,
       addedThisWeek,
       addedThisMonth,
+      participatedToday,
+      participatedThisWeek,
+      participatedThisMonth,
     };
   }, [activeTenders]);
 
@@ -2425,38 +2466,55 @@ export default function TendersPanel({
       </div>
 
       <div className="px-5 pt-5 pb-3 bg-linear-to-b from-slate-50/80 to-white">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">New tenders added</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+          New tenders added &amp; participated
+        </p>
         <div className="grid grid-cols-3 gap-3 mb-5">
           {(
             [
               {
                 label: "Today",
-                value: stats.addedToday,
+                added: stats.addedToday,
+                participated: stats.participatedToday,
                 iconBg: "bg-emerald-100 text-emerald-600",
                 tone: "text-emerald-700",
+                partTone: "text-sky-700",
               },
               {
                 label: "This week",
-                value: stats.addedThisWeek,
+                added: stats.addedThisWeek,
+                participated: stats.participatedThisWeek,
                 iconBg: "bg-teal-100 text-teal-600",
                 tone: "text-teal-700",
+                partTone: "text-sky-700",
               },
               {
                 label: "This month",
-                value: stats.addedThisMonth,
+                added: stats.addedThisMonth,
+                participated: stats.participatedThisMonth,
                 iconBg: "bg-cyan-100 text-cyan-600",
                 tone: "text-cyan-700",
+                partTone: "text-sky-700",
               },
             ] as const
-          ).map(({ label, value, iconBg, tone }) => (
+          ).map(({ label, added, participated, iconBg, tone, partTone }) => (
             <div
               key={label}
               className="rounded-xl border border-slate-100 bg-white px-4 py-3.5 shadow-sm"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-                  <p className={`text-2xl font-black tabular-nums mt-1 ${tone}`}>{value}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Added</p>
+                      <p className={`text-xl font-black tabular-nums ${tone}`}>{added}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Participated</p>
+                      <p className={`text-xl font-black tabular-nums ${partTone}`}>{participated}</p>
+                    </div>
+                  </div>
                 </div>
                 <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
                   <Plus size={15} />
@@ -2525,31 +2583,47 @@ export default function TendersPanel({
               {urgentTenders.map((tender) => {
                 const deadline = deadlineMeta(tender.endDate);
                 const missed = isMissedParticipation(tender);
+                const jumpToTender = () => {
+                  setSearchInput("");
+                  setSearch("");
+                  setTypeFilter("");
+                  setStatusFilter("");
+                  setDeadlineFilter("all");
+                  setExpandedTenderId(tender.id);
+                  requestAnimationFrame(() => {
+                    const row = document.getElementById(`tender-row-${tender.id}`);
+                    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  });
+                };
                 return (
-                  <button
+                  <div
                     key={tender.id}
-                    type="button"
-                    onClick={() => {
-                      setSearchInput("");
-                      setSearch("");
-                      setTypeFilter("");
-                      setStatusFilter("");
-                      setDeadlineFilter("all");
-                      setExpandedTenderId(tender.id);
-                      requestAnimationFrame(() => {
-                        const row = document.getElementById(`tender-row-${tender.id}`);
-                        row?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      });
+                    role="button"
+                    tabIndex={0}
+                    onClick={jumpToTender}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        jumpToTender();
+                      }
                     }}
-                    className="flex items-start gap-3 rounded-lg border border-white/80 bg-white/90 px-3 py-2.5 text-left hover:border-red-200 hover:shadow-sm transition group"
+                    className="flex items-start gap-3 rounded-lg border border-white/80 bg-white/90 px-3 py-2.5 text-left hover:border-red-200 hover:shadow-sm transition group cursor-pointer"
                   >
                     <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${missed ? "bg-red-200 text-red-900" : "bg-amber-200 text-amber-900"}`}>
                       {missed ? "Missed" : "Due soon"}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="font-mono text-[11px] font-bold text-slate-800 truncate group-hover:text-[#ff791a] transition">
-                        {tender.bidNo}
-                      </p>
+                      <div
+                        className="group-hover:text-[#ff791a] transition"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <BidNumberCell
+                          tender={tender}
+                          copiedBidId={copiedBidId}
+                          onCopy={copyBidNumber}
+                        />
+                      </div>
                       <p className="text-[10px] text-slate-500 truncate mt-0.5">
                         {tender.category || tenderOrganisation(tender) || "—"}
                       </p>
@@ -2558,7 +2632,7 @@ export default function TendersPanel({
                       </p>
                     </div>
                     <TypeBadge type={tender.tenderType} />
-                  </button>
+                  </div>
                 );
               })}
             </div>

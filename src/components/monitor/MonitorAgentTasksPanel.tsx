@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, ChevronDown, Plus, RefreshCw, X } from "lucide-react";
 import {
   AgentTaskStatus,
@@ -25,6 +25,7 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -77,6 +78,17 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
   useEffect(() => {
     if (showForm && !readOnly) void loadMonitoredEmployees();
   }, [showForm, readOnly, loadMonitoredEmployees]);
+
+  useEffect(() => {
+    if (!assigneeDropdownOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!assigneeDropdownRef.current?.contains(e.target as Node)) {
+        setAssigneeDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [assigneeDropdownOpen]);
 
   const filteredAssignees = useMemo(() => {
     const q = assigneeSearch.trim().toLowerCase();
@@ -208,7 +220,7 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
               Monitored employees
             </label>
-            <div className="relative mt-1">
+            <div ref={assigneeDropdownRef} className="relative mt-1">
               <button
                 type="button"
                 className="w-full flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2 text-sm text-left bg-white"
