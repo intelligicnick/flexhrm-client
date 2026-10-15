@@ -99,7 +99,13 @@ import {
 } from "../lib/date-helpers";
 import { isEmployeeExitedGeneral, isEmployeeExitedOnDayStatic, isEmployeeExitedForMonth } from "../lib/employee-helpers";
 import { getSalaryColumnValue } from "../lib/salary-columns";
-import { getModuleKey, canViewModule, PERMISSION_MODULES, SidebarItemDef } from "../lib/permissions";
+import {
+  getModuleKey,
+  canViewModule,
+  canUseBrowserExtensionConnection,
+  PERMISSION_MODULES,
+  SidebarItemDef,
+} from "../lib/permissions";
 import { tabToPath, pathToTab, DEFAULT_PATH } from "../routes";
 import PercentIcon from "../components/ui/PercentIcon";
 import DialerOverlay from "../components/ui/DialerOverlay";
@@ -952,12 +958,14 @@ export default function DashboardLayout() {
                                 <Compass size={14} className="text-[#ff791a]" />
                                 System Tour
                               </button>
-                              <ExtensionProfileMenuItem
-                                onClick={() => {
-                                  setIsMobileProfileOpen(false);
-                                  setIsExtensionModalOpen(true);
-                                }}
-                              />
+                              {canUseBrowserExtensionConnection(userPermissions) && (
+                                <ExtensionProfileMenuItem
+                                  onClick={() => {
+                                    setIsMobileProfileOpen(false);
+                                    setIsExtensionModalOpen(true);
+                                  }}
+                                />
+                              )}
                               <FirewallProfileMenuItem
                                 onClick={() => {
                                   setIsMobileProfileOpen(false);
@@ -1109,12 +1117,14 @@ export default function DashboardLayout() {
                                 <Compass size={14} className="text-[#ff791a]" />
                                 System Tour
                               </button>
-                              <ExtensionProfileMenuItem
-                                onClick={() => {
-                                  setIsProfileOpen(false);
-                                  setIsExtensionModalOpen(true);
-                                }}
-                              />
+                              {canUseBrowserExtensionConnection(userPermissions) && (
+                                <ExtensionProfileMenuItem
+                                  onClick={() => {
+                                    setIsProfileOpen(false);
+                                    setIsExtensionModalOpen(true);
+                                  }}
+                                />
+                              )}
                               <FirewallProfileMenuItem
                                 onClick={() => {
                                   setIsProfileOpen(false);

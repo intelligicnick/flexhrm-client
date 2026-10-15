@@ -29,6 +29,16 @@ export function canEditModule(userPermissions: UserPermissionsMap, tabName: stri
   return !!userPermissions?.[key]?.edit;
 }
 
+/** Profile → Browser Extension connection codes (matches smart-capture connection-code API). */
+export function canUseBrowserExtensionConnection(userPermissions: UserPermissionsMap): boolean {
+  if (!userPermissions) return false;
+  return !!(
+    userPermissions.bids?.view ||
+    userPermissions.employees?.view ||
+    userPermissions.admin?.view
+  );
+}
+
 /** Matches backend `buildPermissions` / `isSuperAdminSession` role check. */
 export function isSuperAdminRole(role: string | null | undefined): boolean {
   const normalized = String(role || "").trim().toLowerCase();
@@ -200,7 +210,8 @@ export const ROLE_PERMISSION_MODULE_ROWS: RolePermissionModuleRow[] = [
   {
     key: "bids",
     name: "Bids",
-    includes: "Tenders, contracts, and BG & DD tracking",
+    includes:
+      "Tenders, contracts, BG & DD tracking, and GeM browser extension (view to connect; edit to import/sync)",
   },
   {
     key: "renewals",
