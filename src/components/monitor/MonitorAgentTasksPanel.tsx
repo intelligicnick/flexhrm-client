@@ -311,10 +311,10 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
           />
           <textarea
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            placeholder="Description (optional)"
+            placeholder="Checklist items — one bullet per line (each line becomes a task in FLEX WORKSPACE)"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={3}
+            rows={4}
           />
           <input
             type="date"
