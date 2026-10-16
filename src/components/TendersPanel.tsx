@@ -543,13 +543,6 @@ function tenderAddedAtMs(tender: Tender): number | null {
   return parseFlexibleDateMs(raw);
 }
 
-function tenderParticipatedAtMs(tender: Tender): number | null {
-  if (tender.status === "not_filed") return null;
-  const raw = tender.filedDate?.trim() || "";
-  if (!raw) return null;
-  return parseFlexibleDateMs(raw);
-}
-
 function tenderEntryDateLabel(tender: Tender): string {
   const raw = tender.entryDate?.trim() || tender.createdAt?.trim() || "";
   if (!raw) return "—";
@@ -1033,11 +1026,6 @@ function BidNumberCell({ tender, copiedBidId, onCopy }: BidNumberCellProps) {
   const copied = copiedBidId === tender.id;
   const deleted = isTenderDeleted(tender);
   const missed = isMissedParticipation(tender);
-  const participatedLabel =
-    tender.status !== "not_filed" && tender.filedDate?.trim()
-      ? formatTenderFiledDate(tender.filedDate)
-      : "";
-
   return (
     <div>
       <div className="flex items-start gap-0.5">
@@ -1081,14 +1069,6 @@ function BidNumberCell({ tender, copiedBidId, onCopy }: BidNumberCellProps) {
           )}
         </button>
       </div>
-      {participatedLabel ? (
-        <p
-          className="text-[10px] text-sky-700 font-medium mt-0.5 leading-tight"
-          title={`Participated on ${participatedLabel}`}
-        >
-          Participated · {participatedLabel}
-        </p>
-      ) : null}
       {(deleted || missed) && (
         <div className="mt-0.5 flex flex-wrap gap-1">
           {deleted && (
@@ -1725,9 +1705,6 @@ export default function TendersPanel({
     let addedToday = 0;
     let addedThisWeek = 0;
     let addedThisMonth = 0;
-    let participatedToday = 0;
-    let participatedThisWeek = 0;
-    let participatedThisMonth = 0;
     activeTenders.forEach((t) => {
       if (t.tenderType === "travel") travel += 1;
       else manpower += 1;
@@ -1738,10 +1715,6 @@ export default function TendersPanel({
       if (matchesIsoDateRange(addedMs, today, today)) addedToday += 1;
       if (matchesIsoDateRange(addedMs, week.fromDate, week.toDate)) addedThisWeek += 1;
       if (matchesIsoDateRange(addedMs, month.fromDate, month.toDate)) addedThisMonth += 1;
-      const participatedMs = tenderParticipatedAtMs(t);
-      if (matchesIsoDateRange(participatedMs, today, today)) participatedToday += 1;
-      if (matchesIsoDateRange(participatedMs, week.fromDate, week.toDate)) participatedThisWeek += 1;
-      if (matchesIsoDateRange(participatedMs, month.fromDate, month.toDate)) participatedThisMonth += 1;
       if (isMissedParticipation(t)) {
         passed += 1;
         return;
@@ -1762,9 +1735,6 @@ export default function TendersPanel({
       addedToday,
       addedThisWeek,
       addedThisMonth,
-      participatedToday,
-      participatedThisWeek,
-      participatedThisMonth,
     };
   }, [activeTenders]);
 
@@ -2454,55 +2424,38 @@ export default function TendersPanel({
       </div>
 
       <div className="px-5 pt-5 pb-3 bg-linear-to-b from-slate-50/80 to-white">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-          New tenders added &amp; participated
-        </p>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">New tenders added</p>
         <div className="grid grid-cols-3 gap-3 mb-5">
           {(
             [
               {
                 label: "Today",
-                added: stats.addedToday,
-                participated: stats.participatedToday,
+                value: stats.addedToday,
                 iconBg: "bg-emerald-100 text-emerald-600",
                 tone: "text-emerald-700",
-                partTone: "text-sky-700",
               },
               {
                 label: "This week",
-                added: stats.addedThisWeek,
-                participated: stats.participatedThisWeek,
+                value: stats.addedThisWeek,
                 iconBg: "bg-teal-100 text-teal-600",
                 tone: "text-teal-700",
-                partTone: "text-sky-700",
               },
               {
                 label: "This month",
-                added: stats.addedThisMonth,
-                participated: stats.participatedThisMonth,
+                value: stats.addedThisMonth,
                 iconBg: "bg-cyan-100 text-cyan-600",
                 tone: "text-cyan-700",
-                partTone: "text-sky-700",
               },
             ] as const
-          ).map(({ label, added, participated, iconBg, tone, partTone }) => (
+          ).map(({ label, value, iconBg, tone }) => (
             <div
               key={label}
               className="rounded-xl border border-slate-100 bg-white px-4 py-3.5 shadow-sm"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Added</p>
-                      <p className={`text-xl font-black tabular-nums ${tone}`}>{added}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Participated</p>
-                      <p className={`text-xl font-black tabular-nums ${partTone}`}>{participated}</p>
-                    </div>
-                  </div>
+                  <p className={`text-2xl font-black tabular-nums mt-1 ${tone}`}>{value}</p>
                 </div>
                 <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
                   <Plus size={15} />
