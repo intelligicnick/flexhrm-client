@@ -335,13 +335,20 @@ function canSelectTenderForBulk(
   return canManageTender(tender, canManageLockedTenders);
 }
 
+type TenderDateRangeField = "endDate" | "filedDate" | "dateAdded";
+
 function tenderMatchesDateRange(
   tender: Tender,
-  field: "endDate" | "filedDate",
+  field: TenderDateRangeField,
   from: string,
   to: string,
 ): boolean {
-  const ts = parseFlexibleDateMs(field === "filedDate" ? tender.filedDate : tender.endDate);
+  const ts =
+    field === "filedDate"
+      ? parseFlexibleDateMs(tender.filedDate)
+      : field === "dateAdded"
+        ? tenderAddedAtMs(tender)
+        : parseFlexibleDateMs(tender.endDate);
   return matchesIsoDateRange(ts, from, to);
 }
 
@@ -1591,7 +1598,7 @@ export default function TendersPanel({
   const [statusFilter, setStatusFilter] = useState<"" | TenderStatus>("");
   const [deadlineFilter, setDeadlineFilter] = useState<"all" | "upcoming" | "passed">(initialDeadlineFilter);
   const [accountFilter, setAccountFilter] = useState("");
-  const [dateRangeField, setDateRangeField] = useState<"endDate" | "filedDate">("endDate");
+  const [dateRangeField, setDateRangeField] = useState<TenderDateRangeField>("endDate");
 
   useEffect(() => {
     setDeadlineFilter(initialDeadlineFilter);
@@ -2755,8 +2762,9 @@ export default function TendersPanel({
             fieldOptions={[
               { value: "endDate", label: "End date" },
               { value: "filedDate", label: "Filed date" },
+              { value: "dateAdded", label: "Date added" },
             ]}
-            onFieldChange={(value) => setDateRangeField(value as "endDate" | "filedDate")}
+            onFieldChange={(value) => setDateRangeField(value as TenderDateRangeField)}
             from={dateFrom}
             to={dateTo}
             onFromChange={setDateFrom}
