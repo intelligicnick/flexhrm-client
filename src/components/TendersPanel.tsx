@@ -685,9 +685,13 @@ function isFiledBucket(status: TenderStatus): boolean {
   return status === "filed" || status === "not_evaluated";
 }
 
-function selectableStatuses(current: TenderStatus): TenderStatus[] {
+function selectableStatuses(
+  current: TenderStatus,
+  allowRevertToNotParticipated = false,
+): TenderStatus[] {
   if (current === "not_filed") return STATUS_ORDER;
-  return STATUS_ORDER.filter((status) => status !== "not_filed" && status !== "not_evaluated");
+  const base = STATUS_ORDER.filter((status) => status !== "not_filed" && status !== "not_evaluated");
+  return allowRevertToNotParticipated ? ["not_filed", ...base] : base;
 }
 
 type TenderBulkEditableField = Exclude<keyof TenderBulkEditRowDraft, "id">;
@@ -1284,7 +1288,7 @@ const TenderCardRow = React.memo(function TenderCardRow({
                   onChange={(e) => void onStatusChange(tender, e.target.value as TenderStatus)}
                   className={`w-full appearance-none pl-2 pr-6 py-1 rounded-full text-[11px] font-bold border cursor-pointer disabled:opacity-60 ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
                 >
-                  {selectableStatuses(tender.status).map((key) => (
+                  {selectableStatuses(tender.status, canManageLockedTenders).map((key) => (
                     <option key={key} value={key}>
                       {STATUS_LABELS[key]}
                     </option>
@@ -1465,7 +1469,7 @@ const TenderTableRow = React.memo(function TenderTableRow({
                 onChange={(e) => void onStatusChange(tender, e.target.value as TenderStatus)}
                 className={`w-full appearance-none pl-2 pr-6 py-1 rounded-full text-[10px] font-bold border cursor-pointer disabled:opacity-60 ${STATUS_STYLES[isFiledBucket(tender.status) ? "filed" : tender.status]}`}
               >
-                {selectableStatuses(tender.status).map((key) => (
+                {selectableStatuses(tender.status, canManageLockedTenders).map((key) => (
                   <option key={key} value={key}>
                     {STATUS_LABELS[key]}
                   </option>
@@ -2030,7 +2034,11 @@ export default function TendersPanel({
     ) {
       return;
     }
-    if (nextStatus === "not_filed" && tender.status !== "not_filed") {
+    if (
+      nextStatus === "not_filed" &&
+      tender.status !== "not_filed" &&
+      !canManageLockedTenders
+    ) {
       setToast("Status cannot be changed back to Not Participated.");
       return;
     }
@@ -2047,7 +2055,7 @@ export default function TendersPanel({
     } finally {
       setUpdatingStatusId(null);
     }
-  }, [onUpdate]);
+  }, [canManageLockedTenders, onUpdate]);
 
   const toggleExpandedRow = useCallback((tenderId: string) => {
     setExpandedTenderId((current) => (current === tenderId ? null : tenderId));
@@ -2161,6 +2169,7 @@ export default function TendersPanel({
           }
 
           if (
+            !canManageLockedTenders &&
             draft.status === "not_filed" &&
             tender.status !== "not_filed" &&
             !isFiledBucket(tender.status)
@@ -2236,7 +2245,7 @@ export default function TendersPanel({
     } finally {
       setBulkAction(null);
     }
-  }, [bulkEditRows, onRefresh, onUpdate, selectedTenders]);
+  }, [bulkEditRows, canManageLockedTenders, onRefresh, onUpdate, selectedTenders]);
 
   const handleImportFile = async (file: File) => {
     setImporting(true);
