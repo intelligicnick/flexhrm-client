@@ -1710,6 +1710,7 @@ export default function TendersPanel({
     let passed = 0;
     let filed = 0;
     let qualified = 0;
+    let disqualified = 0;
     let urgent = 0;
     let manpower = 0;
     let travel = 0;
@@ -1721,6 +1722,7 @@ export default function TendersPanel({
       else manpower += 1;
       if (isFiledBucket(t.status) || t.filedDate.trim()) filed += 1;
       if (t.status === "qualified") qualified += 1;
+      if (t.status === "disqualified") disqualified += 1;
       if (isNearNotParticipated(t) || isMissedParticipation(t)) urgent += 1;
       const addedMs = tenderAddedAtMs(t);
       if (matchesIsoDateRange(addedMs, today, today)) addedToday += 1;
@@ -1740,6 +1742,7 @@ export default function TendersPanel({
       passed,
       filed,
       qualified,
+      disqualified,
       urgent,
       manpower,
       travel,
@@ -2277,7 +2280,9 @@ export default function TendersPanel({
       searchInput.trim(),
   );
 
-  const applyQuickFilter = (key: "all" | "filed" | "qualified" | "upcoming" | "passed") => {
+  const applyQuickFilter = (
+    key: "all" | "filed" | "qualified" | "disqualified" | "upcoming" | "passed",
+  ) => {
     if (key === "all") {
       setTypeFilter("");
       setStatusFilter("");
@@ -2295,6 +2300,11 @@ export default function TendersPanel({
     }
     if (key === "qualified") {
       setStatusFilter("qualified");
+      setDeadlineFilter("all");
+      return;
+    }
+    if (key === "disqualified") {
+      setStatusFilter("disqualified");
       setDeadlineFilter("all");
       return;
     }
@@ -2332,6 +2342,16 @@ export default function TendersPanel({
       tone: "text-emerald-700",
       sub: "Technical / final",
       active: statusFilter === "qualified",
+    },
+    {
+      key: "disqualified" as const,
+      label: "Disqualified",
+      value: stats.disqualified,
+      icon: CircleX,
+      iconBg: "bg-violet-100 text-violet-600",
+      tone: "text-violet-700",
+      sub: "Technical rejection",
+      active: statusFilter === "disqualified",
     },
     {
       key: "upcoming" as const,
@@ -2480,7 +2500,7 @@ export default function TendersPanel({
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
           {statCards.map(({ key, label, value, icon: Icon, iconBg, tone, sub, active, highlight }) => (
             <button
               key={key}

@@ -4,6 +4,7 @@ import {
   AgentTaskStatus,
   monitorApi,
   MonitorAgentTask,
+  MonitorRecurringAgentTask,
   MonitoredEmployee,
 } from "../../lib/monitor-api";
 
@@ -30,6 +31,10 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [issueDay, setIssueDay] = useState("1");
+  const [dueDay, setDueDay] = useState("28");
+  const [recurringTemplates, setRecurringTemplates] = useState<MonitorRecurringAgentTask[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const loadTasks = useCallback(async () => {
@@ -49,11 +54,20 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
     }
   }, [statusFilter]);
 
+  const loadRecurring = useCallback(async () => {
+    try {
+      setRecurringTemplates(await monitorApi.getRecurringAgentTasks());
+    } catch {
+      setRecurringTemplates([]);
+    }
+  }, []);
+
   useEffect(() => {
     void loadTasks();
+    void loadRecurring();
     const timer = setInterval(() => void loadTasks(), 60_000);
     return () => clearInterval(timer);
-  }, [loadTasks]);
+  }, [loadTasks, loadRecurring]);
 
   const loadMonitoredEmployees = useCallback(async () => {
     setEmployeesLoading(true);
@@ -132,6 +146,9 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
     setTitle("");
     setDescription("");
     setDueDate("");
+    setIsRecurring(false);
+    setIssueDay("1");
+    setDueDay("28");
     setSelectedIds(new Set());
     setAssigneeSearch("");
     setAssigneeDropdownOpen(false);
@@ -142,18 +159,49 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
     if (selectedIds.size === 0 || !title.trim()) return;
     setSubmitting(true);
     try {
-      await monitorApi.createAgentTask({
-        employeeIds: [...selectedIds],
-        title: title.trim(),
-        description: description.trim() || undefined,
-        dueDate: dueDate || undefined,
-      });
+      if (isRecurring) {
+        const issue = Number(issueDay);
+        const due = Number(dueDay);
+        if (!Number.isInteger(issue) || issue < 1 || issue > 31) {
+          setError("Create-on day must be between 1 and 31.");
+          return;
+        }
+        if (!Number.isInteger(due) || due < 1 || due > 31) {
+          setError("Due day must be between 1 and 31.");
+          return;
+        }
+        await monitorApi.createRecurringAgentTask({
+          employeeIds: [...selectedIds],
+          title: title.trim(),
+          description: description.trim() || undefined,
+          issueDay: issue,
+          dueDay: due,
+        });
+        await loadRecurring();
+      } else {
+        await monitorApi.createAgentTask({
+          employeeIds: [...selectedIds],
+          title: title.trim(),
+          description: description.trim() || undefined,
+          dueDate: dueDate || undefined,
+        });
+      }
       resetForm();
       await loadTasks();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create task");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function stopRecurring(template: MonitorRecurringAgentTask) {
+    if (!confirm(`Stop monthly recurrence for "${template.title}"?`)) return;
+    try {
+      await monitorApi.patchRecurringAgentTask(template.id, { active: false });
+      await loadRecurring();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update recurring task");
     }
   }
 
@@ -327,26 +375,108 @@ export default function MonitorAgentTasksPanel({ readOnly = false }: MonitorAgen
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
+            disabled={isRecurring}
           />
-          <input
-            type="date"
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-          />
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={(e) => setIsRecurring(e.target.checked)}
+            />
+            <span className="font-semibold">Recurring monthly</span>
+            <span className="text-slate-400 text-xs">Auto-creates on a fixed day each month</span>
+          </label>
+          {isRecurring ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                  Create on day
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  value={issueDay}
+                  onChange={(e) => setIssueDay(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                  Due by day
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                  value={dueDay}
+                  onChange={(e) => setDueDay(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+          ) : (
+            <input
+              type="date"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          )}
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={submitting || selectedIds.size === 0}
               className="px-4 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg disabled:opacity-50"
             >
-              {selectedIds.size > 1 ? `Assign to ${selectedIds.size} employees` : "Assign task"}
+              {isRecurring
+                ? selectedIds.size > 1
+                  ? `Save recurring for ${selectedIds.size} employees`
+                  : "Save recurring task"
+                : selectedIds.size > 1
+                  ? `Assign to ${selectedIds.size} employees`
+                  : "Assign task"}
             </button>
             <button type="button" onClick={resetForm} className="px-4 py-2 border text-sm rounded-lg">
               Cancel
             </button>
           </div>
         </form>
+      )}
+
+      {recurringTemplates.some((t) => t.active) && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wide">Recurring schedules</h3>
+          <ul className="text-sm space-y-2">
+            {recurringTemplates
+              .filter((t) => t.active)
+              .map((t) => (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border border-slate-100 rounded-lg px-3 py-2"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-800">{t.title}</p>
+                    <p className="text-xs text-slate-500">
+                      Creates day {t.issueDay} · Due day {t.dueDay} · {t.employeeIds.length} employee
+                      {t.employeeIds.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-red-600 hover:underline"
+                      onClick={() => void stopRecurring(t)}
+                    >
+                      Stop
+                    </button>
+                  )}
+                </li>
+              ))}
+          </ul>
+        </div>
       )}
 
       {loading ? (

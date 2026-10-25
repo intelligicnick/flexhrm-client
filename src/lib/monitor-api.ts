@@ -438,9 +438,39 @@ export const monitorApi = {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  getRecurringAgentTasks: () => monitorFetch<MonitorRecurringAgentTask[]>("/agent-tasks/recurring"),
+  createRecurringAgentTask: (body: {
+    employeeIds: string[];
+    title: string;
+    description?: string;
+    issueDay: number;
+    dueDay: number;
+  }) =>
+    monitorFetch<MonitorRecurringAgentTask>("/agent-tasks/recurring", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  patchRecurringAgentTask: (id: string, body: { active: boolean }) =>
+    monitorFetch<MonitorRecurringAgentTask>(`/agent-tasks/recurring/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 };
 
 export type AgentTaskStatus = "pending" | "done" | "cancelled";
+
+export interface MonitorRecurringAgentTask {
+  id: string;
+  tenantId?: string;
+  employeeIds: string[];
+  title: string;
+  description?: string;
+  issueDay: number;
+  dueDay: number;
+  active: boolean;
+  createdBy?: string;
+  createdAt?: string;
+}
 
 export interface MonitorAgentTask {
   id: string;
