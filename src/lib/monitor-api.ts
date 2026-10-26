@@ -415,9 +415,22 @@ export const monitorApi = {
   applyRetention: () => monitorFetch<{ success: boolean }>("/settings/apply-retention", { method: "POST" }),
   getAgentTaskSummary: () =>
     monitorFetch<{ pending: number; doneToday: number }>("/agent-tasks/summary"),
-  getAgentTasks: (opts?: { employeeId?: string; status?: AgentTaskStatus }) =>
+  getAgentTasks: (opts?: {
+    employeeId?: string;
+    status?: AgentTaskStatus;
+    archived?: "exclude" | "only" | "all";
+  }) =>
     monitorFetch<MonitorAgentTask[]>(
-      withQuery("/agent-tasks", { employeeId: opts?.employeeId, status: opts?.status }),
+      withQuery("/agent-tasks", {
+        employeeId: opts?.employeeId,
+        status: opts?.status,
+        archived:
+          opts?.archived === "only"
+            ? "true"
+            : opts?.archived === "all"
+              ? "all"
+              : undefined,
+      }),
     ),
   createAgentTask: (body: {
     employeeId?: string;
@@ -432,7 +445,13 @@ export const monitorApi = {
     }),
   patchAgentTask: (
     id: string,
-    body: Partial<{ title: string; description: string; dueDate: string; status: AgentTaskStatus }>,
+    body: Partial<{
+      title: string;
+      description: string;
+      dueDate: string;
+      status: AgentTaskStatus;
+      archived: boolean;
+    }>,
   ) =>
     monitorFetch<MonitorAgentTask>(`/agent-tasks/${id}`, {
       method: "PATCH",
@@ -450,11 +469,25 @@ export const monitorApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  patchRecurringAgentTask: (id: string, body: { active: boolean }) =>
+  patchRecurringAgentTask: (
+    id: string,
+    body: Partial<{
+      active: boolean;
+      title: string;
+      description: string;
+      issueDay: number;
+      dueDay: number;
+      employeeIds: string[];
+    }>,
+  ) =>
     monitorFetch<MonitorRecurringAgentTask>(`/agent-tasks/recurring/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+  deleteAgentTask: (id: string) =>
+    monitorFetch<{ success: boolean }>(`/agent-tasks/${id}`, { method: "DELETE" }),
+  deleteRecurringAgentTask: (id: string) =>
+    monitorFetch<{ success: boolean }>(`/agent-tasks/recurring/${id}`, { method: "DELETE" }),
 };
 
 export type AgentTaskStatus = "pending" | "done" | "cancelled";
@@ -485,6 +518,8 @@ export interface MonitorAgentTask {
   createdAt?: string;
   completedAt?: string;
   completionNote?: string;
+  archived?: boolean;
+  archivedAt?: string;
 }
 
 export function formatDuration(seconds: number): string {

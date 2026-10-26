@@ -5539,9 +5539,15 @@ export default function ModuleContent() {
                               onDelete={handleDeleteBgDdRecord}
                             />
                           ) : isMonitorTab(activeSidebarTab) ? (
-                            <MonitorPanel readOnly={!userPermissions.monitor?.edit} />
+                            <MonitorPanel
+                              readOnly={!userPermissions.monitor?.edit && !isSuperAdmin}
+                              agentTasksCanDelete={!!userPermissions.monitor?.delete || isSuperAdmin}
+                            />
                           ) : isAgentTasksTab(activeSidebarTab) ? (
-                            <MonitorAgentTasksPanel readOnly={!userPermissions.monitor?.edit} />
+                            <MonitorAgentTasksPanel
+                              readOnly={!userPermissions.monitor?.edit && !isSuperAdmin}
+                              canDelete={!!userPermissions.monitor?.delete || isSuperAdmin}
+                            />
                           ) : isUploadsTab(activeSidebarTab) ? (
                             <UploadsPanel
                               selectedMonth={selectedMonth}

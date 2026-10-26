@@ -49,6 +49,7 @@ import { periodRangeLabel, PERIOD_LABELS } from "../lib/monitor-period";
 
 interface MonitorPanelProps {
   readOnly?: boolean;
+  agentTasksCanDelete?: boolean;
 }
 
 type MonitorTab =
@@ -147,7 +148,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string 
   );
 }
 
-export default function MonitorPanel({ readOnly = false }: MonitorPanelProps) {
+export default function MonitorPanel({ readOnly = false, agentTasksCanDelete = false }: MonitorPanelProps) {
   const [activeTab, setActiveTab] = useState<MonitorTab>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1165,7 +1166,9 @@ export default function MonitorPanel({ readOnly = false }: MonitorPanelProps) {
               <MonitorEmployeeAgentsPanel readOnly={readOnly} onCredentialsChanged={refresh} />
             )}
 
-            {activeTab === "agent-tasks" && <MonitorAgentTasksPanel readOnly={readOnly} />}
+            {activeTab === "agent-tasks" && (
+              <MonitorAgentTasksPanel readOnly={readOnly} canDelete={agentTasksCanDelete || !readOnly} />
+            )}
 
             {activeTab === "devices" && (
               <div className="border border-slate-200 rounded-xl overflow-hidden">
