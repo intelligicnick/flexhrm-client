@@ -31,6 +31,7 @@ const STATUS_FILTERS: TaskListFilter[] = ["all", "pending", "done", "cancelled",
 type DeadlineFilter = "any" | "overdue" | "today" | "week" | "no_due" | "custom";
 type SourceFilter = "all" | "recurring" | "manual";
 type SortFilter = "created" | "due_asc" | "due_desc";
+type ListViewFilter = "all" | "recurring" | "tasks";
 
 function localTodayIso(): string {
   const d = new Date();
@@ -40,6 +41,20 @@ function localTodayIso(): string {
 function isTaskOverdue(task: MonitorAgentTask): boolean {
   if (task.archived || task.status !== "pending" || !task.dueDate?.trim()) return false;
   return task.dueDate.slice(0, 10) < localTodayIso();
+}
+
+function isGroupTaskDescription(desc?: string): boolean {
+  return Boolean(desc?.trim().toLowerCase().startsWith("group:"));
+}
+
+function taskGroupKey(task: MonitorAgentTask): string {
+  return `${task.employeeId}::${(task.description || "").trim()}`;
+}
+
+function groupTaskMembers(task: MonitorAgentTask, all: MonitorAgentTask[]): MonitorAgentTask[] {
+  if (!isGroupTaskDescription(task.description)) return [task];
+  const key = taskGroupKey(task);
+  return all.filter((t) => taskGroupKey(t) === key && t.status === task.status);
 }
 
 type AssigneeOption = { id: string; employeeCode: string; name: string; isOnline: boolean };
@@ -81,6 +96,7 @@ export default function MonitorAgentTasksPanel({
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sortBy, setSortBy] = useState<SortFilter>("created");
+  const [listViewFilter, setListViewFilter] = useState<ListViewFilter>("all");
   const [viewingTask, setViewingTask] = useState<MonitorAgentTask | null>(null);
   const [viewingRecurring, setViewingRecurring] = useState<MonitorRecurringAgentTask | null>(null);
   const [recurringInstances, setRecurringInstances] = useState<MonitorAgentTask[]>([]);
@@ -104,8 +120,13 @@ export default function MonitorAgentTasksPanel({
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
+  const [editingTaskGroupMode, setEditingTaskGroupMode] = useState(false);
+  const [editingGroupTaskIds, setEditingGroupTaskIds] = useState<string[]>([]);
+  const [editingGroupHeading, setEditingGroupHeading] = useState("");
+  const [editChecklistLines, setEditChecklistLines] = useState("");
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
   const [editRecurringTitle, setEditRecurringTitle] = useState("");
+  const [editRecurringDescription, setEditRecurringDescription] = useState("");
   const [editIssueDay, setEditIssueDay] = useState("1");
   const [editDueDay, setEditDueDay] = useState("28");
 
@@ -160,9 +181,26 @@ export default function MonitorAgentTasksPanel({
     debouncedSearch.trim() !== "" ||
     sourceFilter !== "all" ||
     sortBy !== "created" ||
-    statusFilter !== "pending";
+    statusFilter !== "pending" ||
+    listViewFilter !== "all";
+
+  const showRecurringInList = listViewFilter === "all" || listViewFilter === "recurring";
+  const showTasksInList = listViewFilter === "all" || listViewFilter === "tasks";
+
+  const filteredRecurringSchedules = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    return recurringTemplates
+      .filter((t) => t.active)
+      .filter((t) => !employeeFilter || t.employeeIds.includes(employeeFilter))
+      .filter((t) => {
+        if (!q) return true;
+        const hay = `${t.title} ${t.description || ""}`.toLowerCase();
+        return hay.includes(q);
+      });
+  }, [recurringTemplates, employeeFilter, debouncedSearch]);
 
   function resetFilters() {
+    setListViewFilter("all");
     setStatusFilter("pending");
     setEmployeeFilter("");
     setDeadlineFilter("any");
@@ -369,29 +407,93 @@ export default function MonitorAgentTasksPanel({
     }
   }
 
+  function sortGroupMembers(members: MonitorAgentTask[]) {
+    return [...members].sort(
+      (a, b) =>
+        (a.createdAt || "").localeCompare(b.createdAt || "") || a.title.localeCompare(b.title),
+    );
+  }
+
   function startEditTask(task: MonitorAgentTask) {
     setEditingTaskId(task.id);
-    setEditTitle(task.title);
-    setEditDescription(task.description || "");
+    const members = sortGroupMembers(groupTaskMembers(task, tasks));
+    if (members.length > 1 || isGroupTaskDescription(task.description)) {
+      setEditingTaskGroupMode(true);
+      setEditingGroupTaskIds(members.map((m) => m.id));
+      setEditingGroupHeading((task.description || "").replace(/^Group:\s*/i, "").trim());
+      setEditChecklistLines(members.map((m) => m.title).join("\n"));
+      setEditTitle("");
+      setEditDescription("");
+    } else {
+      setEditingTaskGroupMode(false);
+      setEditingGroupTaskIds([]);
+      setEditingGroupHeading("");
+      setEditChecklistLines("");
+      setEditTitle(task.title);
+      setEditDescription(task.description || "");
+    }
     setEditDueDate(task.dueDate?.slice(0, 10) || "");
   }
 
   function cancelEditTask() {
     setEditingTaskId(null);
+    setEditingTaskGroupMode(false);
+    setEditingGroupTaskIds([]);
+    setEditingGroupHeading("");
+    setEditChecklistLines("");
     setEditTitle("");
     setEditDescription("");
     setEditDueDate("");
   }
 
-  async function saveEditTask(taskId: string) {
-    if (!editTitle.trim()) return;
+  async function saveEditTask(task: MonitorAgentTask) {
     setSubmitting(true);
     try {
-      await monitorApi.patchAgentTask(taskId, {
-        title: editTitle.trim(),
-        description: editDescription.trim(),
-        dueDate: editDueDate || undefined,
-      });
+      if (editingTaskGroupMode) {
+        const heading = editingGroupHeading.trim();
+        if (!heading) {
+          setError("Group heading is required.");
+          return;
+        }
+        const lines = editChecklistLines
+          .split(/\r?\n/)
+          .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
+          .filter(Boolean);
+        if (!lines.length) {
+          setError("Add at least one checklist line.");
+          return;
+        }
+        const members = sortGroupMembers(tasks.filter((t) => editingGroupTaskIds.includes(t.id)));
+        const groupDesc = `Group: ${heading}`;
+        const due = editDueDate || undefined;
+        for (let i = 0; i < members.length; i++) {
+          const line = lines[i];
+          if (line) {
+            await monitorApi.patchAgentTask(members[i].id, {
+              title: line,
+              description: groupDesc,
+              dueDate: due,
+            });
+          } else {
+            await monitorApi.patchAgentTask(members[i].id, { status: "cancelled" });
+          }
+        }
+        for (let i = members.length; i < lines.length; i++) {
+          await monitorApi.createAgentTask({
+            employeeIds: [task.employeeId],
+            title: lines[i],
+            description: groupDesc,
+            dueDate: due,
+          });
+        }
+      } else {
+        if (!editTitle.trim()) return;
+        await monitorApi.patchAgentTask(task.id, {
+          title: editTitle.trim(),
+          description: editDescription.trim(),
+          dueDate: editDueDate || undefined,
+        });
+      }
       cancelEditTask();
       await loadTasks();
     } catch (err) {
@@ -448,6 +550,7 @@ export default function MonitorAgentTasksPanel({
   function startEditRecurring(t: MonitorRecurringAgentTask) {
     setEditingRecurringId(t.id);
     setEditRecurringTitle(t.title);
+    setEditRecurringDescription(t.description || "");
     setEditIssueDay(String(t.issueDay));
     setEditDueDay(String(t.dueDay));
   }
@@ -455,6 +558,7 @@ export default function MonitorAgentTasksPanel({
   function cancelEditRecurring() {
     setEditingRecurringId(null);
     setEditRecurringTitle("");
+    setEditRecurringDescription("");
     setEditIssueDay("1");
     setEditDueDay("28");
   }
@@ -475,6 +579,7 @@ export default function MonitorAgentTasksPanel({
     try {
       await monitorApi.patchRecurringAgentTask(templateId, {
         title: editRecurringTitle.trim(),
+        description: editRecurringDescription.trim(),
         issueDay: issue,
         dueDay: due,
       });
@@ -511,7 +616,10 @@ export default function MonitorAgentTasksPanel({
           <button
             type="button"
             data-no-busy
-            onClick={() => void loadTasks()}
+            onClick={() => {
+              void loadTasks();
+              void loadRecurring();
+            }}
             className="flex items-center gap-1 px-3 py-2 text-xs font-bold border border-slate-200 rounded-lg"
           >
             <RefreshCw size={14} /> Refresh
@@ -534,6 +642,28 @@ export default function MonitorAgentTasksPanel({
       )}
 
       <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { id: "all" as const, label: "All" },
+              { id: "recurring" as const, label: "Recurring schedules" },
+              { id: "tasks" as const, label: "Assigned tasks" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg border ${
+                listViewFilter === tab.id
+                  ? "bg-[#ff791a] text-white border-[#ff791a]"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
+              onClick={() => setListViewFilter(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 min-w-[140px] flex-1">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Search</span>
@@ -561,11 +691,14 @@ export default function MonitorAgentTasksPanel({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 min-w-[120px]">
+          <label
+            className={`flex flex-col gap-1 min-w-[120px] ${!showTasksInList ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Status</span>
             <select
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
               value={statusFilter}
+              disabled={!showTasksInList}
               onChange={(e) => setStatusFilter(e.target.value as TaskListFilter)}
             >
               {STATUS_FILTERS.map((s) => (
@@ -579,11 +712,14 @@ export default function MonitorAgentTasksPanel({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 min-w-[130px]">
+          <label
+            className={`flex flex-col gap-1 min-w-[130px] ${!showTasksInList ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Deadline</span>
             <select
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
               value={deadlineFilter}
+              disabled={!showTasksInList}
               onChange={(e) => setDeadlineFilter(e.target.value as DeadlineFilter)}
             >
               <option value="any">Any due date</option>
@@ -594,11 +730,14 @@ export default function MonitorAgentTasksPanel({
               <option value="custom">Custom range</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 min-w-[120px]">
+          <label
+            className={`flex flex-col gap-1 min-w-[120px] ${!showTasksInList ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Source</span>
             <select
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
               value={sourceFilter}
+              disabled={!showTasksInList}
               onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
             >
               <option value="all">All tasks</option>
@@ -606,11 +745,14 @@ export default function MonitorAgentTasksPanel({
               <option value="recurring">From recurring</option>
             </select>
           </label>
-          <label className="flex flex-col gap-1 min-w-[120px]">
+          <label
+            className={`flex flex-col gap-1 min-w-[120px] ${!showTasksInList ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Sort</span>
             <select
               className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
               value={sortBy}
+              disabled={!showTasksInList}
               onChange={(e) => setSortBy(e.target.value as SortFilter)}
             >
               <option value="created">Newest first</option>
@@ -643,8 +785,17 @@ export default function MonitorAgentTasksPanel({
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
           <span>
-            {loading ? "Loading…" : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
-            {deadlineFilter === "overdue" ? " · overdue pending only" : ""}
+            {loading && showTasksInList
+              ? "Loading…"
+              : [
+                  showRecurringInList
+                    ? `${filteredRecurringSchedules.length} schedule${filteredRecurringSchedules.length === 1 ? "" : "s"}`
+                    : null,
+                  showTasksInList ? `${tasks.length} task${tasks.length === 1 ? "" : "s"}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "0 items"}
+            {deadlineFilter === "overdue" && showTasksInList ? " · overdue pending only" : ""}
           </span>
           {hasActiveFilters && (
             <button
@@ -767,11 +918,14 @@ export default function MonitorAgentTasksPanel({
           />
           <textarea
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            placeholder="Checklist items — one bullet per line (each line becomes a task in FLEX WORKSPACE)"
+            placeholder={
+              isRecurring
+                ? "Checklist / instructions — one item per line (shown to employees each month)"
+                : "Checklist items — one bullet per line (each line becomes a task in FLEX WORKSPACE)"
+            }
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
-            disabled={isRecurring}
           />
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
             <input
@@ -842,129 +996,14 @@ export default function MonitorAgentTasksPanel({
         </form>
       )}
 
-      {recurringTemplates.some((t) => t.active) && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-          <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wide">Recurring schedules</h3>
-          <ul className="text-sm space-y-2">
-            {recurringTemplates
-              .filter((t) => t.active)
-              .map((t) => (
-                <li
-                  key={t.id}
-                  className="flex flex-wrap items-center justify-between gap-2 border border-slate-100 rounded-lg px-3 py-2"
-                >
-                  <div className="flex-1 min-w-[200px]">
-                    {editingRecurringId === t.id ? (
-                      <div className="space-y-2">
-                        <input
-                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-                          value={editRecurringTitle}
-                          onChange={(e) => setEditRecurringTitle(e.target.value)}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input
-                            type="number"
-                            min={1}
-                            max={31}
-                            className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-                            value={editIssueDay}
-                            onChange={(e) => setEditIssueDay(e.target.value)}
-                            aria-label="Create on day"
-                          />
-                          <input
-                            type="number"
-                            min={1}
-                            max={31}
-                            className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-                            value={editDueDay}
-                            onChange={(e) => setEditDueDay(e.target.value)}
-                            aria-label="Due day"
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <p className="font-semibold text-slate-800">{t.title}</p>
-                        <p className="text-xs text-slate-500">
-                          Creates day {t.issueDay} · Due day {t.dueDay} · {t.employeeIds.length} employee
-                          {t.employeeIds.length === 1 ? "" : "s"}
-                        </p>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {editingRecurringId === t.id ? (
-                      !readOnly && (
-                        <>
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-slate-700 hover:underline"
-                            disabled={submitting}
-                            onClick={() => void saveEditRecurring(t.id)}
-                          >
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-slate-500 hover:underline"
-                            onClick={cancelEditRecurring}
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:underline"
-                          onClick={() => void openRecurringView(t)}
-                        >
-                          <Eye size={12} /> View
-                        </button>
-                        {!readOnly && (
-                          <>
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:underline"
-                              onClick={() => startEditRecurring(t)}
-                            >
-                              <Pencil size={12} /> Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs font-semibold text-amber-700 hover:underline"
-                              onClick={() => void stopRecurring(t)}
-                            >
-                              Stop
-                            </button>
-                            {canDelete && (
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
-                                onClick={() => void deleteRecurring(t)}
-                              >
-                                <Trash2 size={12} /> Delete
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </div>
-      )}
-
-      {loading ? (
+      {loading && showTasksInList ? (
         <p className="text-sm text-slate-400 py-8 text-center">Loading tasks…</p>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-slate-500 uppercase">
               <tr>
+                <th className="text-left p-3 w-[88px]">Type</th>
                 <th className="text-left p-3">Task</th>
                 <th className="text-left p-3">Employee</th>
                 <th className="text-left p-3">Due</th>
@@ -975,7 +1014,137 @@ export default function MonitorAgentTasksPanel({
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {showRecurringInList &&
+                filteredRecurringSchedules.map((t) => (
+                  <tr key={`recurring-${t.id}`} className="border-t border-slate-100 bg-orange-50/20">
+                    <td className="p-3">
+                      <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-[#ff791a] bg-orange-100 px-2 py-0.5 rounded">
+                        Recurring
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      {editingRecurringId === t.id ? (
+                        <div className="space-y-2 min-w-[220px]">
+                          <input
+                            className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                            placeholder="Schedule heading"
+                            value={editRecurringTitle}
+                            onChange={(e) => setEditRecurringTitle(e.target.value)}
+                          />
+                          <textarea
+                            className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                            placeholder="Checklist — one item per line"
+                            rows={4}
+                            value={editRecurringDescription}
+                            onChange={(e) => setEditRecurringDescription(e.target.value)}
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="number"
+                              min={1}
+                              max={31}
+                              className="border border-slate-200 rounded-md px-2 py-1 text-sm"
+                              value={editIssueDay}
+                              onChange={(e) => setEditIssueDay(e.target.value)}
+                              aria-label="Create on day"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              max={31}
+                              className="border border-slate-200 rounded-md px-2 py-1 text-sm"
+                              value={editDueDay}
+                              onChange={(e) => setEditDueDay(e.target.value)}
+                              aria-label="Due day"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-semibold text-slate-800">{t.title}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Monthly · create day {t.issueDay} · due day {t.dueDay}
+                          </p>
+                        </>
+                      )}
+                    </td>
+                    <td className="p-3 text-slate-600 max-w-[160px]">
+                      <span className="line-clamp-3">
+                        {t.employeeIds.map((id) => resolveEmployeeName(id)).join(", ")}
+                      </span>
+                    </td>
+                    <td className="p-3 text-slate-600 whitespace-nowrap">
+                      Day {t.issueDay} → {t.dueDay}
+                    </td>
+                    <td className="p-3 capitalize text-green-700 font-semibold">active</td>
+                    <td className="p-3 text-slate-400">—</td>
+                    <td className="p-3 text-slate-600 max-w-[200px]">
+                      <span className="line-clamp-3 whitespace-pre-wrap">{t.description || "—"}</span>
+                    </td>
+                    <td className="p-3">
+                      {editingRecurringId === t.id ? (
+                        !readOnly && (
+                          <div className="flex flex-col gap-1">
+                            <button
+                              type="button"
+                              className="text-slate-800 font-semibold text-left hover:underline"
+                              disabled={submitting}
+                              onClick={() => void saveEditRecurring(t.id)}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="text-slate-500 font-semibold text-left hover:underline"
+                              onClick={cancelEditRecurring}
+                            >
+                              Discard
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
+                            onClick={() => void openRecurringView(t)}
+                          >
+                            <Eye size={12} /> View
+                          </button>
+                          {!readOnly && (
+                            <>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
+                                onClick={() => startEditRecurring(t)}
+                              >
+                                <Pencil size={12} /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="text-amber-700 font-semibold hover:underline"
+                                onClick={() => void stopRecurring(t)}
+                              >
+                                Stop
+                              </button>
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 text-red-700 font-semibold hover:underline"
+                                  onClick={() => void deleteRecurring(t)}
+                                >
+                                  <Trash2 size={12} /> Delete
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              {showTasksInList &&
+                tasks.map((task) => (
                 <tr
                   key={task.id}
                   className={`border-t border-slate-100 ${
@@ -987,19 +1156,58 @@ export default function MonitorAgentTasksPanel({
                   }`}
                 >
                   <td className="p-3">
+                    <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                      {task.recurringTemplateId ? "Instance" : "Task"}
+                    </span>
+                  </td>
+                  <td className="p-3">
                     {editingTaskId === task.id ? (
-                      <div className="space-y-2 min-w-[180px]">
-                        <input
-                          className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                        />
-                        <textarea
-                          className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
-                          rows={2}
-                          value={editDescription}
-                          onChange={(e) => setEditDescription(e.target.value)}
-                        />
+                      <div className="space-y-2 min-w-[220px]">
+                        {editingTaskGroupMode ? (
+                          <>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                              Group heading
+                            </label>
+                            <input
+                              className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                              value={editingGroupHeading}
+                              onChange={(e) => setEditingGroupHeading(e.target.value)}
+                            />
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                              Checklist (one line per item)
+                            </label>
+                            <textarea
+                              className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm font-mono"
+                              rows={5}
+                              value={editChecklistLines}
+                              onChange={(e) => setEditChecklistLines(e.target.value)}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                              Heading
+                            </label>
+                            <input
+                              className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                            />
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                              Checklist & details
+                            </label>
+                            <textarea
+                              className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                              rows={5}
+                              placeholder="One checklist item per line"
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                            />
+                          </>
+                        )}
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                          Due date
+                        </label>
                         <input
                           type="date"
                           className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
@@ -1044,7 +1252,7 @@ export default function MonitorAgentTasksPanel({
                           data-no-busy
                           className="text-slate-800 font-semibold text-left hover:underline"
                           disabled={submitting}
-                          onClick={() => void saveEditTask(task.id)}
+                          onClick={() => void saveEditTask(task)}
                         >
                           Save
                         </button>
@@ -1134,10 +1342,12 @@ export default function MonitorAgentTasksPanel({
                   </td>
                 </tr>
               ))}
-              {tasks.length === 0 && (
+              {(showRecurringInList ? filteredRecurringSchedules.length : 0) +
+                (showTasksInList ? tasks.length : 0) ===
+                0 && (
                 <tr>
-                  <td colSpan={7} className="p-6 text-center text-slate-400">
-                    No tasks match this filter
+                  <td colSpan={8} className="p-6 text-center text-slate-400">
+                    Nothing matches this view and filters
                   </td>
                 </tr>
               )}
