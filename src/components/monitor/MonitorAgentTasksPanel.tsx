@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Archive,
   ChevronDown,
-  Eye,
   Pencil,
   Plus,
   RefreshCw,
@@ -83,7 +82,10 @@ function ActionLink({
 
 function ActionCell({ children }: { children: React.ReactNode }) {
   return (
-    <td className="p-2 align-top w-[9.5rem] min-w-[9.5rem]">
+    <td
+      className="p-2 align-top w-[9.5rem] min-w-[9.5rem]"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="grid grid-cols-2 gap-x-2.5 gap-y-1 justify-items-start text-[11px] leading-snug">
         {children}
       </div>
@@ -1041,7 +1043,16 @@ export default function MonitorAgentTasksPanel({
             <tbody>
               {showRecurringInList &&
                 filteredRecurringSchedules.map((t) => (
-                  <tr key={`recurring-${t.id}`} className="border-t border-slate-100 bg-orange-50/20">
+                  <tr
+                    key={`recurring-${t.id}`}
+                    className={`border-t border-slate-100 bg-orange-50/20 ${
+                      editingRecurringId === t.id ? "" : "cursor-pointer hover:bg-orange-50/45"
+                    }`}
+                    onClick={() => {
+                      if (editingRecurringId === t.id) return;
+                      void openRecurringView(t);
+                    }}
+                  >
                     <td className="p-3">
                       <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-[#ff791a] bg-orange-100 px-2 py-0.5 rounded">
                         Recurring
@@ -1107,7 +1118,7 @@ export default function MonitorAgentTasksPanel({
                       <span className="line-clamp-3 whitespace-pre-wrap">{t.description || "—"}</span>
                     </td>
                     {editingRecurringId === t.id ? (
-                      <td className="p-2 align-top">
+                      <td className="p-2 align-top" onClick={(e) => e.stopPropagation()}>
                         {!readOnly && (
                           <div className="flex flex-col gap-1 text-[11px]">
                             <ActionLink
@@ -1123,28 +1134,23 @@ export default function MonitorAgentTasksPanel({
                           </div>
                         )}
                       </td>
+                    ) : readOnly ? (
+                      <td className="p-2" />
                     ) : (
                       <ActionCell>
-                        <ActionLink onClick={() => void openRecurringView(t)}>
-                          <Eye size={12} aria-hidden /> View
+                        <ActionLink onClick={() => startEditRecurring(t)}>
+                          <Pencil size={12} aria-hidden /> Edit
                         </ActionLink>
-                        {!readOnly ? (
-                          <>
-                            <ActionLink onClick={() => startEditRecurring(t)}>
-                              <Pencil size={12} aria-hidden /> Edit
-                            </ActionLink>
-                            <ActionLink className="text-amber-700" onClick={() => void stopRecurring(t)}>
-                              Stop
-                            </ActionLink>
-                            {canDelete ? (
-                              <ActionLink className="text-red-700" onClick={() => void deleteRecurring(t)}>
-                                <Trash2 size={12} aria-hidden /> Delete
-                              </ActionLink>
-                            ) : (
-                              <span />
-                            )}
-                          </>
-                        ) : null}
+                        <ActionLink className="text-amber-700" onClick={() => void stopRecurring(t)}>
+                          Stop
+                        </ActionLink>
+                        {canDelete ? (
+                          <ActionLink className="text-red-700" onClick={() => void deleteRecurring(t)}>
+                            <Trash2 size={12} aria-hidden /> Delete
+                          </ActionLink>
+                        ) : (
+                          <span />
+                        )}
                       </ActionCell>
                     )}
                   </tr>
@@ -1159,7 +1165,11 @@ export default function MonitorAgentTasksPanel({
                       : isTaskOverdue(task)
                         ? "bg-red-50/50"
                         : ""
-                  }`}
+                  } ${editingTaskId === task.id ? "" : "cursor-pointer hover:bg-slate-50"}`}
+                  onClick={() => {
+                    if (editingTaskId === task.id) return;
+                    setViewingTask(task);
+                  }}
                 >
                   <td className="p-3">
                     <span className="inline-block text-[10px] font-bold uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
@@ -1251,7 +1261,7 @@ export default function MonitorAgentTasksPanel({
                     <span className="line-clamp-3 whitespace-pre-wrap block">{task.completionNote || "—"}</span>
                   </td>
                   {editingTaskId === task.id ? (
-                    <td className="p-2 align-top">
+                    <td className="p-2 align-top" onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-col gap-1 text-[11px]">
                         <ActionLink
                           data-no-busy
@@ -1266,22 +1276,21 @@ export default function MonitorAgentTasksPanel({
                         </ActionLink>
                       </div>
                     </td>
+                  ) : readOnly ? (
+                    <td className="p-2" />
                   ) : (
                     <ActionCell>
-                      <ActionLink data-no-busy onClick={() => setViewingTask(task)}>
-                        <Eye size={12} aria-hidden /> View
-                      </ActionLink>
-                      {!readOnly && !task.archived && task.status === "pending" && (
+                      {!task.archived && task.status === "pending" && (
                         <ActionLink data-no-busy onClick={() => startEditTask(task)}>
                           <Pencil size={12} aria-hidden /> Edit
                         </ActionLink>
                       )}
-                      {!readOnly && !task.archived && task.status === "pending" && (
+                      {!task.archived && task.status === "pending" && (
                         <ActionLink data-no-busy className="text-red-600" onClick={() => void cancelTask(task)}>
                           Cancel
                         </ActionLink>
                       )}
-                      {!readOnly && !task.archived && (task.status === "done" || task.status === "cancelled") && (
+                      {!task.archived && (task.status === "done" || task.status === "cancelled") && (
                         <ActionLink
                           data-no-busy
                           className="text-[#ff791a]"
@@ -1290,17 +1299,17 @@ export default function MonitorAgentTasksPanel({
                           <RotateCcw size={12} aria-hidden /> Reopen
                         </ActionLink>
                       )}
-                      {!readOnly && !task.archived && (
+                      {!task.archived && (
                         <ActionLink data-no-busy onClick={() => void archiveTask(task)}>
                           <Archive size={12} aria-hidden /> Archive
                         </ActionLink>
                       )}
-                      {!readOnly && task.archived && (
+                      {task.archived && (
                         <ActionLink data-no-busy onClick={() => void unarchiveTask(task)}>
                           <RotateCcw size={12} aria-hidden /> Restore
                         </ActionLink>
                       )}
-                      {!readOnly && canDelete && (
+                      {canDelete && (
                         <ActionLink data-no-busy className="text-red-700" onClick={() => void deleteTask(task)}>
                           <Trash2 size={12} aria-hidden /> Delete
                         </ActionLink>
