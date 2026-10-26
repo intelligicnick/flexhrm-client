@@ -419,11 +419,25 @@ export const monitorApi = {
     employeeId?: string;
     status?: AgentTaskStatus;
     archived?: "exclude" | "only" | "all";
+    recurringTemplateId?: string;
+    dueFrom?: string;
+    dueTo?: string;
+    deadline?: "overdue" | "today" | "week" | "no_due";
+    search?: string;
+    source?: "recurring" | "manual";
+    sort?: "created" | "due_asc" | "due_desc";
   }) =>
     monitorFetch<MonitorAgentTask[]>(
       withQuery("/agent-tasks", {
         employeeId: opts?.employeeId,
         status: opts?.status,
+        recurringTemplateId: opts?.recurringTemplateId,
+        dueFrom: opts?.dueFrom,
+        dueTo: opts?.dueTo,
+        deadline: opts?.deadline,
+        search: opts?.search,
+        source: opts?.source,
+        sort: opts?.sort,
         archived:
           opts?.archived === "only"
             ? "true"
@@ -520,6 +534,8 @@ export interface MonitorAgentTask {
   completionNote?: string;
   archived?: boolean;
   archivedAt?: string;
+  recurringTemplateId?: string;
+  recurringPeriod?: string;
 }
 
 export function formatDuration(seconds: number): string {

@@ -28,7 +28,42 @@ interface MonitorAgentTasksPanelProps {
 type TaskListFilter = AgentTaskStatus | "all" | "archived";
 const STATUS_FILTERS: TaskListFilter[] = ["all", "pending", "done", "cancelled", "archived"];
 
+type DeadlineFilter = "any" | "overdue" | "today" | "week" | "no_due" | "custom";
+type SourceFilter = "all" | "recurring" | "manual";
+type SortFilter = "created" | "due_asc" | "due_desc";
+
+function localTodayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isTaskOverdue(task: MonitorAgentTask): boolean {
+  if (task.archived || task.status !== "pending" || !task.dueDate?.trim()) return false;
+  return task.dueDate.slice(0, 10) < localTodayIso();
+}
+
 type AssigneeOption = { id: string; employeeCode: string; name: string; isOnline: boolean };
+
+function taskBulletLines(text: string): string[] {
+  return (text || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s•\-*]+/, "").replace(/^\d+[.)]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function TaskDetailList({ label, lines }: { label: string; lines: string[] }) {
+  if (!lines.length) return null;
+  return (
+    <div className="space-y-1">
+      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">{label}</p>
+      <ul className="list-disc list-inside text-slate-700 text-xs space-y-0.5">
+        {lines.map((line, i) => (
+          <li key={`${i}-${line}`} className="whitespace-pre-wrap">{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export default function MonitorAgentTasksPanel({
   readOnly = false,
@@ -38,7 +73,18 @@ export default function MonitorAgentTasksPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskListFilter>("pending");
+  const [employeeFilter, setEmployeeFilter] = useState("");
+  const [deadlineFilter, setDeadlineFilter] = useState<DeadlineFilter>("any");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [sortBy, setSortBy] = useState<SortFilter>("created");
   const [viewingTask, setViewingTask] = useState<MonitorAgentTask | null>(null);
+  const [viewingRecurring, setViewingRecurring] = useState<MonitorRecurringAgentTask | null>(null);
+  const [recurringInstances, setRecurringInstances] = useState<MonitorAgentTask[]>([]);
+  const [recurringInstancesLoading, setRecurringInstancesLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [monitoredEmployees, setMonitoredEmployees] = useState<AssigneeOption[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
@@ -63,6 +109,11 @@ export default function MonitorAgentTasksPanel({
   const [editIssueDay, setEditIssueDay] = useState("1");
   const [editDueDay, setEditDueDay] = useState("28");
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const loadTasks = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -74,6 +125,16 @@ export default function MonitorAgentTasksPanel({
               ? undefined
               : statusFilter,
           archived: statusFilter === "archived" ? "only" : "exclude",
+          employeeId: employeeFilter || undefined,
+          deadline:
+            deadlineFilter === "any" || deadlineFilter === "custom"
+              ? undefined
+              : deadlineFilter,
+          dueFrom: deadlineFilter === "custom" ? dueFrom || undefined : undefined,
+          dueTo: deadlineFilter === "custom" ? dueTo || undefined : undefined,
+          search: debouncedSearch.trim() || undefined,
+          source: sourceFilter === "all" ? undefined : sourceFilter,
+          sort: sortBy,
         }),
       );
     } catch (err) {
@@ -82,7 +143,35 @@ export default function MonitorAgentTasksPanel({
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [
+    statusFilter,
+    employeeFilter,
+    deadlineFilter,
+    dueFrom,
+    dueTo,
+    debouncedSearch,
+    sourceFilter,
+    sortBy,
+  ]);
+
+  const hasActiveFilters =
+    employeeFilter !== "" ||
+    deadlineFilter !== "any" ||
+    debouncedSearch.trim() !== "" ||
+    sourceFilter !== "all" ||
+    sortBy !== "created" ||
+    statusFilter !== "pending";
+
+  function resetFilters() {
+    setStatusFilter("pending");
+    setEmployeeFilter("");
+    setDeadlineFilter("any");
+    setDueFrom("");
+    setDueTo("");
+    setSearchQuery("");
+    setSourceFilter("all");
+    setSortBy("created");
+  }
 
   const loadRecurring = useCallback(async () => {
     try {
@@ -120,8 +209,43 @@ export default function MonitorAgentTasksPanel({
   }, []);
 
   useEffect(() => {
-    if (showForm && !readOnly) void loadMonitoredEmployees();
-  }, [showForm, readOnly, loadMonitoredEmployees]);
+    void loadMonitoredEmployees();
+  }, [loadMonitoredEmployees]);
+
+  const employeeNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of monitoredEmployees) {
+      map.set(e.id, `${e.name} (${e.employeeCode})`);
+    }
+    return map;
+  }, [monitoredEmployees]);
+
+  function resolveEmployeeName(id: string, fallback?: string) {
+    return employeeNameById.get(id) || fallback || id;
+  }
+
+  async function openRecurringView(template: MonitorRecurringAgentTask) {
+    setViewingRecurring(template);
+    setRecurringInstances([]);
+    setRecurringInstancesLoading(true);
+    try {
+      setRecurringInstances(
+        await monitorApi.getAgentTasks({
+          recurringTemplateId: template.id,
+          archived: "all",
+        }),
+      );
+    } catch {
+      setRecurringInstances([]);
+    } finally {
+      setRecurringInstancesLoading(false);
+    }
+  }
+
+  function closeRecurringView() {
+    setViewingRecurring(null);
+    setRecurringInstances([]);
+  }
 
   useEffect(() => {
     if (!assigneeDropdownOpen) return;
@@ -409,21 +533,130 @@ export default function MonitorAgentTasksPanel({
         <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</div>
       )}
 
-      <select
-        className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-        value={statusFilter}
-        onChange={(e) => setStatusFilter(e.target.value as TaskListFilter)}
-      >
-        {STATUS_FILTERS.map((s) => (
-          <option key={s} value={s}>
-            {s === "all"
-              ? "All statuses"
-              : s === "archived"
-                ? "Archived"
-                : s}
-          </option>
-        ))}
-      </select>
+      <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-3">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 min-w-[140px] flex-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Search</span>
+            <input
+              type="search"
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full min-w-[160px]"
+              placeholder="Title, details, comment…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 min-w-[140px] flex-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Employee</span>
+            <select
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
+              value={employeeFilter}
+              onChange={(e) => setEmployeeFilter(e.target.value)}
+              disabled={employeesLoading}
+            >
+              <option value="">All employees</option>
+              {monitoredEmployees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name} ({e.employeeCode})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 min-w-[120px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Status</span>
+            <select
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as TaskListFilter)}
+            >
+              {STATUS_FILTERS.map((s) => (
+                <option key={s} value={s}>
+                  {s === "all"
+                    ? "All statuses"
+                    : s === "archived"
+                      ? "Archived"
+                      : s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 min-w-[130px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Deadline</span>
+            <select
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
+              value={deadlineFilter}
+              onChange={(e) => setDeadlineFilter(e.target.value as DeadlineFilter)}
+            >
+              <option value="any">Any due date</option>
+              <option value="overdue">Overdue</option>
+              <option value="today">Due today</option>
+              <option value="week">Due this week</option>
+              <option value="no_due">No due date</option>
+              <option value="custom">Custom range</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 min-w-[120px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Source</span>
+            <select
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+            >
+              <option value="all">All tasks</option>
+              <option value="manual">One-off assigned</option>
+              <option value="recurring">From recurring</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 min-w-[120px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Sort</span>
+            <select
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-full"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortFilter)}
+            >
+              <option value="created">Newest first</option>
+              <option value="due_asc">Due date (soonest)</option>
+              <option value="due_desc">Due date (latest)</option>
+            </select>
+          </label>
+        </div>
+        {deadlineFilter === "custom" && (
+          <div className="flex flex-wrap gap-2 items-end">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Due from</span>
+              <input
+                type="date"
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                value={dueFrom}
+                onChange={(e) => setDueFrom(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Due to</span>
+              <input
+                type="date"
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                value={dueTo}
+                onChange={(e) => setDueTo(e.target.value)}
+              />
+            </label>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+          <span>
+            {loading ? "Loading…" : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
+            {deadlineFilter === "overdue" ? " · overdue pending only" : ""}
+          </span>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              className="font-semibold text-[#ff791a] hover:underline"
+              onClick={resetFilters}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
 
       {showForm && !readOnly && (
         <form onSubmit={(e) => void submitTask(e)} className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
@@ -659,9 +892,9 @@ export default function MonitorAgentTasksPanel({
                       </>
                     )}
                   </div>
-                  {!readOnly && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {editingRecurringId === t.id ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {editingRecurringId === t.id ? (
+                      !readOnly && (
                         <>
                           <button
                             type="button"
@@ -679,35 +912,46 @@ export default function MonitorAgentTasksPanel({
                             Cancel
                           </button>
                         </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:underline"
-                            onClick={() => startEditRecurring(t)}
-                          >
-                            <Pencil size={12} /> Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs font-semibold text-amber-700 hover:underline"
-                            onClick={() => void stopRecurring(t)}
-                          >
-                            Stop
-                          </button>
-                          {canDelete && (
+                      )
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:underline"
+                          onClick={() => void openRecurringView(t)}
+                        >
+                          <Eye size={12} /> View
+                        </button>
+                        {!readOnly && (
+                          <>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
-                              onClick={() => void deleteRecurring(t)}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:underline"
+                              onClick={() => startEditRecurring(t)}
                             >
-                              <Trash2 size={12} /> Delete
+                              <Pencil size={12} /> Edit
                             </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-amber-700 hover:underline"
+                              onClick={() => void stopRecurring(t)}
+                            >
+                              Stop
+                            </button>
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 hover:underline"
+                                onClick={() => void deleteRecurring(t)}
+                              >
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </li>
               ))}
           </ul>
@@ -723,6 +967,7 @@ export default function MonitorAgentTasksPanel({
               <tr>
                 <th className="text-left p-3">Task</th>
                 <th className="text-left p-3">Employee</th>
+                <th className="text-left p-3">Due</th>
                 <th className="text-left p-3">Status</th>
                 <th className="text-left p-3">Completed</th>
                 <th className="text-left p-3">Note</th>
@@ -733,7 +978,13 @@ export default function MonitorAgentTasksPanel({
               {tasks.map((task) => (
                 <tr
                   key={task.id}
-                  className={`border-t border-slate-100 ${task.status === "done" ? "bg-green-50/40" : ""}`}
+                  className={`border-t border-slate-100 ${
+                    task.status === "done"
+                      ? "bg-green-50/40"
+                      : isTaskOverdue(task)
+                        ? "bg-red-50/50"
+                        : ""
+                  }`}
                 >
                   <td className="p-3">
                     {editingTaskId === task.id ? (
@@ -759,18 +1010,32 @@ export default function MonitorAgentTasksPanel({
                     ) : (
                       <>
                         <p className="font-semibold text-slate-800">{task.title}</p>
-                        {task.description && <p className="text-slate-500 mt-0.5">{task.description}</p>}
+                        {task.description && (
+                          <p className="text-slate-500 mt-0.5 line-clamp-2 whitespace-pre-wrap">{task.description}</p>
+                        )}
                       </>
                     )}
                   </td>
                   <td className="p-3">{task.employeeName || task.employeeId}</td>
+                  <td className="p-3 text-slate-600 whitespace-nowrap">
+                    {task.dueDate ? (
+                      <span className={isTaskOverdue(task) ? "text-red-700 font-semibold" : ""}>
+                        {task.dueDate.slice(0, 10)}
+                        {isTaskOverdue(task) ? " · overdue" : ""}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="p-3 capitalize">
                     {task.archived ? "archived" : task.status}
                   </td>
                   <td className="p-3 text-slate-600">
                     {task.completedAt ? new Date(task.completedAt).toLocaleString("en-IN") : "—"}
                   </td>
-                  <td className="p-3 text-slate-600 max-w-[200px] truncate">{task.completionNote || "—"}</td>
+                  <td className="p-3 text-slate-600 max-w-[220px]">
+                    <span className="line-clamp-3 whitespace-pre-wrap block">{task.completionNote || "—"}</span>
+                  </td>
                   <td className="p-3">
                     {editingTaskId === task.id ? (
                       <div className="flex flex-col gap-1">
@@ -871,7 +1136,7 @@ export default function MonitorAgentTasksPanel({
               ))}
               {tasks.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="p-6 text-center text-slate-400">
+                  <td colSpan={7} className="p-6 text-center text-slate-400">
                     No tasks match this filter
                   </td>
                 </tr>
@@ -886,7 +1151,7 @@ export default function MonitorAgentTasksPanel({
           onClick={() => setViewingTask(null)}
         >
           <div
-            className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-lg w-full p-5 space-y-3 text-sm"
+            className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 space-y-3 text-sm"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2">
@@ -900,8 +1165,9 @@ export default function MonitorAgentTasksPanel({
                 <X size={18} />
               </button>
             </div>
-            {viewingTask.description && (
-              <p className="text-slate-600 whitespace-pre-wrap">{viewingTask.description}</p>
+            <TaskDetailList label="Checklist / details" lines={taskBulletLines(viewingTask.description || "")} />
+            {viewingTask.description && taskBulletLines(viewingTask.description).length <= 1 && (
+              <p className="text-slate-600 whitespace-pre-wrap text-xs">{viewingTask.description}</p>
             )}
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
               <dt className="text-slate-400 font-semibold">Employee</dt>
@@ -925,8 +1191,10 @@ export default function MonitorAgentTasksPanel({
                   ? new Date(viewingTask.completedAt).toLocaleString("en-IN")
                   : "—"}
               </dd>
-              <dt className="text-slate-400 font-semibold">Employee note</dt>
-              <dd className="text-slate-800 whitespace-pre-wrap">{viewingTask.completionNote || "—"}</dd>
+              <dt className="text-slate-400 font-semibold">Employee comment</dt>
+              <dd className="text-slate-800 whitespace-pre-wrap text-xs leading-relaxed min-h-[1rem]">
+                {viewingTask.completionNote?.trim() ? viewingTask.completionNote : "—"}
+              </dd>
               {viewingTask.archivedAt && (
                 <>
                   <dt className="text-slate-400 font-semibold">Archived</dt>
@@ -950,6 +1218,103 @@ export default function MonitorAgentTasksPanel({
                   {viewingTask.status === "done" ? "Reopen for employee" : "Reopen task"}
                 </button>
               )}
+          </div>
+        </div>
+      )}
+      {viewingRecurring && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={closeRecurringView}
+        >
+          <div
+            className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-5 space-y-4 text-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="font-bold text-slate-900">{viewingRecurring.title}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Creates day {viewingRecurring.issueDay} · Due day {viewingRecurring.dueDay} · Monthly
+                </p>
+              </div>
+              <button
+                type="button"
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+                aria-label="Close"
+                onClick={closeRecurringView}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <TaskDetailList
+              label="Checklist / instructions"
+              lines={taskBulletLines(viewingRecurring.description || "")}
+            />
+            {viewingRecurring.description && taskBulletLines(viewingRecurring.description).length <= 1 && (
+              <p className="text-slate-600 whitespace-pre-wrap text-xs">{viewingRecurring.description}</p>
+            )}
+            <div>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">
+                Assigned employees ({viewingRecurring.employeeIds.length})
+              </p>
+              <ul className="text-xs text-slate-700 space-y-0.5 border border-slate-100 rounded-lg p-3 max-h-40 overflow-y-auto">
+                {viewingRecurring.employeeIds.map((id) => (
+                  <li key={id}>{resolveEmployeeName(id)}</li>
+                ))}
+              </ul>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <dt className="text-slate-400 font-semibold">Created</dt>
+              <dd className="text-slate-800">
+                {viewingRecurring.createdAt
+                  ? new Date(viewingRecurring.createdAt).toLocaleString("en-IN")
+                  : "—"}
+                {viewingRecurring.createdBy ? ` · ${viewingRecurring.createdBy}` : ""}
+              </dd>
+              <dt className="text-slate-400 font-semibold">Status</dt>
+              <dd className="text-slate-800">{viewingRecurring.active ? "Active" : "Stopped"}</dd>
+            </dl>
+            <div>
+              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-2">
+                Generated tasks & employee comments
+              </p>
+              {recurringInstancesLoading ? (
+                <p className="text-xs text-slate-400 py-4 text-center">Loading instances…</p>
+              ) : recurringInstances.length === 0 ? (
+                <p className="text-xs text-slate-400 py-3 text-center border border-dashed border-slate-200 rounded-lg">
+                  No instances created yet for this schedule.
+                </p>
+              ) : (
+                <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500 uppercase">
+                      <tr>
+                        <th className="text-left p-2">Period</th>
+                        <th className="text-left p-2">Employee</th>
+                        <th className="text-left p-2">Status</th>
+                        <th className="text-left p-2">Completed</th>
+                        <th className="text-left p-2">Comment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recurringInstances.map((row) => (
+                        <tr key={row.id} className="border-t border-slate-100 align-top">
+                          <td className="p-2 text-slate-600">{row.recurringPeriod || row.dueDate || "—"}</td>
+                          <td className="p-2">{row.employeeName || resolveEmployeeName(row.employeeId)}</td>
+                          <td className="p-2 capitalize">{row.archived ? "archived" : row.status}</td>
+                          <td className="p-2 text-slate-600 whitespace-nowrap">
+                            {row.completedAt ? new Date(row.completedAt).toLocaleString("en-IN") : "—"}
+                          </td>
+                          <td className="p-2 text-slate-700 whitespace-pre-wrap min-w-[140px]">
+                            {row.completionNote?.trim() || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
