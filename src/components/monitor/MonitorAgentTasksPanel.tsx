@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
-  CheckCircle2,
   ChevronDown,
   Eye,
   Pencil,
@@ -64,6 +63,32 @@ function taskBulletLines(text: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.replace(/^[\s•\-*]+/, "").replace(/^\d+[.)]\s*/, "").trim())
     .filter(Boolean);
+}
+
+function ActionLink({
+  className = "text-slate-600",
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { className?: string }) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-0.5 font-semibold hover:underline whitespace-nowrap ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ActionCell({ children }: { children: React.ReactNode }) {
+  return (
+    <td className="p-2 align-top w-[9.5rem] min-w-[9.5rem]">
+      <div className="grid grid-cols-2 gap-x-2.5 gap-y-1 justify-items-start text-[11px] leading-snug">
+        {children}
+      </div>
+    </td>
+  );
 }
 
 function TaskDetailList({ label, lines }: { label: string; lines: string[] }) {
@@ -1010,7 +1035,7 @@ export default function MonitorAgentTasksPanel({
                 <th className="text-left p-3">Status</th>
                 <th className="text-left p-3">Completed</th>
                 <th className="text-left p-3">Note</th>
-                <th className="text-left p-3">Actions</th>
+                <th className="text-left p-3 w-[9.5rem] min-w-[9.5rem]">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1081,66 +1106,47 @@ export default function MonitorAgentTasksPanel({
                     <td className="p-3 text-slate-600 max-w-[200px]">
                       <span className="line-clamp-3 whitespace-pre-wrap">{t.description || "—"}</span>
                     </td>
-                    <td className="p-3">
-                      {editingRecurringId === t.id ? (
-                        !readOnly && (
-                          <div className="flex flex-col gap-1">
-                            <button
-                              type="button"
-                              className="text-slate-800 font-semibold text-left hover:underline"
+                    {editingRecurringId === t.id ? (
+                      <td className="p-2 align-top">
+                        {!readOnly && (
+                          <div className="flex flex-col gap-1 text-[11px]">
+                            <ActionLink
+                              className="text-slate-800"
                               disabled={submitting}
                               onClick={() => void saveEditRecurring(t.id)}
                             >
                               Save
-                            </button>
-                            <button
-                              type="button"
-                              className="text-slate-500 font-semibold text-left hover:underline"
-                              onClick={cancelEditRecurring}
-                            >
+                            </ActionLink>
+                            <ActionLink className="text-slate-500" onClick={cancelEditRecurring}>
                               Discard
-                            </button>
+                            </ActionLink>
                           </div>
-                        )
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                            onClick={() => void openRecurringView(t)}
-                          >
-                            <Eye size={12} /> View
-                          </button>
-                          {!readOnly && (
-                            <>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                                onClick={() => startEditRecurring(t)}
-                              >
-                                <Pencil size={12} /> Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="text-amber-700 font-semibold hover:underline"
-                                onClick={() => void stopRecurring(t)}
-                              >
-                                Stop
-                              </button>
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center gap-1 text-red-700 font-semibold hover:underline"
-                                  onClick={() => void deleteRecurring(t)}
-                                >
-                                  <Trash2 size={12} /> Delete
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </td>
+                        )}
+                      </td>
+                    ) : (
+                      <ActionCell>
+                        <ActionLink onClick={() => void openRecurringView(t)}>
+                          <Eye size={12} aria-hidden /> View
+                        </ActionLink>
+                        {!readOnly ? (
+                          <>
+                            <ActionLink onClick={() => startEditRecurring(t)}>
+                              <Pencil size={12} aria-hidden /> Edit
+                            </ActionLink>
+                            <ActionLink className="text-amber-700" onClick={() => void stopRecurring(t)}>
+                              Stop
+                            </ActionLink>
+                            {canDelete ? (
+                              <ActionLink className="text-red-700" onClick={() => void deleteRecurring(t)}>
+                                <Trash2 size={12} aria-hidden /> Delete
+                              </ActionLink>
+                            ) : (
+                              <span />
+                            )}
+                          </>
+                        ) : null}
+                      </ActionCell>
+                    )}
                   </tr>
                 ))}
               {showTasksInList &&
@@ -1244,102 +1250,63 @@ export default function MonitorAgentTasksPanel({
                   <td className="p-3 text-slate-600 max-w-[220px]">
                     <span className="line-clamp-3 whitespace-pre-wrap block">{task.completionNote || "—"}</span>
                   </td>
-                  <td className="p-3">
-                    {editingTaskId === task.id ? (
-                      <div className="flex flex-col gap-1">
-                        <button
-                          type="button"
+                  {editingTaskId === task.id ? (
+                    <td className="p-2 align-top">
+                      <div className="flex flex-col gap-1 text-[11px]">
+                        <ActionLink
                           data-no-busy
-                          className="text-slate-800 font-semibold text-left hover:underline"
+                          className="text-slate-800"
                           disabled={submitting}
                           onClick={() => void saveEditTask(task)}
                         >
                           Save
-                        </button>
-                        <button
-                          type="button"
-                          className="text-slate-500 font-semibold text-left hover:underline"
-                          onClick={cancelEditTask}
-                        >
+                        </ActionLink>
+                        <ActionLink data-no-busy className="text-slate-500" onClick={cancelEditTask}>
                           Discard
-                        </button>
+                        </ActionLink>
                       </div>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
+                    </td>
+                  ) : (
+                    <ActionCell>
+                      <ActionLink data-no-busy onClick={() => setViewingTask(task)}>
+                        <Eye size={12} aria-hidden /> View
+                      </ActionLink>
+                      {!readOnly && !task.archived && task.status === "pending" && (
+                        <ActionLink data-no-busy onClick={() => startEditTask(task)}>
+                          <Pencil size={12} aria-hidden /> Edit
+                        </ActionLink>
+                      )}
+                      {!readOnly && !task.archived && task.status === "pending" && (
+                        <ActionLink data-no-busy className="text-red-600" onClick={() => void cancelTask(task)}>
+                          Cancel
+                        </ActionLink>
+                      )}
+                      {!readOnly && !task.archived && (task.status === "done" || task.status === "cancelled") && (
+                        <ActionLink
                           data-no-busy
-                          className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                          onClick={() => setViewingTask(task)}
+                          className="text-[#ff791a]"
+                          onClick={() => void reopenTask(task)}
                         >
-                          <Eye size={12} /> View
-                        </button>
-                        {!readOnly && !task.archived && task.status === "pending" && (
-                          <>
-                            <button
-                              type="button"
-                              data-no-busy
-                              className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                              onClick={() => startEditTask(task)}
-                            >
-                              <Pencil size={12} /> Edit
-                            </button>
-                            <button
-                              type="button"
-                              data-no-busy
-                              className="text-red-600 font-semibold hover:underline"
-                              onClick={() => void cancelTask(task)}
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        )}
-                        {!readOnly && !task.archived && (task.status === "done" || task.status === "cancelled") && (
-                          <button
-                            type="button"
-                            data-no-busy
-                            className="inline-flex items-center gap-1 text-[#ff791a] font-semibold hover:underline"
-                            onClick={() => void reopenTask(task)}
-                          >
-                            <RotateCcw size={12} /> Reopen
-                          </button>
-                        )}
-                        {!readOnly && !task.archived && (
-                          <button
-                            type="button"
-                            data-no-busy
-                            className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                            onClick={() => void archiveTask(task)}
-                          >
-                            <Archive size={12} /> Archive
-                          </button>
-                        )}
-                        {!readOnly && task.archived && (
-                          <button
-                            type="button"
-                            data-no-busy
-                            className="inline-flex items-center gap-1 text-slate-600 font-semibold hover:underline"
-                            onClick={() => void unarchiveTask(task)}
-                          >
-                            <RotateCcw size={12} /> Restore
-                          </button>
-                        )}
-                        {task.status === "done" && !task.archived && (
-                          <CheckCircle2 size={16} className="text-green-600" aria-hidden />
-                        )}
-                        {!readOnly && canDelete && (
-                          <button
-                            type="button"
-                            data-no-busy
-                            className="inline-flex items-center gap-1 text-red-700 font-semibold hover:underline"
-                            onClick={() => void deleteTask(task)}
-                          >
-                            <Trash2 size={12} /> Delete
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
+                          <RotateCcw size={12} aria-hidden /> Reopen
+                        </ActionLink>
+                      )}
+                      {!readOnly && !task.archived && (
+                        <ActionLink data-no-busy onClick={() => void archiveTask(task)}>
+                          <Archive size={12} aria-hidden /> Archive
+                        </ActionLink>
+                      )}
+                      {!readOnly && task.archived && (
+                        <ActionLink data-no-busy onClick={() => void unarchiveTask(task)}>
+                          <RotateCcw size={12} aria-hidden /> Restore
+                        </ActionLink>
+                      )}
+                      {!readOnly && canDelete && (
+                        <ActionLink data-no-busy className="text-red-700" onClick={() => void deleteTask(task)}>
+                          <Trash2 size={12} aria-hidden /> Delete
+                        </ActionLink>
+                      )}
+                    </ActionCell>
+                  )}
                 </tr>
               ))}
               {(showRecurringInList ? filteredRecurringSchedules.length : 0) +
