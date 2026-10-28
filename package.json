@@ -54,9 +54,11 @@
     "postcss": "^8.5.23",
     "esbuild": "^0.28.1",
     "uuid": "^11.1.1",
-    "fast-uri": "3.1.4",
+    "fast-uri": "3.1.9",
     "js-yaml": "4.3.0",
-    "body-parser": "1.20.6",
+    "body-parser": "1.20.9",
+    "proxy-addr": "2.0.8",
+    "qs": "6.16.1",
     "brace-expansion": "5.0.8"
   },
   "devDependencies": {
