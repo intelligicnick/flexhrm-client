@@ -25,6 +25,7 @@ import {
   Filter,
   Zap,
   TrendingUp,
+  TrendingDown,
   LayoutGrid,
   Table2,
   MapPin,
@@ -548,6 +549,57 @@ function formatPreBidVenueLabel(tender: Tender): string {
 function tenderAddedAtMs(tender: Tender): number | null {
   const raw = tender.entryDate?.trim() || tender.createdAt?.trim() || "";
   return parseFlexibleDateMs(raw);
+}
+
+function offsetIsoDate(iso: string, dayDelta: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + dayDelta);
+  return todayIsoDate(d);
+}
+
+function percentChange(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function StatTrend({
+  current,
+  previous,
+  compareLabel,
+  positiveIsGood = true,
+}: {
+  current: number;
+  previous: number;
+  compareLabel: string;
+  positiveIsGood?: boolean;
+}) {
+  const pct = percentChange(current, previous);
+  if (pct === null && current > 0) {
+    return (
+      <p className="text-[10px] font-semibold text-emerald-600 mt-1 truncate" title={compareLabel}>
+        New · {compareLabel}
+      </p>
+    );
+  }
+  if (pct === 0) {
+    return (
+      <p className="text-[10px] text-slate-400 mt-1 truncate" title={compareLabel}>
+        0% · {compareLabel}
+      </p>
+    );
+  }
+  const up = (pct ?? 0) > 0;
+  const good = positiveIsGood ? up : !up;
+  const tone = good ? "text-emerald-600" : "text-red-600";
+  const Icon = up ? TrendingUp : TrendingDown;
+  const signed = `${up ? "+" : ""}${pct}%`;
+  return (
+    <p className={`inline-flex items-center gap-0.5 text-[10px] font-bold mt-1 max-w-full ${tone}`} title={compareLabel}>
+      <Icon size={11} className="shrink-0" />
+      <span className="tabular-nums shrink-0">{signed}</span>
+      <span className="font-normal text-slate-400 truncate">{compareLabel}</span>
+    </p>
+  );
 }
 
 function tenderEntryDateLabel(tender: Tender): string {
@@ -1704,8 +1756,15 @@ export default function TendersPanel({
   const stats = useMemo(() => {
     const now = Date.now();
     const today = todayIsoDate();
+    const yesterday = offsetIsoDate(today, -1);
     const week = getDateRangeForPeriod("week");
     const month = getDateRangeForPeriod("month");
+    const priorWeekRef = new Date(`${week.fromDate}T12:00:00`);
+    priorWeekRef.setDate(priorWeekRef.getDate() - 7);
+    const priorWeek = getDateRangeForPeriod("week", priorWeekRef);
+    const priorMonthRef = new Date(`${month.fromDate}T12:00:00`);
+    priorMonthRef.setMonth(priorMonthRef.getMonth() - 1);
+    const priorMonth = getDateRangeForPeriod("month", priorMonthRef);
     let upcoming = 0;
     let passed = 0;
     let filed = 0;
@@ -1715,20 +1774,59 @@ export default function TendersPanel({
     let manpower = 0;
     let travel = 0;
     let addedToday = 0;
+    let addedYesterday = 0;
     let addedThisWeek = 0;
+    let addedLastWeek = 0;
     let addedThisMonth = 0;
+    let addedLastMonth = 0;
+    let activeThroughPriorWeek = 0;
+    let addedThisWeekFiled = 0;
+    let addedLastWeekFiled = 0;
+    let addedThisWeekQualified = 0;
+    let addedLastWeekQualified = 0;
+    let addedThisWeekDisqualified = 0;
+    let addedLastWeekDisqualified = 0;
+    let addedThisWeekUpcoming = 0;
+    let addedLastWeekUpcoming = 0;
+    let addedThisWeekPassed = 0;
+    let addedLastWeekPassed = 0;
     activeTenders.forEach((t) => {
       if (t.tenderType === "travel") travel += 1;
       else manpower += 1;
-      if (isFiledBucket(t.status) || t.filedDate.trim()) filed += 1;
+      const isFiled = isFiledBucket(t.status) || Boolean(t.filedDate.trim());
+      if (isFiled) filed += 1;
       if (t.status === "qualified") qualified += 1;
       if (t.status === "disqualified") disqualified += 1;
       if (isNearNotParticipated(t) || isMissedParticipation(t)) urgent += 1;
       const addedMs = tenderAddedAtMs(t);
       if (matchesIsoDateRange(addedMs, today, today)) addedToday += 1;
+      if (matchesIsoDateRange(addedMs, yesterday, yesterday)) addedYesterday += 1;
       if (matchesIsoDateRange(addedMs, week.fromDate, week.toDate)) addedThisWeek += 1;
+      if (matchesIsoDateRange(addedMs, priorWeek.fromDate, priorWeek.toDate)) addedLastWeek += 1;
       if (matchesIsoDateRange(addedMs, month.fromDate, month.toDate)) addedThisMonth += 1;
-      if (isMissedParticipation(t)) {
+      if (matchesIsoDateRange(addedMs, priorMonth.fromDate, priorMonth.toDate)) addedLastMonth += 1;
+      if (matchesIsoDateRange(addedMs, "", priorWeek.toDate)) activeThroughPriorWeek += 1;
+      const missed = isMissedParticipation(t);
+      let isUpcoming = false;
+      if (!missed) {
+        const ts = parseEndDateMs(t.endDate);
+        if (ts !== null && ts >= now) isUpcoming = true;
+      }
+      if (matchesIsoDateRange(addedMs, week.fromDate, week.toDate)) {
+        if (isFiled) addedThisWeekFiled += 1;
+        if (t.status === "qualified") addedThisWeekQualified += 1;
+        if (t.status === "disqualified") addedThisWeekDisqualified += 1;
+        if (isUpcoming) addedThisWeekUpcoming += 1;
+        if (missed) addedThisWeekPassed += 1;
+      }
+      if (matchesIsoDateRange(addedMs, priorWeek.fromDate, priorWeek.toDate)) {
+        if (isFiled) addedLastWeekFiled += 1;
+        if (t.status === "qualified") addedLastWeekQualified += 1;
+        if (t.status === "disqualified") addedLastWeekDisqualified += 1;
+        if (isUpcoming) addedLastWeekUpcoming += 1;
+        if (missed) addedLastWeekPassed += 1;
+      }
+      if (missed) {
         passed += 1;
         return;
       }
@@ -1747,8 +1845,22 @@ export default function TendersPanel({
       manpower,
       travel,
       addedToday,
+      addedYesterday,
       addedThisWeek,
+      addedLastWeek,
       addedThisMonth,
+      addedLastMonth,
+      activeThroughPriorWeek,
+      addedThisWeekFiled,
+      addedLastWeekFiled,
+      addedThisWeekQualified,
+      addedLastWeekQualified,
+      addedThisWeekDisqualified,
+      addedLastWeekDisqualified,
+      addedThisWeekUpcoming,
+      addedLastWeekUpcoming,
+      addedThisWeekPassed,
+      addedLastWeekPassed,
     };
   }, [activeTenders]);
 
@@ -2322,6 +2434,11 @@ export default function TendersPanel({
       tone: "text-slate-800",
       sub: `${stats.manpower} manpower · ${stats.travel} car`,
       active: !hasActiveFilters,
+      trend: {
+        current: stats.total,
+        previous: stats.activeThroughPriorWeek,
+        compareLabel: "vs last week",
+      },
     },
     {
       key: "filed" as const,
@@ -2332,6 +2449,11 @@ export default function TendersPanel({
       tone: "text-sky-700",
       sub: stats.total > 0 ? `${Math.round((stats.filed / stats.total) * 100)}% of active` : undefined,
       active: statusFilter === "filed",
+      trend: {
+        current: stats.addedThisWeekFiled,
+        previous: stats.addedLastWeekFiled,
+        compareLabel: "added vs last wk",
+      },
     },
     {
       key: "qualified" as const,
@@ -2342,6 +2464,11 @@ export default function TendersPanel({
       tone: "text-emerald-700",
       sub: "Technical / final",
       active: statusFilter === "qualified",
+      trend: {
+        current: stats.addedThisWeekQualified,
+        previous: stats.addedLastWeekQualified,
+        compareLabel: "added vs last wk",
+      },
     },
     {
       key: "disqualified" as const,
@@ -2352,6 +2479,12 @@ export default function TendersPanel({
       tone: "text-violet-700",
       sub: "Technical rejection",
       active: statusFilter === "disqualified",
+      positiveTrendIsGood: false,
+      trend: {
+        current: stats.addedThisWeekDisqualified,
+        previous: stats.addedLastWeekDisqualified,
+        compareLabel: "added vs last wk",
+      },
     },
     {
       key: "upcoming" as const,
@@ -2363,6 +2496,11 @@ export default function TendersPanel({
       sub: stats.urgent > 0 ? `${stats.urgent} need action` : "Open deadlines",
       active: deadlineFilter === "upcoming" && !statusFilter,
       highlight: stats.urgent > 0,
+      trend: {
+        current: stats.addedThisWeekUpcoming,
+        previous: stats.addedLastWeekUpcoming,
+        compareLabel: "added vs last wk",
+      },
     },
     {
       key: "passed" as const,
@@ -2373,6 +2511,12 @@ export default function TendersPanel({
       tone: "text-red-700",
       sub: "Not participated · elapsed",
       active: deadlineFilter === "passed" && !statusFilter,
+      positiveTrendIsGood: false,
+      trend: {
+        current: stats.addedThisWeekPassed,
+        previous: stats.addedLastWeekPassed,
+        compareLabel: "added vs last wk",
+      },
     },
   ];
 
@@ -2469,21 +2613,36 @@ export default function TendersPanel({
                 value: stats.addedToday,
                 iconBg: "bg-emerald-100 text-emerald-600",
                 tone: "text-emerald-700",
+                trend: {
+                  current: stats.addedToday,
+                  previous: stats.addedYesterday,
+                  compareLabel: "vs yesterday",
+                },
               },
               {
                 label: "This week",
                 value: stats.addedThisWeek,
                 iconBg: "bg-teal-100 text-teal-600",
                 tone: "text-teal-700",
+                trend: {
+                  current: stats.addedThisWeek,
+                  previous: stats.addedLastWeek,
+                  compareLabel: "vs last week",
+                },
               },
               {
                 label: "This month",
                 value: stats.addedThisMonth,
                 iconBg: "bg-cyan-100 text-cyan-600",
                 tone: "text-cyan-700",
+                trend: {
+                  current: stats.addedThisMonth,
+                  previous: stats.addedLastMonth,
+                  compareLabel: "vs last month",
+                },
               },
             ] as const
-          ).map(({ label, value, iconBg, tone }) => (
+          ).map(({ label, value, iconBg, tone, trend }) => (
             <div
               key={label}
               className="rounded-xl border border-slate-100 bg-white px-4 py-3.5 shadow-sm"
@@ -2492,6 +2651,7 @@ export default function TendersPanel({
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
                   <p className={`text-2xl font-black tabular-nums mt-1 ${tone}`}>{value}</p>
+                  <StatTrend {...trend} />
                 </div>
                 <div className={`p-2 rounded-xl shrink-0 ${iconBg}`}>
                   <Plus size={15} />
@@ -2501,7 +2661,7 @@ export default function TendersPanel({
           ))}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-          {statCards.map(({ key, label, value, icon: Icon, iconBg, tone, sub, active, highlight }) => (
+          {statCards.map(({ key, label, value, icon: Icon, iconBg, tone, sub, active, highlight, trend, positiveTrendIsGood }) => (
             <button
               key={key}
               type="button"
@@ -2518,6 +2678,12 @@ export default function TendersPanel({
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
                   <p className={`text-2xl font-black tabular-nums mt-1 ${tone}`}>{value}</p>
+                  {trend && (
+                    <StatTrend
+                      {...trend}
+                      positiveIsGood={positiveTrendIsGood !== false}
+                    />
+                  )}
                   {sub && (
                     <p className="text-[10px] text-slate-400 mt-0.5 truncate group-hover:text-slate-500 transition">
                       {sub}
